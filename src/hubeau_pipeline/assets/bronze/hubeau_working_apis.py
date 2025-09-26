@@ -5,7 +5,11 @@ Basé sur les tests réels des endpoints Hub'Eau
 
 from dagster import asset, DailyPartitionsDefinition, AssetExecutionContext, get_dagster_logger, RetryPolicy
 from typing import Dict, Any
-from .hubeau_real_ingestion import HubeauAPIConfig, HubeauIngestionService
+from .hubeau_real_ingestion import (
+    EndpointConfig,
+    HubeauAPIConfig,
+    HubeauIngestionService,
+)
 
 # Partitions quotidiennes
 DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2024-09-01")
@@ -34,11 +38,17 @@ def hubeau_onde_bronze_real(context: AssetExecutionContext) -> Dict[str, Any]:
     config = HubeauAPIConfig(
         name="onde",
         base_url="https://hubeau.eaufrance.fr/api/v1/ecoulement",
-        endpoints=["campagnes"],  # Seul endpoint qui fonctionne vraiment
-        params={
+        endpoints={
+            "campagnes": EndpointConfig(
+                path="campagnes",
+                temporal_param_keys=("date_debut_campagne", "date_fin_campagne"),
+                page_size=1000,
+                lookback_days=365,
+            ),
+        },
+        base_params={
             "format": "json",
-            "size": 5000  # Limite adaptée pour campagnes ONDE
-        }
+        },
     )
     
     service = HubeauIngestionService()
