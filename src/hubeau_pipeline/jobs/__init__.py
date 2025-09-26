@@ -1,33 +1,29 @@
 """
-Jobs Dagster - Organisation optimisée par fonction métier
+Jobs Bronze Simplifiés - 3 jobs essentiels seulement
+Organisation claire par source de données
 """
 
-from .ingestion import (
-    hubeau_production_job, 
-    bdlisa_production_job, 
-    sandre_production_job,
-    demo_showcase_job
+# Import des 3 jobs essentiels
+from .bronze_simple_jobs import (
+    hubeau_bronze_job,
+    bdlisa_bronze_job, 
+    sandre_bronze_job
 )
-from .analytics import analytics_production_job
 
-# Jobs de production (données réelles)
-production_jobs = [
-    hubeau_production_job,
-    bdlisa_production_job,
-    sandre_production_job, 
-    analytics_production_job
-]
-
-# Jobs de démonstration
-demo_jobs = [
-    demo_showcase_job
+# Jobs Bronze - 3 seulement !
+bronze_jobs = [
+    hubeau_bronze_job,   # 8 APIs Hub'Eau
+    bdlisa_bronze_job,   # Géologie BDLISA
+    sandre_bronze_job    # Nomenclatures Sandre
 ]
 
 # Tous les jobs
-all_jobs = production_jobs + demo_jobs
+all_jobs = bronze_jobs
 
 __all__ = [
     "all_jobs",
-    "production_jobs",
-    "demo_jobs"
+    "bronze_jobs",
+    "hubeau_bronze_job",
+    "bdlisa_bronze_job", 
+    "sandre_bronze_job"
 ]

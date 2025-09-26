@@ -3,54 +3,47 @@ Assets Hub'Eau - Architecture Dagster professionnelle
 Bronze → Silver → Gold avec optimisations
 """
 
-# Import des assets par couche
-from .bronze import (
-    hubeau_piezo_bronze, hubeau_hydro_bronze, hubeau_quality_surface_bronze,
-    hubeau_quality_groundwater_bronze, hubeau_temperature_bronze,
-    bdlisa_geographic_bronze, sandre_thesaurus_bronze
-)
-from .silver import (
-    piezo_timescale_optimized, quality_timescale_optimized,
-    bdlisa_postgis_silver, sandre_neo4j_silver
-)
-from .gold import (
-    sosa_ontology_production, integrated_analytics_production,
-    demo_quality_scores, demo_neo4j_showcase
-)
+# Import des assets par couche - VERSION RÉELLE (Bronze seulement)
+from .bronze import production_bronze_assets
+
+# Silver et Gold temporairement désactivés (imports cassés)
+# from .silver import (
+#     piezo_timescale_optimized, quality_timescale_optimized,
+#     bdlisa_postgis_silver, sandre_neo4j_silver
+# )
+# from .gold import (
+#     sosa_ontology_production, integrated_analytics_production,
+#     demo_quality_scores, demo_neo4j_showcase
+# )
 
 # Assets de production (calculs réels)
 production_assets = [
-    # Bronze
-    hubeau_piezo_bronze,
-    hubeau_hydro_bronze,
-    hubeau_quality_surface_bronze,
-    hubeau_quality_groundwater_bronze,
-    hubeau_temperature_bronze,
-    bdlisa_geographic_bronze,
-    sandre_thesaurus_bronze,
+    # Bronze - Assets réels avec vraies connexions
+    *production_bronze_assets,
     
-    # Silver
-    piezo_timescale_optimized,
-    quality_timescale_optimized,
-    bdlisa_postgis_silver,
-    sandre_neo4j_silver,
+    # Silver - À réimplémenter avec vraies transformations
+    # piezo_timescale_optimized,
+    # quality_timescale_optimized,
+    # bdlisa_postgis_silver,
+    # sandre_neo4j_silver,
     
-    # Gold - Production
-    sosa_ontology_production,
-    integrated_analytics_production
+    # Gold - Production future
+    # sosa_ontology_production,
+    # integrated_analytics_production
 ]
 
-# Assets de démonstration (simulations)
-demo_assets = [
-    demo_quality_scores,
-    demo_neo4j_showcase
-]
+# Assets de démonstration (temporairement désactivés)
+# demo_assets = [
+#     demo_quality_scores,
+#     demo_neo4j_showcase
+# ]
 
-# Tous les assets
-all_assets = production_assets + demo_assets
+# Tous les assets - BRONZE SEULEMENT pour l'instant
+all_assets = production_assets  # Seulement Bronze réels pour tests
+# all_assets = production_assets + demo_assets  # Complet quand Silver/Gold prêts
 
 __all__ = [
     "all_assets",
-    "production_assets", 
-    "demo_assets"
+    "production_assets"
+    # "demo_assets"  # Temporairement désactivé
 ]

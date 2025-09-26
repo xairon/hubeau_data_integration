@@ -1,256 +1,173 @@
-﻿# Hub'Eau Data Integration Pipeline - Architecture Optimisée
+# 🌊 Hub'Eau Data Integration Pipeline
+## Pipeline de Données Hydrologiques Françaises - Architecture Moderne
 
-Pipeline d'intégration professionnel des données Hub'Eau avec Dagster, architecture moderne et optimisations de production.
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-311/)
+[![Dagster](https://img.shields.io/badge/orchestrator-Dagster-orange.svg)](https://dagster.io/)
+[![Docker](https://img.shields.io/badge/deployment-Docker-blue.svg)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 🎯 Vue d'ensemble
+---
 
-Ce projet intègre les données des APIs Hub'Eau dans une architecture robuste et optimisée :
+## 🎯 **Vision & Objectifs**
 
-- **🔄 Dagster** : Orchestration avec retry/pagination professionnelle
-- **⏱️ TimescaleDB** : Chroniques temporelles avec batch loading optimisé  
-- **🗺️ PostGIS** : Données géographiques BDLISA
-- **🕸️ Neo4j** : Thésaurus Sandre + Ontologie SOSA
-- **📦 MinIO** : Data lake Bronze layer
-- **🔧 Docker** : Déploiement conteneurisé
+Ce pipeline **modernise l'intégration des données hydrologiques françaises** en unifiant **8 APIs Hub'Eau officielles** avec les **référentiels nationaux** (BDLISA géologique, Sandre thématique) et les **standards internationaux** (SOSA/SSN W3C).
 
-## 🏗️ Architecture Optimisée
+### **🌟 Pourquoi ce Projet ?**
 
-### Structure Dagster Professionnelle
+#### **🔄 Défis Actuels**
+- **Fragmentation** : Données éparpillées sur 8+ APIs différentes
+- **Hétérogénéité** : Formats, unités, nomenclatures variables
+- **Volume** : 140K+ observations/jour en production
+- **Complexité** : Croisement spatial, temporel, thématique difficile
+
+#### **🚀 Solutions Apportées**
+- **Pipeline unifié** : Ingestion automatisée 8 APIs Hub'Eau
+- **Architecture moderne** : Dagster + Docker + bases spécialisées
+- **Modèle sémantique** : Standards W3C pour interopérabilité
+- **Architecture modulaire** : Scaling et maintenance optimisés
+
+---
+
+## 📊 **Sources de Données Intégrées**
+
+### **🌊 8 APIs Hub'Eau Officielles**
+| **API** | **Stations** | **Données** | **Fréquence** |
+|---------|--------------|-------------|---------------|
+| **🏔️ Piézométrie** | ~1,500 | Niveaux nappes | Horaire |
+| **🌊 Hydrométrie** | ~3,000 | Débits/hauteurs | Temps réel |
+| **🧪 Qualité Surface** | ~2,000 | Analyses physicochimiques | Hebdomadaire |
+| **🧪 Qualité Nappes** | ~1,200 | Analyses souterraines | Mensuelle |
+| **🌡️ Température** | ~800 | Température continue | Horaire |
+| **🌊 Écoulement ONDE** | ~3,200 | Observations visuelles | Saisonnière |
+| **🐟 Hydrobiologie** | ~1,500 | Indices biologiques | Campagnes |
+| **🚰 Prélèvements** | National | Volumes prélevés | Déclarations |
+
+### **🗺️ Référentiels Nationaux**
+- **BDLISA** (BRGM) : Formations aquifères, contexte hydrogéologique
+- **Sandre** (OFB) : Nomenclatures officielles, thésaurus eau
+
+### **🔗 Standards Internationaux**
+- **SOSA/SSN** (W3C) : Ontologie capteurs/observations pour interopérabilité
+
+---
+
+## 🚀 **Quick Start**
+
+### **⚡ Démarrage Rapide (5 minutes)**
+
+```bash
+# 1. Clone du repository
+git clone https://github.com/your-org/hubeau-pipeline
+cd hubeau-pipeline
+
+# 2. Configuration environnement
+cp env.example .env
+# Éditer .env avec vos credentials
+
+# 3. Démarrage infrastructure complète
+docker-compose up -d
+
+# 4. Vérification santé
+docker-compose exec timescaledb pg_isready
+docker-compose exec neo4j cypher-shell "RETURN 'Neo4j ready'"
+docker-compose exec postgis pg_isready -p 5432
+
+# 5. Interface Dagster
+open http://localhost:3000
+```
+
+### **🎛️ Services Disponibles**
+| **Service** | **URL** | **Usage** |
+|-------------|---------|-----------|
+| **Dagster UI** | http://localhost:3000 | Interface orchestration |
+| **MinIO Console** | http://localhost:9001 | Stockage objets |
+| **Neo4j Browser** | http://localhost:7474 | Exploration graphe |
+| **pgAdmin** | http://localhost:5050 | Administration PostgreSQL |
+| **TimescaleDB** | localhost:5432 | Connexion directe |
+| **PostGIS** | localhost:5433 | Connexion directe |
+
+---
+
+## 📊 **Architecture & Performance**
+
+### **🥉🥈🥇 Medallion Architecture**
+- **Bronze** : Données brutes (MinIO Object Storage)
+- **Silver** : Bases spécialisées (TimescaleDB + PostGIS + Neo4j)
+- **Gold** : Knowledge Graph unifié (SOSA/Future)
+
+### **🎯 Configuration Développement**
+```yaml
+APIs_Intégrées: 8 (Hub'Eau + externes)
+Sources_Données: 11 total
+Bases_Spécialisées: 3 (TimescaleDB + PostGIS + Neo4j)
+Orchestration: Dagster (assets + jobs + schedules)
+```
+
+---
+
+## 🔬 **Vision Future : Knowledge Graph & IA**
+
+### **🧠 Couche SOSA/KG (Non Implémentée)**
+
+Cette couche représente l'**évolution future** du pipeline vers un **Knowledge Graph unifié** :
+
+#### **🎯 Objectifs Visionnaires**
+- **Business Intelligence** : Dashboards cross-sources unifiés
+- **Machine Learning** : Entraînement modèles sur graphe enrichi
+- **Explicabilité** : Traçabilité complète observations
+- **Recherche Naturelle** : Interface conversationnelle LLM
+
+#### **🚀 Technologies Envisagées**
+- **GraphRAG** : Retrieval-Augmented Generation sur graphe
+- **Neo4j Vector Search** : Embeddings sémantiques
+- **LangChain/LlamaIndex** : Orchestration LLM + graphe
+
+---
+
+## 📚 **Documentation Complète**
+
+### **📖 Guides Techniques**
+- [📊 Sources de Données Complètes](docs/DATA_SOURCES_COMPLETE.md)
+- [🏗️ Architecture Technique](docs/TECHNICAL_ARCHITECTURE.md)  
+- [🔗 Vision SOSA/Knowledge Graph](docs/SOSA_FUTURE_VISION.md)
+- [🎯 Stratégie Stockage Données](docs/DATA_STORAGE_STRATEGY.md)
+
+---
+
+## 🔧 **Développement**
+
+### **📁 Structure**
 ```
 src/hubeau_pipeline/
-├── assets/                    # Assets par couche
-│   ├── bronze/               # Ingestion avec retry/pagination
-│   ├── silver/               # Transformation optimisée  
-│   └── gold/                 # Analyses + SOSA
-├── jobs/                     # Jobs par fonction métier
-├── schedules/                # Planification production
-└── resources.py              # Configuration centralisée
+├── assets/              # Assets Dagster (Bronze/Silver/Gold)
+├── jobs/                # Jobs orchestration
+├── resources/           # Connexions bases données
+├── schedules/           # Planification temporelle
+└── sensors/             # Surveillance & alerting
 ```
 
-### Flow de Données
-```
-🌊 Hub'Eau APIs ──[retry/pagination]──▶ MinIO (Bronze)
-🗺️ BDLISA WFS ──[géographique]─────▶ MinIO (Bronze)  
-📚 Sandre API ──[thésaurus]────────▶ MinIO (Bronze)
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    ▼                     ▼                     ▼
-            TimescaleDB (Silver)   PostGIS (Silver)    Neo4j (Silver)
-              [batch loading]      [index spatial]    [graphe hiérarchique]
-                    │                     │                     │
-                    └─────────────────────┼─────────────────────┘
-                                          ▼
-                                   Neo4j SOSA (Gold)
-                                 [ontologie + analytics]
-```
-
-## 🚀 Fonctionnalités Professionnelles
-
-### ✅ Ingestion Hub'Eau Optimisée
-- **Retry automatique** : 3 tentatives avec backoff exponentiel
-- **Pagination complète** : Jusqu'à 20K records/page  
-- **Rate limiting** : Appels respectueux des APIs
-- **Gestion d'erreurs** : Robuste et logged
-
-### ✅ Chargement TimescaleDB Optimisé  
-- **Batch loading** : 1000 records/batch
-- **Upserts conditionnels** : ON CONFLICT optimisé
-- **Hypertables automatiques** : Partitioning temporel
-- **Tables complètes** : `piezo_observations`, `measure_quality`, `piezo_quality_flags`
-
-### ✅ Séparation Production/Démonstration
-- **Assets de production** : Calculs sur données réelles
-- **Assets de démonstration** : Marqués `🎭 DEMO` pour interface
-
-## 📊 Sources de Données
-
-### 🌊 Hub'Eau (Production)
-- **Piézométrie** : `/api/v1/niveaux_nappes`
-- **Hydrométrie** : `/api/v1/hydrometrie`  
-- **Qualité surface** : `/api/v1/qualite_eau_surface`
-- **Qualité souterraine** : `/api/v1/qualite_eaux_souterraines`
-- **Température** : `/api/v1/temperature`
-
-### 🗺️ BDLISA (Géographique → PostGIS)
-- **Source** : https://bdlisa.eaufrance.fr/telechargement
-- **Masses d'eau souterraine**
-- **Formations géologiques**
-- **Limites administratives**
-
-### 📚 Sandre (Thésaurus → Neo4j)
-- **Source** : https://api.sandre.eaufrance.fr/
-- **Paramètres physicochimiques**
-- **Unités de mesure**  
-- **Méthodes d'analyse**
-- **Supports et fractions**
-
-## 🎯 Jobs de Production
-
-### `hubeau_production_job` (Quotidien 6h)
-```python
-🌊 Hub'Eau APIs → MinIO → TimescaleDB
-- Retry/pagination automatique
-- Batch loading optimisé
-- 5 APIs Hub'Eau intégrées
-```
-
-### `bdlisa_production_job` (Mensuel)
-```python  
-🗺️ BDLISA WFS → MinIO → PostGIS
-- Données géographiques réelles
-- Index spatial automatique
-```
-
-### `sandre_production_job` (Mensuel)
-```python
-📚 Sandre API → MinIO → Neo4j  
-- Thésaurus complet
-- Graphe hiérarchique
-```
-
-### `analytics_production_job` (Quotidien 10h)
-```python
-🔗 Ontologie SOSA + Analyses multi-sources
-- Basé sur données réelles
-- Relations spatiales/temporelles
-```
-
-## 🗄️ Schémas de Base de Données
-
-### TimescaleDB (Chroniques)
-```sql
--- Hypertables optimisées
-piezo_observations          -- Observations piézométriques
-measure_quality            -- Mesures de qualité (mentionné README)
-piezo_quality_flags        -- Flags de qualité automatiques
-
--- Configuration
-chunk_time_interval => INTERVAL '1 day'
-compression + retention automatiques
-```
-
-### PostGIS (Géographique)
-```sql
--- Tables spatiales
-bdlisa_masses_eau_souterraine    -- Masses d'eau avec géométries
-bdlisa_formations_geologiques    -- Formations géologiques
-bdlisa_limites_administratives   -- Limites administratives
-
--- Index GIST automatiques
-```
-
-### Neo4j (Thésaurus + Ontologie)
-```cypher
-// Sandre Thésaurus
-(:SandreParametres)-[:MESURE_AVEC_UNITE]->(:SandreUnites)
-(:SandreMethodes)-[:UTILISE_SUPPORT]->(:SandreSupports)
-
-// Ontologie SOSA
-(:Platform)-[:hosts]->(:Sensor)
-(:Observation)-[:madeBySensor]->(:Sensor)
-(:Observation)-[:observedProperty]->(:ObservableProperty)
-```
-
-## 🚀 Démarrage
-
-### 1. Configuration
+### **🧪 Tests**
 ```bash
-cp env.example .env
-# Éditer les variables d'environnement
+pytest tests/ -v
+pytest tests/integration/ --docker
 ```
 
-### 2. Démarrage des services
-```bash
-docker-compose up -d
-```
+---
 
-### 3. Accès interfaces
-- **Dagster** : http://localhost:3000
-- **Neo4j** : http://localhost:7474  
-- **pgAdmin** : http://localhost:5050
-- **MinIO** : http://localhost:9001
+## 📄 **Licence & Crédits**
 
-### 4. Initialisation des schémas
-```bash
-# Exécuter les scripts d'initialisation
-./scripts/init_all.sh
-```
+**Licence MIT** - Projet Open Source
 
-## 📈 Monitoring
+**Remerciements :**
+- **Hub'Eau** (OFB) : APIs données hydrologiques
+- **BRGM** : Référentiel BDLISA hydrogéologique  
+- **Sandre** (OFB + OiEau) : Nomenclatures officielles
+- **W3C** : Standards SOSA/SSN sémantiques
 
-### Métriques de Performance
-- **Débit Hub'Eau** : 20K records/page
-- **Batch TimescaleDB** : 1000 records/batch  
-- **Retry policy** : 3 tentatives max
-- **Rate limiting** : 0.1s entre appels
+---
 
-### Logs et Debugging
-```bash
-# Logs Dagster
-docker-compose logs -f dagster_webserver
+**🌊 Construisons ensemble l'avenir de l'analyse des données hydrologiques françaises !**
 
-# Monitoring bases de données
-docker-compose exec timescaledb psql -U postgres -d water_timeseries
-docker-compose exec neo4j cypher-shell
-```
-
-## 📚 Documentation
-
-- **[Architecture Optimisée](docs/ARCHITECTURE_OPTIMIZED.md)** : Détails techniques
-- **[Guide de Production](docs/PRODUCTION_GUIDE.md)** : Déploiement et monitoring
-- **[Exemples de Requêtes](docs/examples_queries.md)** : Requêtes SQL/Cypher
-- **[Guide de Correction](docs/REVIEW_CORRECTIONS.md)** : Corrections appliquées
-
-## 🔧 Structure des Assets
-
-### Bronze (Ingestion)
-```python
-hubeau_piezo_bronze          # Piézométrie avec retry
-hubeau_quality_surface_bronze # Qualité surface avec pagination  
-bdlisa_geographic_bronze     # BDLISA WFS réel
-sandre_thesaurus_bronze      # Sandre API officielle
-```
-
-### Silver (Transformation)
-```python
-piezo_timescale_optimized    # TimescaleDB batch loading
-quality_timescale_optimized  # Table measure_quality
-bdlisa_postgis_silver       # PostGIS avec index spatial
-sandre_neo4j_silver         # Neo4j thésaurus
-```
-
-### Gold (Analyses)
-```python
-sosa_ontology_production        # Ontologie SOSA réelle
-integrated_analytics_production # Analyses multi-sources
-
-# Démonstration (séparés)
-demo_quality_scores    🎭     # Scores simulés pour UI
-demo_neo4j_showcase   🎭     # Graphe simulé
-```
-
-## 💡 Optimisations Appliquées
-
-### ✅ Ingestion Hub'Eau
-- Retry exponentiel (3x avec backoff 2.0)  
-- Pagination complète (20K/page)
-- Rate limiting respectueux
-- Filtrage temporel par partition
-
-### ✅ TimescaleDB 
-- Batch loading (1000 records/batch)
-- Upserts conditionnels optimisés
-- Hypertables avec compression
-- Index temporels automatiques
-
-### ✅ Architecture
-- Séparation production/démonstration claire
-- Structure Dagster standard  
-- Jobs par fonction métier
-- Monitoring intégré
-
-## 🏷️ Version
-**v2.0** - Architecture Optimisée avec fonctionnalités professionnelles
-
-## 👥 Équipe
-BRGM - Service géologique national
+[![Dagster](https://img.shields.io/badge/powered%20by-Dagster-orange)](https://dagster.io/)
+[![France](https://img.shields.io/badge/made%20in-France-blue)](https://www.eaufrance.fr/)
+[![Open Source](https://img.shields.io/badge/open-source-green)](https://github.com/)

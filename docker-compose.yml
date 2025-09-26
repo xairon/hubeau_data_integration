@@ -64,11 +64,17 @@ services:
     image: timescale/timescaledb-ha:pg16
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_DB: water
+      POSTGRES_DB: postgres
     ports: 
       - "5432:5432"
     volumes: 
       - ts_pg:/var/lib/postgresql/data
+      - ./docker/init-scripts/timescaledb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d water_timeseries"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
   neo4j:
     image: neo4j:5.15-community
@@ -77,12 +83,19 @@ services:
       NEO4J_server_config_strict__validation_enabled: "false"
       NEO4JLABS_PLUGINS: '["apoc","n10s"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_dbms_default__database: "neo4j"
     ports: 
       - "7474:7474"
       - "7687:7687"
     volumes: 
       - neo4j_data:/data
       - neo4j_logs:/logs
+      - ./docker/init-scripts/neo4j:/var/lib/neo4j/init
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -100,32 +113,61 @@ services:
       - "9001:9001"
     volumes: 
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  grafana:
-    image: grafana/grafana
+  minio_init:
+    image: hubeau-dagster:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+    volumes:
+      - ./scripts:/app/scripts:ro
+    command: ["python", "/app/scripts/init_minio.py"]
+    restart: "no"
+
+
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: postgres
     ports: 
-      - "3001:3000"
+      - "5433:5432"
     volumes: 
-      - grafana_data:/var/lib/grafana
+      - postgis_data:/var/lib/postgresql/data
+      - ./docker/init-scripts/postgis:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d water_geo"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
   pgadmin:
     image: dpage/pgadmin4:latest
     ports:
-      - "8080:80"
+      - "5050:80"
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@brgm.fr
       PGADMIN_DEFAULT_PASSWORD: BrgmPgAdmin2024!
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     depends_on:
       - timescaledb
+      - postgis
 
 volumes:
   dagster_pg: {}
   ts_pg: {}
+  postgis_data: {}
   neo4j_data: {}
   neo4j_logs: {}
   minio_data: {}
-  grafana_data: {}
 
 
 

@@ -1,24 +1,44 @@
 """
-Jobs d'ingestion optimisés - Bronze → Silver
+Jobs d'ingestion optimisés - Bronze → Silver (Hub'Eau 8 APIs)
 """
 
 from dagster import define_asset_job, AssetSelection
 
-# Job Hub'Eau : APIs → MinIO → TimescaleDB (optimisé)
+# Job Hub'Eau Principal : 5 APIs quotidiennes → TimescaleDB
 hubeau_production_job = define_asset_job(
     name="hubeau_production_job",
-    description="🌊 Hub'Eau Production: APIs → MinIO → TimescaleDB (optimisé)",
+    description="🌊 Hub'Eau Principal: 5 APIs quotidiennes → TimescaleDB",
     selection=AssetSelection.keys(
-        # Bronze - Ingestion avec retry/pagination
+        # Bronze - APIs principales (quotidiennes)
         "hubeau_piezo_bronze",
         "hubeau_hydro_bronze",
         "hubeau_quality_surface_bronze",
         "hubeau_quality_groundwater_bronze",
         "hubeau_temperature_bronze",
 
-        # Silver - Chargement optimisé TimescaleDB
+        # Silver - Chargement optimisé TimescaleDB (5 APIs)
         "piezo_timescale_optimized",
-        "quality_timescale_optimized"
+        "hydro_timescale_optimized",
+        "quality_surface_timescale_optimized",
+        "quality_groundwater_timescale_optimized",
+        "temperature_timescale_optimized"
+    )
+)
+
+# Job Hub'Eau Complémentaire : 3 APIs mensuelles/saisonnières
+hubeau_complementary_job = define_asset_job(
+    name="hubeau_complementary_job", 
+    description="🌊 Hub'Eau Complémentaire: Écoulement + Hydrobiologie + Prélèvements",
+    selection=AssetSelection.keys(
+        # Bronze - APIs complémentaires (mensuelles)
+        "hubeau_ecoulement_bronze",
+        "hubeau_hydrobiologie_bronze",
+        "hubeau_prelevements_bronze",
+
+        # Silver - Chargement complémentaire TimescaleDB
+        "ecoulement_timescale",
+        "hydrobiologie_timescale", 
+        "prelevements_timescale"
     )
 )
 
