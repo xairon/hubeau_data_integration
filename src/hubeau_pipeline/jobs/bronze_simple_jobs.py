@@ -11,16 +11,19 @@ from dagster import define_asset_job, AssetSelection
 
 hubeau_bronze_job = define_asset_job(
     name="hubeau_bronze_job",
-    description="🌊 Hub'Eau - 4 APIs FONCTIONNELLES → MinIO",
+    description="🌊 Hub'Eau - 8 APIs COMPLÈTES REFACTORISÉES → MinIO",
     selection=AssetSelection.keys(
-        # 4 APIs Hub'Eau QUI MARCHENT RÉELLEMENT
-        "hubeau_piezo_bronze_real",                    # ✅ 20k stations + 843 chroniques
-        "hubeau_hydro_bronze_real",                    # ✅ 2718 observations  
-        "hubeau_quality_groundwater_bronze_real",       # ✅ 20k stations + 20k analyses
-        "hubeau_temperature_bronze_real",               # ✅ 849 stations + 835 chroniques
+        # 4 APIs Hub'Eau existantes
+        "hubeau_piezo_bronze_real",                    # ✅ Piezometrie v1
+        "hubeau_hydro_bronze_real",                    # ✅ Hydrometrie v2  
+        "hubeau_quality_groundwater_bronze_real",       # ✅ Qualité nappes v1
+        "hubeau_temperature_bronze_real",               # ✅ Température v1
         
-        # APIs non disponibles (documentation seulement)
-        "hubeau_apis_unavailable_bronze_real"          # 📋 Documentation des APIs non disponibles
+        # 4 APIs Hub'Eau nouvellement refactorisées
+        "hubeau_quality_surface_bronze_real",           # ✅ Qualité surface v2 
+        "hubeau_onde_bronze_real",                      # ✅ ONDE v1
+        "hubeau_hydrobiologie_bronze_real",             # ✅ Hydrobiologie v1
+        "hubeau_prelevements_bronze_real"               # ✅ Prélèvements v1
     )
 )
 

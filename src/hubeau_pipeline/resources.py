@@ -5,7 +5,6 @@ Connexions aux bases de données et services externes
 
 import boto3
 import psycopg
-import redis
 import httpx
 from neo4j import GraphDatabase
 from dagster import resource
@@ -46,15 +45,6 @@ def neo4j_driver(init_context):
     )
 
 
-@resource(config_schema={"url": str})
-def redis_client(init_context):
-    """Client Redis pour cache et verrous"""
-    return redis.from_url(
-        init_context.resource_config["url"],
-        decode_responses=True
-    )
-
-
 @resource(config_schema={
     "endpoint_url": str, 
     "access_key": str, 
@@ -87,9 +77,6 @@ RESOURCES = {
         "dsn": "bolt://neo4j:7687",
         "user": "neo4j",
         "password": "{{ env.NEO4J_PASSWORD }}"
-    }),
-    "redis": redis_client.configured({
-        "url": "redis://redis:6379/0"
     }),
     "s3": s3_client.configured({
         "endpoint_url": "http://minio:9000",
