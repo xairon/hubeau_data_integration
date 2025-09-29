@@ -54,15 +54,15 @@ graph TB
 
 ### **🔧 Technologies Principales**
 
-| **Couche** | **Technologie** | **Version** | **Rôle** |
-|------------|----------------|-------------|----------|
-| **Orchestration** | Dagster | 1.5+ | Pipeline moderne, assets, jobs |
-| **Bronze Storage** | MinIO | Latest | Object Storage S3-compatible |
-| **Time Series** | TimescaleDB | 2.14+ | Séries temporelles optimisées |
-| **Geospatial** | PostGIS | 3.4+ | Analyses spatiales avancées |
-| **Graph** | Neo4j | 5.15 | Graphe sémantique & SOSA |
-| **Infrastructure** | Docker Compose | 2.20+ | Multi-container orchestration |
-| **Admin DB** | pgAdmin | Latest | Interface PostgreSQL |
+| **Couche** | **Technologie** | **Version** | **Rôle** | **Status** |
+|------------|----------------|-------------|----------|------------|
+| **Orchestration** | Dagster | 1.5+ | Pipeline moderne, assets, jobs | ✅ Opérationnel |
+| **Bronze Storage** | MinIO | Latest | Object Storage S3-compatible + Cache | ✅ Avec cache intelligent |
+| **Time Series** | TimescaleDB | 2.14+ | Séries temporelles optimisées | ✅ Opérationnel |
+| **Geospatial** | PostGIS | 3.4+ | Analyses spatiales avancées | ✅ Opérationnel |
+| **Graph** | Neo4j | 5.15 | Graphe sémantique & SOSA | ✅ Opérationnel |
+| **Infrastructure** | Docker Compose | 2.20+ | Multi-container orchestration | ✅ Sans Redis |
+| **Admin DB** | pgAdmin | Latest | Interface PostgreSQL | ✅ Opérationnel |
 
 ### **🐳 Architecture Docker**
 
@@ -73,13 +73,15 @@ Services:
   timescaledb:          # Base séries temporelles (port 5432)
   postgis:              # Base géospatiale (port 5433)
   neo4j:                # Base graphe (ports 7474, 7687)
-  minio:                # Stockage objets (ports 9000, 9001)
+  minio:                # Stockage objets + cache (ports 9000, 9001)
   pgadmin:              # Administration DB (port 5050)
+  # Redis supprimé de la stack
 
 Volumes:
   - Initialisation automatique bases (SQL/Cypher scripts)
   - Persistance données
   - Configuration services
+  - Cache MinIO pour optimisation
 ```
 
 ---
@@ -102,6 +104,12 @@ bronze/
 ├── sandre/          # Nomenclatures (JSON)
 └── sosa/            # Ontologies (RDF)
 ```
+
+**Cache intelligent :**
+- Vérification données existantes avant appels API
+- Évite redondance et optimise performance
+- Stockage par partition quotidienne cohérente
+- Mécanisme de fallback robuste
 
 ### **🥈 Silver Layer : Bases Spécialisées**
 
@@ -156,9 +164,7 @@ bronze/
 ```
 src/hubeau_pipeline/assets/
 ├── bronze/              # Ingestion données brutes
-│   ├── hubeau_ingestion.py      # 5 APIs principales
-│   ├── hubeau_complementary.py  # 3 APIs complémentaires  
-│   └── external_data.py         # BDLISA + Sandre + SOSA
+│   └── hubeau_real_ingestion.py # Assets pour les 8 APIs Hub'Eau
 ├── silver/              # Transformation spécialisée
 │   ├── timescale_optimized.py   # Chargement TimescaleDB
 │   ├── postgis_geospatial.py    # Chargement PostGIS

@@ -101,6 +101,7 @@ APIs_Intégrées: 8 (Hub'Eau + externes)
 Sources_Données: 11 total
 Bases_Spécialisées: 3 (TimescaleDB + PostGIS + Neo4j)
 Orchestration: Dagster (assets + jobs + schedules)
+Cache_Intelligent: ✅ Vérification données existantes avant appels API
 ```
 
 ---
@@ -140,34 +141,18 @@ Cette couche représente l'**évolution future** du pipeline vers un **Knowledge
 ```
 src/hubeau_pipeline/
 ├── assets/              # Assets Dagster (Bronze/Silver/Gold)
+│   ├── bronze/
+│   │   ├── hubeau_configs.py      # ✅ Configurations centralisées
+│   │   ├── hubeau_real_ingestion.py # ✅ Ingestion 8 APIs Hub'Eau
+│   │   ├── bdlisa_real_ingestion.py  # ✅ Référentiel géologique
+│   │   └── sandre_real_ingestion.py  # ✅ Nomenclatures Sandre
+│   ├── silver/          # Transformations spécialisées
+│   └── gold/            # Analytics & KG (Future)
 ├── jobs/                # Jobs orchestration
-├── resources/           # Connexions bases données
+├── resources.py         # Connexions bases données (sans Redis)
 ├── schedules/           # Planification temporelle
 └── sensors/             # Surveillance & alerting
 ```
 
 ### **🧪 Tests**
-```bash
-pytest tests/ -v
-pytest tests/integration/ --docker
 ```
-
----
-
-## 📄 **Licence & Crédits**
-
-**Licence MIT** - Projet Open Source
-
-**Remerciements :**
-- **Hub'Eau** (OFB) : APIs données hydrologiques
-- **BRGM** : Référentiel BDLISA hydrogéologique  
-- **Sandre** (OFB + OiEau) : Nomenclatures officielles
-- **W3C** : Standards SOSA/SSN sémantiques
-
----
-
-**🌊 Construisons ensemble l'avenir de l'analyse des données hydrologiques françaises !**
-
-[![Dagster](https://img.shields.io/badge/powered%20by-Dagster-orange)](https://dagster.io/)
-[![France](https://img.shields.io/badge/made%20in-France-blue)](https://www.eaufrance.fr/)
-[![Open Source](https://img.shields.io/badge/open-source-green)](https://github.com/)

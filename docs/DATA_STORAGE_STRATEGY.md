@@ -5,7 +5,7 @@
 
 ## 📊 **Situation Actuelle vs Alternatives**
 
-### **🔄 Architecture Actuelle**
+### **🔄 Architecture Actuelle (Avec Correctifs)**
 ```mermaid
 graph TB
     subgraph "📥 INGESTION"
@@ -15,15 +15,16 @@ graph TB
         H4[SOSA W3C]
     end
     
-    subgraph "🥉 BRONZE (MinIO)"
-        B1[JSON Hub'Eau]
+    subgraph "🥉 BRONZE (MinIO + Cache)"
+        B1[JSON Hub'Eau<br/>✅ Cache intelligent]
         B2[GeoJSON BDLISA] 
         B3[JSON Sandre]
         B4[RDF SOSA]
+        CACHE[Cache MinIO<br/>✅ Évite redondance]
     end
     
     subgraph "🥈 SILVER (Spécialisé)"
-        TS[(TimescaleDB<br/>🌊 Observations)]
+        TS[(TimescaleDB<br/>🌊 Observations<br/>✅ lookback_days=1)]
         PG[(PostGIS<br/>🗺️ Géospatial)]
         N4[(Neo4j<br/>📚 Thésaurus)]
     end
@@ -32,6 +33,8 @@ graph TB
     H2 --> B2 --> PG
     H3 --> B3 --> N4
     H4 --> B4 --> N4
+    B1 -.-> CACHE
+    CACHE -.-> B1
 ```
 
 ### **🔗 Alternative SOSA Centralisée**
@@ -146,6 +149,31 @@ Performance:
   - Intégration reporting complexe
   - Moins d'expertise équipe
   - Stack technique plus exotique
+```
+
+---
+
+## 🔧 **Cache Intelligent MinIO**
+
+### **Mécanisme de Cache**
+```yaml
+Fonctionnalités:
+  - Vérification données existantes avant appels API
+  - Évite redondance et optimise performance
+  - Stockage par partition quotidienne cohérente
+  - Mécanisme de fallback robuste
+
+Avantages:
+  - Réduction appels API Hub'Eau redondants
+  - Performance améliorée pour rejeux
+  - Cohérence avec partitions Dagster
+  - Robustesse en cas d'échec cache
+
+Implémentation:
+  - check_minio_exists() : Vérification existence données
+  - load_from_minio() : Chargement depuis cache
+  - _store_endpoint_data() : Stockage avec métadonnées
+  - Fallback automatique si cache indisponible
 ```
 
 ---

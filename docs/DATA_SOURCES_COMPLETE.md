@@ -8,12 +8,12 @@
 Ce document centralise **toutes les sources de données** du pipeline Hub'Eau, basé sur les documentations officielles et les besoins d'intégration identifiés.
 
 ### **📊 Synthèse des Sources**
-| **Catégorie** | **Sources** | **Volume/Fréquence** | **Usage Principal** |
-|---------------|-------------|---------------------|-------------------|
-| **🌊 APIs Hub'Eau** | 8 APIs temps réel | 36K obs/jour | Données opérationnelles |
-| **🗺️ Référentiels Géo** | BDLISA WFS | Trimestriel | Contexte spatial |
-| **📚 Thésaurus** | Sandre APIs | Mensuel | Normalisation |
-| **🔗 Ontologies** | SOSA/SSN W3C | Annuel | Modélisation sémantique |
+| **Catégorie** | **Sources** | **Volume/Fréquence** | **Usage Principal** | **Status** |
+|---------------|-------------|---------------------|-------------------|------------|
+| **🌊 APIs Hub'Eau** | 8 APIs temps réel | ~8,500 obs/jour | Données opérationnelles | ✅ Opérationnel |
+| **🗺️ Référentiels Géo** | BDLISA WFS | Trimestriel | Contexte spatial | ✅ Intégré |
+| **📚 Thésaurus** | Sandre APIs | Mensuel | Normalisation | ✅ Intégré |
+| **🔗 Ontologies** | SOSA/SSN W3C | Annuel | Modélisation sémantique | 🔮 Future |
 
 ---
 
@@ -30,10 +30,23 @@ Ce document centralise **toutes les sources de données** du pipeline Hub'Eau, b
 ```yaml
 Base_URL: "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes"
 
-Endpoints_Disponibles:
-  /stations:          # Métadonnées piézomètres
-  /chroniques:        # Séries historiques quotidiennes (exige code_bss)
-  /chroniques_tr:     # Données temps réel horaires (télétransmission)
+Endpoints_Complets:
+  /stations:          # ✅ RÉFÉRENTIEL - Métadonnées piézomètres
+  /chroniques:        # ✅ HISTORIQUE - Séries quotidiennes (exige code_bss)
+  /chroniques_tr:     # ✅ TEMPS RÉEL - Données horaires (télétransmission)
+
+Différences_Chroniques_vs_Chroniques_TR:
+  chroniques_tr:
+    fréquence: "Horaire (télétransmission)"
+    période: "Données récentes (derniers jours)"
+    lookback_days: 1
+    usage: "Monitoring temps réel"
+    
+  chroniques:
+    fréquence: "Quotidienne" 
+    période: "Données historiques (plusieurs années)"
+    lookback_days: 365
+    usage: "Analyse historique"
 
 Structure_Données_Chroniques_TR:
   code_bss: "06252X0063/PZ1"           # Code national BSS
@@ -56,21 +69,39 @@ Paramètres_Techniques:
 
 ### **🌊 2. API Hydrométrie**  
 - **URL Officielle** : [hubeau.eaufrance.fr/page/api-hydrometrie](https://hubeau.eaufrance.fr/page/api-hydrometrie)
-- **URL API** : `https://hubeau.eaufrance.fr/api/v1/hydrometrie/`
+- **URL API** : `https://hubeau.eaufrance.fr/api/v2/hydrometrie/` ⚠️ **VERSION v2**
 - **Source** : Service Central Vigicrues (SCHAPI)
 - **Stations** : **~3,000 stations** (estimation réseau national)
+- **⚠️ RESTRICTION TEMPORELLE** : **Pas d'accès aux données antérieures à 1 mois** (erreur 400 si date_debut_obs < 1 mois)
 
 #### **Endpoints & Données**
 ```yaml
-Base_URL: "https://hubeau.eaufrance.fr/api/v1/hydrometrie"
+Base_URL: "https://hubeau.eaufrance.fr/api/v2/hydrometrie"
 
-Endpoints_Disponibles:
-  /stations:          # Métadonnées stations hydrométriques
-  /observations:      # Observations hydrométriques (exige code_station)
-  /observations_tr:   # Observations temps réel (pagination curseur)
+Endpoints_Complets:
+  /referentiel/sites:     # ✅ RÉFÉRENTIEL - Tronçons de cours d'eau
+  /referentiel/stations:  # ✅ RÉFÉRENTIEL - Stations d'observation
+  /observations_tr:       # ✅ TEMPS RÉEL - Observations temps réel (pagination cursor)
+  /obs_elab:             # ✅ ÉLABORÉES - Observations validées/traitées
+
+Différences_Observations_TR_vs_Obs_Elab:
+  observations_tr:
+    fréquence: "Temps réel (2 min)"
+    période: "24h-1 mois"
+    statut: "Non validées"
+    usage: "Monitoring opérationnel"
+    pagination: "cursor"
+    
+  obs_elab:
+    fréquence: "Traitement différé"
+    période: "Historique long terme"
+    statut: "Validées et traitées"
+    usage: "Analyses approfondies"
+    pagination: "cursor"
 
 Structure_Données:
   code_station: "K037041001"          # Code station hydro
+  code_site: "SITE1234567890"         # Code site (v2)
   hauteur_eau: 1250                   # Hauteur en millimètres
   debit: 15.7                         # Débit en litres/seconde
   date_obs: "2020-02-05T08:00:00Z"    # Date observation UTC
@@ -93,17 +124,49 @@ Conversions_Requises:
 
 ### **🧪 3. API Qualité des Cours d'Eau**
 - **URL Officielle** : [hubeau.eaufrance.fr/page/api-qualite-cours-deau](https://hubeau.eaufrance.fr/page/api-qualite-cours-deau)
-- **URL API** : `https://hubeau.eaufrance.fr/api/v1/qualite_cours_eau/`
+- **URL API** : `https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/` ⚠️ **VERSION v2**
 - **Source** : NAIADES (système d'information sur l'eau)
-- **Stations** : **~2,000 stations** qualité surface
+- **Stations** : **~15,000 stations** qualité surface
 
 #### **Endpoints & Données**
 ```yaml
-Base_URL: "https://hubeau.eaufrance.fr/api/v1/qualite_cours_eau"
+Base_URL: "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres"
 
-Endpoints_Disponibles:
-  /station_pc:        # Stations de prélèvement qualité (selon doc officielle)
-  /analyse_pc:        # Analyses physico-chimiques (selon doc officielle)
+Endpoints_Complets:
+  /station_pc:                    # ✅ RÉFÉRENTIEL - Stations de prélèvement qualité
+  /operation_pc:                  # ✅ OPÉRATIONS - Opérations de prélèvement
+  /condition_environnementale_pc: # ✅ CONDITIONS - Conditions environnementales
+  /analyse_pc:                    # ✅ ANALYSES - Analyses physico-chimiques
+
+Hiérarchie_Données_Qualité:
+  Station_PC:
+    - code_station: "STATION1234567890"
+    - nom_station: "Station Qualité Seine"
+    - cours_eau: "Seine"
+    - coordonnées: "longitude, latitude"
+    
+  Operation_PC:
+    - code_operation: "OP1234567890"
+    - code_station: "STATION1234567890"
+    - date_prelevement: "2024-01-15"
+    - type_prelevement: "Physico-chimique"
+    - profondeur_prelevement: 0.5  # mètres
+    
+  Condition_Environnementale_PC:
+    - code_operation: "OP1234567890"
+    - code_station: "STATION1234567890"
+    - temperature_air: 15.2  # °C
+    - presence_feuilles: "NON"
+    - presence_mousses: "OUI"
+    - presence_irisations: "NON"
+    
+  Analyse_PC:
+    - code_operation: "OP1234567890"
+    - code_station: "STATION1234567890"
+    - code_parametre: "1340"  # Nitrates
+    - nom_parametre: "Nitrates"
+    - resultat: 25.4  # mg/L
+    - limite_qualite: 50.0  # mg/L
 
 Structure_Données_Analyse:
   code_station: "05138000"            # Code station de prélèvement
@@ -133,14 +196,31 @@ Paramètres_Sandre_Prioritaires:
 - **URL Officielle** : [hubeau.eaufrance.fr/page/api-qualite-nappes](https://hubeau.eaufrance.fr/page/api-qualite-nappes)
 - **URL API** : `https://hubeau.eaufrance.fr/api/v1/qualite_nappes/`
 - **Source** : ADES + NAIADES  
-- **Stations** : **~1,200 stations** surveillance nappes
+- **Stations** : **~50,000 points d'eau** surveillance nappes
 
 #### **Endpoints & Données**
 ```yaml
 Base_URL: "https://hubeau.eaufrance.fr/api/v1/qualite_nappes"
 
-Endpoints_Disponibles:
-  /analyses:          # Analyses qualité nappes (selon doc officielle)
+Endpoints_Complets:
+  /stations:          # ✅ RÉFÉRENTIEL - Points d'eau (puits, forages, sources)
+  /analyses:          # ✅ ANALYSES - Analyses physico-chimiques
+
+Hiérarchie_Données_Qualité_Nappes:
+  Stations:
+    - code_bss: "06252X0063/PZ1"
+    - nom_station: "Puits Principal"
+    - type_point_eau: "Puits" | "Forage" | "Source"
+    - coordonnées: "longitude, latitude"
+    - profondeur: 45.2  # mètres
+    
+  Analyses:
+    - code_bss: "06252X0063/PZ1"
+    - code_parametre: "1340"  # Nitrates
+    - nom_parametre: "Nitrates"
+    - resultat: 25.4  # mg/L
+    - date_prelevement: "2024-01-15"
+    - limite_qualite: 50.0  # mg/L
 
 Structure_Données_Analyse:
   code_bss: "06252X0063/PZ1"          # Code BSS point d'eau
@@ -170,16 +250,32 @@ Substances_Prioritaires:
 - **URL Officielle** : [hubeau.eaufrance.fr/page/api-temperature-continu](https://hubeau.eaufrance.fr/page/api-temperature-continu)
 - **URL API** : `https://hubeau.eaufrance.fr/api/v1/temperature/`
 - **Source** : Banque Naïades
-- **Stations** : **~760 stations** (dont ~50 actives selon doc)
+- **Stations** : **~500 stations thermiques** (réseau thermique national)
 - **Mesure** : Température continue des cours d'eau
+- **⚠️ LIMITATIONS** : **Peu de stations encore en service** et **pas de données après 2024** via l'API
 
 #### **Endpoints & Données**
 ```yaml
 Base_URL: "https://hubeau.eaufrance.fr/api/v1/temperature"
 
-Endpoints_Disponibles:
-  /station:           # Stations de mesure température (singulier selon doc!)
-  /chronique:         # Chroniques températures (singulier selon doc!)
+Endpoints_Complets:
+  /station:           # ✅ RÉFÉRENTIEL - Stations de mesure température (singulier selon doc!)
+  /chronique:         # ✅ TEMPORELLES - Chroniques températures (singulier selon doc!)
+
+Hiérarchie_Données_Température:
+  Station:
+    - code_station: "T1234567890"
+    - nom_station: "Station Thermique Principal"
+    - coordonnées: "longitude, latitude"
+    - cours_eau: "Rivière XYZ"
+    - type_mesure: "Température continue"
+    
+  Chronique:
+    - code_station: "T1234567890"
+    - temperature: 15.2  # °C
+    - date_mesure: "2024-01-15T08:00:00Z"
+    - qualite_mesure: "BONNE"
+    - profondeur_mesure: 0.5  # mètres
 
 Structure_Données_Chronique:
   code_station: "04051125"             # Code station de mesure
@@ -204,9 +300,44 @@ Paramètres_Techniques:
 
 ### **🌊 6. API Écoulement des Cours d'Eau (ONDE)**
 - **URL Officielle** : [hubeau.eaufrance.fr/api-ecoulement](https://hubeau.eaufrance.fr/page/api-ecoulement)
-- **Réseau** : **3,200+ stations ONDE** (Observatoire National Des Étiages)
+- **URL API** : `https://hubeau.eaufrance.fr/api/v1/ecoulement/`
+- **Réseau** : **~3,000 stations ONDE** (Observatoire National Des Étiages)
 - **Type** : Observations visuelles par agents OFB
 - **Standard** : OpenAPI 3.0
+
+#### **Endpoints & Données**
+```yaml
+Base_URL: "https://hubeau.eaufrance.fr/api/v1/ecoulement"
+
+Endpoints_Complets:
+  /stations:           # ✅ RÉFÉRENTIEL - Stations d'observation des écoulements
+  /campagnes:          # ✅ CAMPAGNES - Campagnes d'observation des écoulements
+  /observations:       # ✅ OBSERVATIONS - Observations visuelles de l'écoulement
+
+Hiérarchie_Données_ONDE:
+  Stations:
+    - code_station: "ONDE1234567890"
+    - nom_station: "Station ONDE Seine"
+    - cours_eau: "Seine"
+    - coordonnées: "longitude, latitude"
+    - type_station: "Observation visuelle"
+    
+  Campagnes:
+    - code_campagne: "CAMP1234567890"
+    - code_station: "ONDE1234567890"
+    - date_campagne: "2024-07-15"
+    - periode_campagne: "Été"
+    - agent_observateur: "OFB Départemental"
+    - conditions_meteo: "Soleil"
+    
+  Observations:
+    - code_observation: "OBS1234567890"
+    - code_campagne: "CAMP1234567890"
+    - code_station: "ONDE1234567890"
+    - date_observation: "2024-07-15T10:30:00Z"
+    - code_ecoulement: "1"  # Écoulement visible
+    - libelle_ecoulement: "Écoulement visible"
+    - commentaire: "Écoulement normal"
 
 #### **Modalités d'Observation**
 ```yaml
@@ -222,9 +353,44 @@ Couverture: "France hexagonale + Corse"
 ```
 
 ### **🐟 7. API Hydrobiologie**
-- **URL** : `https://hubeau.eaufrance.fr/api/v1/hydrobio/`
+- **URL Officielle** : [hubeau.eaufrance.fr/page/api-hydrobiologie](https://hubeau.eaufrance.fr/page/api-hydrobiologie)
+- **URL API** : `https://hubeau.eaufrance.fr/api/v1/hydrobio/`
 - **Source** : NAIADES (peuplement cours d'eau)
 - **Stations** : **~1,500 stations** analyses biologiques
+
+#### **Endpoints & Données**
+```yaml
+Base_URL: "https://hubeau.eaufrance.fr/api/v1/hydrobio"
+
+Endpoints_Complets:
+  /stations_hydrobio:  # ✅ RÉFÉRENTIEL - Stations de prélèvement hydrobiologique
+  /indices:           # ✅ INDICES - Indices biologiques calculés
+  /taxons:            # ✅ TAXONS - Taxons identifiés lors des prélèvements
+
+Hiérarchie_Données_Hydrobiologie:
+  Stations_Hydrobio:
+    - code_station: "HYDRO1234567890"
+    - nom_station: "Station Hydrobio Seine"
+    - cours_eau: "Seine"
+    - coordonnées: "longitude, latitude"
+    - type_prelevement: "Macroinvertébrés"
+    
+  Indices:
+    - code_station: "HYDRO1234567890"
+    - code_indice: "IBGN"  # Indice Biologique Global Normalisé
+    - valeur_indice: 8.5
+    - date_prelevement: "2024-01-15"
+    - classe_qualite: "BONNE"
+    - interpretation: "Qualité biologique bonne"
+    
+  Taxons:
+    - code_station: "HYDRO1234567890"
+    - code_taxon: "TAXON1234567890"
+    - nom_taxon: "Gammarus pulex"
+    - famille: "Gammaridae"
+    - abondance: 15
+    - date_prelevement: "2024-01-15"
+    - groupe_taxonomique: "Crustacés"
 
 #### **Types d'Analyses & Indices**
 ```yaml
@@ -246,9 +412,36 @@ Poissons:
 ```
 
 ### **🚰 8. API Prélèvements d'Eau**
-- **URL** : `https://hubeau.eaufrance.fr/api/v1/prelevements/`
+- **URL Officielle** : [hubeau.eaufrance.fr/page/api-prelevements-en-eau](https://hubeau.eaufrance.fr/page/api-prelevements-en-eau)
+- **URL API** : `https://hubeau.eaufrance.fr/api/v1/prelevements/`
 - **Données** : Volumes prélevés par usage
 - **Couverture** : France entière (déclarations)
+
+#### **Endpoints & Données**
+```yaml
+Base_URL: "https://hubeau.eaufrance.fr/api/v1/prelevements"
+
+Endpoints_Complets:
+  /referentiel/points_prelevement:  # ✅ RÉFÉRENTIEL - Points physiques de prélèvement
+  /referentiel/ouvrages:           # ✅ RÉFÉRENTIEL - Installations techniques
+  /chroniques:                     # ✅ CHRONIQUES - Volumes annuels par ouvrage
+
+Hiérarchie_Données_Prélèvements:
+  Ouvrages:
+    - code_ouvrage: "OPR1234567890"
+    - description: "Station de pompage principale"
+    - relation: "1 ouvrage → N points de prélèvement"
+    
+  Points_Prélèvement:
+    - code_point: "PPR1234567890" 
+    - description: "Puits n°1 de l'ouvrage"
+    - relation: "1 point → 1 ouvrage"
+    
+  Chroniques:
+    - code_ouvrage: "OPR1234567890"  # ⚠️ IMPORTANT: lié à l'OUVRAGE
+    - annee: 2023
+    - volume_preleve: 15000  # m³/an
+    - usage: "AEP"  # Alimentation Eau Potable
 
 #### **Types d'Usage**
 ```yaml
@@ -258,6 +451,113 @@ Usages_Catégories:
   IRR: "Irrigation"
   ENE: "Énergétique (refroidissement)"
   AQU: "Aquaculture"
+```
+
+---
+
+## ⚠️ **Restrictions Temporelles des APIs Hub'Eau**
+
+### **🔒 Limitations Temporelles Critiques**
+
+```yaml
+APIs_Avec_Restrictions:
+
+  Hydrométrie_v2:
+    restriction: "Pas d'accès aux données antérieures à 1 mois"
+    erreur: "400 Client Error: date can't be < 1 month from now"
+    impact: "Impossible de récupérer des données historiques récentes"
+    solution: "Utiliser lookback_days >= 30 pour éviter les erreurs"
+    
+  Température:
+    limitation: "Peu de stations encore en service"
+    limitation_data: "Pas de données après 2024 via l'API"
+    impact: "Couverture réduite et données obsolètes"
+    recommandation: "Vérifier la disponibilité avant intégration"
+
+APIs_Sans_Restrictions:
+  - Piézométrie: "Accès historique complet"
+  - Qualité_Cours_Eau: "Accès historique complet"
+  - Qualité_Nappes: "Accès historique complet"
+  - Écoulement_ONDE: "Données saisonnières disponibles"
+  - Hydrobiologie: "Données selon campagnes"
+  - Prélèvements: "Données annuelles disponibles"
+
+Recommandations_Techniques:
+  configuration_temporelle:
+    hydrometrie: "lookback_days: 30 minimum"
+    temperature: "lookback_days: 365 (données historiques limitées)"
+    autres_apis: "lookback_days: selon besoins (1-365)"
+    
+  gestion_erreurs:
+    pattern: "Vérifier erreur 400 avec message temporel"
+    fallback: "Réduire la période de recherche"
+    monitoring: "Logger les restrictions temporelles"
+```
+
+---
+
+## 📊 **Synthèse des Corrections Apportées**
+
+### **🔧 Corrections Majeures Effectuées**
+
+```yaml
+APIs_Corrigées:
+  
+  Piézométrie:
+    problème: "chroniques sans code_bss → erreur 400"
+    solution: "Ajout logique récupération codes BSS depuis stations"
+    endpoints: ["stations", "chroniques", "chroniques_tr"]
+    
+  Hydrométrie:
+    problème: "Configuration incomplète v2 + restriction temporelle 1 mois"
+    solution: "Ajout referentiel/sites et obs_elab + correction lookback_days"
+    endpoints: ["referentiel/sites", "referentiel/stations", "observations_tr", "obs_elab"]
+    restriction: "Pas d'accès aux données antérieures à 1 mois"
+    
+  Qualité_Cours_Eau:
+    problème: "Configuration incomplète v2"
+    solution: "Ajout operation_pc et condition_environnementale_pc"
+    endpoints: ["station_pc", "operation_pc", "condition_environnementale_pc", "analyse_pc"]
+    
+  Prélèvements:
+    problème: "chroniques sans code_ouvrage → erreur 500"
+    solution: "Ajout referentiel/ouvrages et logique codes ouvrage"
+    endpoints: ["referentiel/points_prelevement", "referentiel/ouvrages", "chroniques"]
+    
+  Température:
+    limitation: "Peu de stations en service + pas de données après 2024"
+    impact: "Couverture réduite et données obsolètes"
+    recommandation: "Vérifier disponibilité avant intégration"
+
+Différences_Clés_Entre_Endpoints:
+  
+  Piézométrie:
+    chroniques_tr: "Temps réel horaire (1 jour lookback)"
+    chroniques: "Historique quotidien (365 jours lookback)"
+    
+  Hydrométrie:
+    observations_tr: "Non validées, temps réel (1 jour lookback)"
+    obs_elab: "Validées et traitées (30 jours lookback)"
+    
+  Qualité_Cours_Eau:
+    station_pc: "Référentiel géographique"
+    operation_pc: "Opérations de prélèvement"
+    condition_environnementale_pc: "Contexte des prélèvements"
+    analyse_pc: "Résultats des analyses"
+
+Logique_Récupération_Codes:
+  
+  Piézométrie_Qualité_Nappes:
+    source: "stations → code_bss"
+    usage: "chroniques avec code_bss"
+    
+  Prélèvements:
+    source: "ouvrages → code_ouvrage"
+    usage: "chroniques avec code_ouvrage"
+    
+  Autres_APIs:
+    source: "stations → code_station"
+    usage: "observations avec code_station"
 ```
 
 ---
@@ -549,6 +849,11 @@ Stockage_Estimé:
 - [API Piézométrie](https://hubeau.eaufrance.fr/page/api-piezometrie)
 - [API Écoulement ONDE](https://hubeau.eaufrance.fr/page/api-ecoulement)
 - [API Hydrobiologie](https://hubeau.eaufrance.fr/page/api-hydrobiologie)
+- [API Qualité des nappes](https://hubeau.eaufrance.fr/page/api-qualite-nappes)
+- [API Hydrométrie](https://hubeau.eaufrance.fr/page/api-hydrometrie)
+- [API Température des cours d'eau](https://hubeau.eaufrance.fr/page/api-temperature-continu)
+- [API Qualité des cours d'eau](https://hubeau.eaufrance.fr/page/api-qualite-cours-deau)
+- [API Prélèvements en eau](https://hubeau.eaufrance.fr/page/api-prelevements-eau)
 - [Statistiques Usage 2023](https://hubeau.eaufrance.fr/page/statistiques-2023)
 
 ### **🌐 Références Externes**
@@ -565,5 +870,5 @@ Stockage_Estimé:
 
 ---
 
-**📅 Dernière mise à jour** : Septembre 2024  
-**🎯 Version** : 1.0 - Documentation unifiée sources complètes
+**📅 Dernière mise à jour** : Septembre 2025  
+**🎯 Version** : 1.1 - Documentation unifiée avec restrictions temporelles Hub'Eau
