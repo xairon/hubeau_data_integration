@@ -3,7 +3,7 @@ Assets Dagster pour l'ingestion Hub'Eau Bronze
 Assets clairs et logiques pour chaque API Hub'Eau avec vraies APIs
 """
 
-from dagster import asset, DailyPartitionsDefinition, AssetExecutionContext, get_dagster_logger
+from dagster import asset, DailyPartitionsDefinition, AssetExecutionContext
 from datetime import datetime
 from typing import Dict, Any
 import asyncio
@@ -23,14 +23,15 @@ async def ingest_hubeau_api(context: AssetExecutionContext, api_name: str) -> Di
     """Helper function pour l'ingestion d'une API Hub'Eau"""
     day = context.partition_key
     context.log.info(f"🚀 Début ingestion {api_name} Hub'Eau pour {day}")
-    
+
     try:
         # Récupération de la configuration
         configs = get_all_hubeau_configs()
         config = configs[api_name]
-        
+
         # Service d'ingestion réel
-        service = HubeauIngestionService()
+        minio_resource = getattr(context.resources, "s3", None)
+        service = HubeauIngestionService(minio_resource=minio_resource)
         result = await service.ingest_api_data(config, day)
         
         context.log.info(f"✅ Ingestion {api_name} terminée: {result['total_records_ingested']} records")
@@ -54,6 +55,7 @@ async def ingest_hubeau_api(context: AssetExecutionContext, api_name: str) -> Di
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🌊 Ingestion Hydrométrie Hub'Eau (débits et niveaux des cours d'eau)"
 )
 async def hubeau_hydrometry_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -63,6 +65,7 @@ async def hubeau_hydrometry_bronze(context: AssetExecutionContext) -> Dict[str, 
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🏔️ Ingestion Piézométrie Hub'Eau (niveaux des nappes phréatiques)"
 )
 async def hubeau_piezometry_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -72,6 +75,7 @@ async def hubeau_piezometry_bronze(context: AssetExecutionContext) -> Dict[str, 
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🌊 Ingestion Qualité Cours d'Eau Hub'Eau (analyses physico-chimiques)"
 )
 async def hubeau_water_quality_surface_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -81,6 +85,7 @@ async def hubeau_water_quality_surface_bronze(context: AssetExecutionContext) ->
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🌊 Ingestion Qualité Nappes Hub'Eau (analyses physico-chimiques)"
 )
 async def hubeau_water_quality_groundwater_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -90,6 +95,7 @@ async def hubeau_water_quality_groundwater_bronze(context: AssetExecutionContext
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🌡️ Ingestion Température Hub'Eau (température des cours d'eau)"
 )
 async def hubeau_temperature_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -99,6 +105,7 @@ async def hubeau_temperature_bronze(context: AssetExecutionContext) -> Dict[str,
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🌊 Ingestion ONDE Hub'Eau (Opération Nationale Des Étiages)"
 )
 async def hubeau_onde_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -108,6 +115,7 @@ async def hubeau_onde_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="🐟 Ingestion Hydrobiologie Hub'Eau (indices biologiques)"
 )
 async def hubeau_hydrobiology_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -117,6 +125,7 @@ async def hubeau_hydrobiology_bronze(context: AssetExecutionContext) -> Dict[str
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
+    required_resource_keys={"s3"},
     description="💧 Ingestion Prélèvements Hub'Eau (prélèvements en eau)"
 )
 async def hubeau_prelevements_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
