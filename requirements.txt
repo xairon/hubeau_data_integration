@@ -12,6 +12,7 @@ neo4j==5.15.0
 
 # HTTP et cache
 httpx==0.26.0
+tenacity==8.2.3
 redis==5.0.1
 
 # S3/MinIO
