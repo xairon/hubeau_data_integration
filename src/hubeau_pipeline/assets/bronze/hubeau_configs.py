@@ -3,8 +3,8 @@ Configurations Hub'Eau centralisées
 Définition des paramètres pour chaque API Hub'Eau
 """
 
-from typing import Dict, List, Any, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List
+
 from .hubeau_client import HubeauApiConfig, HubeauEndpointConfig
 
 # ====================================
