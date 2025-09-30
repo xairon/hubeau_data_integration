@@ -4,10 +4,10 @@ Surveillance des erreurs et alertes
 """
 
 from dagster import sensor, SensorEvaluationContext, RunRequest, SkipReason
-from hubeau_pipeline.jobs import hubeau_daily_job
+from hubeau_pipeline.jobs import hubeau_bronze_job
 
 @sensor(
-    job=hubeau_daily_job,
+    job=hubeau_bronze_job,
     name="error_detection_sensor",
     description="Détecte les erreurs dans les pipelines"
 )

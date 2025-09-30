@@ -5,15 +5,15 @@ Jobs correspondant à la nouvelle structure des assets
 
 # Import des jobs Hub'Eau modernes
 from .bronze_ingestion import (
+    all_jobs,
+    bdlisa_bronze_job,
     hubeau_bronze_job,
-    hubeau_hydrology_job,
-    hubeau_water_quality_job,
     hubeau_environment_job,
+    hubeau_hydrology_job,
     hubeau_prelevements_job,
     hubeau_summary_job,
-    bdlisa_bronze_job,
+    hubeau_water_quality_job,
     sandre_bronze_job,
-    all_jobs
 )
 
 # Jobs Hub'Eau modernes
@@ -47,5 +47,5 @@ __all__ = [
     "hubeau_prelevements_job",
     "hubeau_summary_job",
     "bdlisa_bronze_job",
-    "sandre_bronze_job"
+    "sandre_bronze_job",
 ]

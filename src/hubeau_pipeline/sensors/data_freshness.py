@@ -4,10 +4,10 @@ Surveillance de la fraîcheur des données Hub'Eau
 """
 
 from dagster import sensor, SensorEvaluationContext, RunRequest, SkipReason
-from hubeau_pipeline.jobs import hubeau_daily_job
+from hubeau_pipeline.jobs import hubeau_bronze_job
 
 @sensor(
-    job=hubeau_daily_job,
+    job=hubeau_bronze_job,
     name="hubeau_freshness_sensor",
     description="Surveille la fraîcheur des données Hub'Eau"
 )

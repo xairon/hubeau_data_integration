@@ -3,8 +3,8 @@ Configurations Hub'Eau centralisées
 Définition des paramètres pour chaque API Hub'Eau
 """
 
-from typing import Dict, List, Any, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List
+
 from .hubeau_client import HubeauApiConfig, HubeauEndpointConfig
 
 # ====================================
@@ -57,8 +57,7 @@ def get_hydrometry_config() -> HubeauApiConfig:
                        supports_cursor=True,
                        realtime_cache_duration=15,
                        cache_duration=30,
-                       requires_spatial_filter=True,  # ✅ CORRECTIF: Nécessite filtre spatial
-                       spatial_params={"dept": "code_departement"},
+                       requires_spatial_filter=False,
                        depth_limit=100000  # Limite très élevée pour observations
                    ),
                    "obs_elab": HubeauEndpointConfig(
@@ -67,8 +66,7 @@ def get_hydrometry_config() -> HubeauApiConfig:
                        page_size=1000,
                        max_pages=20,
                        cache_duration=30,
-                       requires_spatial_filter=True,  # ✅ CORRECTIF: Nécessite filtre spatial
-                       spatial_params={"dept": "code_departement"},
+                       requires_spatial_filter=False,
                        depth_limit=50000  # Limite élevée pour observations élaborées
                    )
         }

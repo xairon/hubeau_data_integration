@@ -5,16 +5,16 @@ Architecture robuste et performante pour l'ingestion des données Hub'Eau
 
 import asyncio
 import json
+import os
 import random
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import httpx
 from tenacity import (
-    retry, 
-    stop_after_attempt, 
-    wait_exponential, 
+    stop_after_attempt,
+    wait_exponential,
     retry_if_exception_type,
     before_sleep_log,
     AsyncRetrying  # ✅ CORRECTIF C: Pour retries dynamiques
@@ -22,6 +22,7 @@ from tenacity import (
 from pydantic import BaseModel, Field, validator
 from dagster import get_dagster_logger
 import boto3
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 logger = get_dagster_logger()
@@ -165,14 +166,16 @@ class HubeauClient:
         self.logger.info(f"🌍 Récupération stations {endpoint_name} pour TOUT LE TERRITOIRE FRANÇAIS")
         self.logger.info(f"📊 Découpage spatial: {len(all_departments)} départements en {len(dept_chunks)} groupes (chunk_size={chunk_size})")
         
+        spatial_param_key = self._resolve_spatial_param(endpoint_config)
+
         for i, dept_chunk in enumerate(dept_chunks):
             self.logger.info(f"🌍 Groupe {i+1}/{len(dept_chunks)}: départements {dept_chunk}")
-            
+
             # Paramètres pour ce chunk
             params = {
-                "format": "json", 
+                "format": "json",
                 "size": endpoint_config.page_size,
-                endpoint_config.spatial_params["dept"]: ",".join(dept_chunk)
+                spatial_param_key: ",".join(dept_chunk)
             }
             
             # Récupérer toutes les pages pour ce chunk
@@ -227,7 +230,16 @@ class HubeauClient:
                     raise
                 self.logger.error(f"Erreur page {page}: {e}")
                 break
-        
+
+        expected_records_cap = endpoint_config.max_pages * params.get("size", endpoint_config.page_size)
+        if page > endpoint_config.max_pages and len(all_data) >= expected_records_cap:
+            self.logger.warning(
+                "⚠️ TRONCATURE: max_pages=%s atteint pour %s. Récupéré %s records, mais il pourrait y en avoir plus !",
+                endpoint_config.max_pages,
+                endpoint_config.path,
+                len(all_data),
+            )
+
         return all_data
     
     async def get_observations(
@@ -266,7 +278,8 @@ class HubeauClient:
             if "annee" in start_key:
                 year = date_obj.year
                 params[start_key] = year
-                params[end_key] = year
+                # Les API Hub'Eau attendent une fenêtre inclusive-exclusive
+                params[end_key] = year + 1
             else:
                 # Format standard pour les autres APIs avec gestion de borne fin exclusive
                 end_offset = getattr(endpoint_config, 'end_offset_days', 0)
@@ -293,7 +306,7 @@ class HubeauClient:
         if endpoint_config.requires_spatial_filter and endpoint_config.spatial_params:
             # APPROCHE SPATIALE (départements)
             all_departments = self._get_french_departments()
-        
+
             # Chunking adaptatif selon la profondeur limite et l'API
             depth_limit = getattr(endpoint_config, 'depth_limit', None)
             if depth_limit is None:
@@ -316,15 +329,15 @@ class HubeauClient:
             MAX_CONCURRENT_SPATIAL = 4 if self.config.name == "hydrobiology" else 10
             semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPATIAL)
             self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT_SPATIAL} requêtes simultanées")
-            
+
+            spatial_param_key = self._resolve_spatial_param(endpoint_config)
+
             async def fetch_dept_chunk(i, dept_chunk):
                 async with semaphore:
                     try:
                         chunk_params = params.copy()
-                        if "dept" in endpoint_config.spatial_params:
-                            dept_key = endpoint_config.spatial_params["dept"]
-                            chunk_params[dept_key] = ",".join(dept_chunk)
-                        
+                        chunk_params[spatial_param_key] = ",".join(dept_chunk)
+
                         chunk_data = await self._fetch_all_pages(endpoint_config, chunk_params)
                         self.logger.info(f"✅ Groupe {i+1}/{len(dept_chunks)}: {len(chunk_data)} observations")
                         return chunk_data
@@ -336,7 +349,7 @@ class HubeauClient:
                             for dept in dept_chunk:
                                 try:
                                     one_params = params.copy()
-                                    one_params[dept_key] = dept
+                                    one_params[spatial_param_key] = dept
                                     one_data = await self._fetch_all_pages(endpoint_config, one_params)
                                     merged.extend(one_data)
                                 except Exception as ee:
@@ -365,7 +378,15 @@ class HubeauClient:
         elif entity_codes:
             # APPROCHE PAR CODES D'ENTITÉS
             api_name_actual = api_name or self.config.name
-            if api_name_actual in ["piezometry", "ground_water_quality", "prelevements", "temperature", "onde", "hydrobiology"]:
+            if api_name_actual in [
+                "hydrometry",
+                "piezometry",
+                "ground_water_quality",
+                "prelevements",
+                "temperature",
+                "onde",
+                "hydrobiology",
+            ]:
                 entity_key = self._get_entity_key_for_api(api_name_actual)
                 self.logger.info(f"📊 Approche avec {entity_key} pour observations {endpoint_name}")
                 
@@ -376,7 +397,12 @@ class HubeauClient:
                 
                 # Chunking systématique si trop de codes (évite URL too long)
                 # Hydrobiologie : limite URL ≈2083 caractères → chunks plus petits
-                MAX_CODES_PER_REQUEST = 25 if api_name_actual == "hydrobiology" else 50
+                if api_name_actual == "hydrobiology":
+                    MAX_CODES_PER_REQUEST = 25
+                elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
+                    MAX_CODES_PER_REQUEST = 25
+                else:
+                    MAX_CODES_PER_REQUEST = 50
                 
                 if len(entity_codes) > MAX_CODES_PER_REQUEST:
                     # Découpage systématique en chunks avec parallélisation
@@ -385,55 +411,78 @@ class HubeauClient:
                     
                     # Parallélisation avec asyncio.gather() pour accélérer l'ingestion
                     # Hydrobiologie : API sensible → parallélisme réduit
-                    MAX_CONCURRENT = 4 if api_name_actual == "hydrobiology" else 15
+                    if api_name_actual == "hydrobiology":
+                        MAX_CONCURRENT = 4
+                    elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
+                        MAX_CONCURRENT = 8  # ✅ Parallélisme modéré pour limiter la pression API
+                    else:
+                        MAX_CONCURRENT = 15
                     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
                     self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT} requêtes simultanées")
                     
-                    async def fetch_chunk(i, chunk):
+                    async def _execute_chunk(chunk: List[str]) -> List[Dict[str, Any]]:
                         async with semaphore:
-                            try:
-                                chunk_params = params.copy()
-                                chunk_params[entity_key] = ",".join(chunk)
-                                # ✅ CORRECTIF B: Activer bubble_exceptions pour déclencher split binaire
-                                chunk_data = await self._fetch_all_pages(
-                                    endpoint_config, 
-                                    chunk_params, 
-                                    bubble_exceptions=True
+                            chunk_params = params.copy()
+                            chunk_params[entity_key] = ",".join(chunk)
+                            return await self._fetch_all_pages(
+                                endpoint_config,
+                                chunk_params,
+                                bubble_exceptions=True,
+                            )
+
+                    async def fetch_chunk(i, chunk: List[str], depth: int = 0) -> List[Dict[str, Any]]:
+                        # Chaque tentative (y compris les splits) est comptabilisée
+                        self.metrics.chunks_total += 1
+
+                        try:
+                            chunk_data = await _execute_chunk(chunk)
+                        except Exception as e:
+                            # ✅ CORRECTIF D: Tracking erreurs par type
+                            message = str(e)
+                            if "500" in message:
+                                self.metrics.erreurs_http_500 += 1
+                            elif "timeout" in message.lower():
+                                self.metrics.erreurs_timeout += 1
+
+                            if len(chunk) > 1:
+                                self.logger.warning(
+                                    "⚠️ Chunk %s erreur (%s...), découpage en 2...",
+                                    i + 1,
+                                    message[:50],
                                 )
-                                
-                                # ✅ CORRECTIF D: Mise à jour métriques
-                                self.metrics.chunks_total += 1
-                                if len(chunk_data) == 0:
-                                    self.metrics.chunks_vides += 1
-                                    self.metrics.stations_sans_donnees.extend(chunk)
-                                else:
-                                    self.metrics.chunks_ok += 1
-                                
-                                # Log tous les 50 chunks
-                                if i % 50 == 0 or i == len(entity_chunks) - 1:
-                                    self.logger.info(f"✅ Traité {i+1}/{len(entity_chunks)} chunks")
-                                
-                                return chunk_data
-                            except Exception as e:
-                                # ✅ CORRECTIF D: Tracking erreurs par type
-                                if "500" in str(e):
-                                    self.metrics.erreurs_http_500 += 1
-                                elif "timeout" in str(e).lower():
-                                    self.metrics.erreurs_timeout += 1
-                                
-                                # Fallback : si un chunk échoue, on le coupe en 2 jusqu'à taille 1
-                                if len(chunk) > 1:
-                                    self.logger.warning(f"⚠️ Chunk {i+1} erreur ({str(e)[:50]}...), découpage en 2...")
-                                    mid = len(chunk) // 2
-                                    left = await fetch_chunk(i, chunk[:mid])
-                                    right = await fetch_chunk(i, chunk[mid:])
-                                    return (left or []) + (right or [])
-                                else:
-                                    # ✅ CORRECTIF D: Logger les codes fautifs pour observabilité
-                                    self.metrics.chunks_echoues += 1
-                                    self.metrics.codes_echoues.append(chunk[0])
-                                    self.logger.error(f"❌ Chunk {i+1} échoué définitivement (code: {chunk[0]}): {str(e)}")
-                                    return []
+                                mid = len(chunk) // 2
+                                left = await fetch_chunk(i, chunk[:mid], depth + 1)
+                                right = await fetch_chunk(i, chunk[mid:], depth + 1)
+                                return (left or []) + (right or [])
+
+                            # ✅ CORRECTIF D: Logger les codes fautifs pour observabilité
+                            self.metrics.chunks_echoues += 1
+                            if chunk:
+                                self.metrics.codes_echoues.append(chunk[0])
+                                self.logger.error(
+                                    "❌ Chunk %s échoué définitivement (code: %s): %s",
+                                    i + 1,
+                                    chunk[0],
+                                    message,
+                                )
+                            else:
+                                self.logger.error(
+                                    "❌ Chunk %s échoué définitivement: %s",
+                                    i + 1,
+                                    message,
+                                )
+                            return []
+
+                        if len(chunk_data) == 0:
+                            self.metrics.chunks_vides += 1
+                            self.metrics.stations_sans_donnees.extend(chunk)
+                        else:
+                            self.metrics.chunks_ok += 1
+
+                        if depth == 0 and (i % 50 == 0 or i == len(entity_chunks) - 1):
+                            self.logger.info(f"✅ Traité {i+1}/{len(entity_chunks)} chunks")
+
+                        return chunk_data
                     
                     # Lancer toutes les requêtes en parallèle
                     tasks = [fetch_chunk(i, chunk) for i, chunk in enumerate(entity_chunks)]
@@ -503,6 +552,20 @@ class HubeauClient:
         }
         return entity_keys.get(api_name, "code_station")
 
+    def _resolve_spatial_param(self, endpoint_config: HubeauEndpointConfig) -> str:
+        """Retourne la clé de paramètre spatial attendue par l'endpoint."""
+        spatial_params = endpoint_config.spatial_params or {}
+        if "dept" in spatial_params:
+            return spatial_params["dept"]
+
+        if spatial_params:
+            # Prendre le premier paramètre disponible (ex: bbox, code_commune, etc.)
+            return next(iter(spatial_params.values()))
+
+        raise ValueError(
+            f"Endpoint {endpoint_config.path} requiert un filtre spatial mais aucun paramètre n'est défini"
+        )
+
 # ====================================
 # MÉTRIQUES D'OBSERVABILITÉ (CORRECTIF D)
 # ====================================
@@ -540,28 +603,69 @@ class IngestionMetrics(BaseModel):
 
 class HubeauIngestionService:
     """Service d'ingestion Hub'Eau pour la couche Bronze"""
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        minio_resource: Optional[Dict[str, Any]] = None,
+        bucket: Optional[str] = None,
+    ):
         self.logger = logger
-        self.minio_client = self._init_minio_client()
-        self.minio_bucket = "hubeau-bronze"
-    
+        (
+            self.minio_client,
+            detected_bucket,
+            fallback_dir,
+        ) = self._resolve_minio_client(minio_resource)
+        self.local_fallback_dir = fallback_dir
+
+        default_bucket = os.getenv("MINIO_BRONZE_BUCKET") or detected_bucket or "bronze"
+        self.minio_bucket = bucket or default_bucket
+
+        if not self.minio_bucket:
+            raise ValueError("MinIO bucket must be provided through resources or environment")
+
+    def _resolve_minio_client(
+        self, minio_resource: Optional[Dict[str, Any]]
+    ) -> tuple[Optional[BaseClient], Optional[str], Optional[Path]]:
+        """Initialise le client MinIO via ressource Dagster ou variables d'environnement."""
+        if minio_resource is not None:
+            client = minio_resource.get("client")
+            bucket = minio_resource.get("bucket")
+            if client is None or bucket is None:
+                raise ValueError("The provided MinIO resource must expose 'client' and 'bucket' keys")
+            return client, bucket, None
+
+        try:
+            return self._init_minio_client(), None, None
+        except Exception as exc:  # pragma: no cover - fallback tested via behaviour
+            fallback_dir = self._prepare_local_fallback()
+            self.logger.warning(
+                "MinIO connection unavailable (%s). Falling back to local storage at %s.",
+                exc,
+                fallback_dir,
+            )
+            return None, None, fallback_dir
+
     def _init_minio_client(self):
         """Initialisation client MinIO"""
         try:
-            import os
             client = boto3.client(
                 's3',
-                endpoint_url='http://minio:9000',
+                endpoint_url=os.getenv('MINIO_ENDPOINT', 'http://minio:9000'),
                 aws_access_key_id=os.getenv('MINIO_USER', 'admin'),
                 aws_secret_access_key=os.getenv('MINIO_PASS', 'BrgmMinio2024!'),
-                region_name='us-east-1'
+                region_name=os.getenv('MINIO_REGION', 'us-east-1')
             )
             client.list_buckets()
             return client
         except Exception as e:
             self.logger.error(f"MinIO connection FAILED: {e}")
-            raise Exception(f"MinIO required for Bronze layer: {e}")
+            raise
+
+    def _prepare_local_fallback(self) -> Path:
+        """Prepare a local directory used when MinIO is unavailable."""
+        base_path = Path(os.getenv("HUBEAU_LOCAL_CACHE", "./data/hubeau_bronze"))
+        base_path.mkdir(parents=True, exist_ok=True)
+        return base_path
     
     async def ingest_api_data(self, config: HubeauApiConfig, date_partition: str) -> Dict[str, Any]:
         """Ingestion complète d'une API Hub'Eau"""
@@ -593,19 +697,27 @@ class HubeauIngestionService:
                 try:
                     # Extraire les codes de stations avec le bon champ selon l'API
                     if stations:
-                        # Déterminer le champ à utiliser selon l'API
-                        if config.name == "hydrobiology":
-                            station_codes = [s.get("code_station_hydrobio", "") for s in stations]
-                        elif config.name in ["piezometry", "ground_water_quality"]:
-                            station_codes = [s.get("code_bss", "") for s in stations]
-                        elif config.name == "prelevements":
-                            station_codes = [s.get("code_ouvrage", "") for s in stations]
-                        else:
-                            station_codes = [s.get("code_station", s.get("code_entite", "")) for s in stations]
-                        
-                        # Filtrer les valeurs vides/None
-                        station_codes = [code for code in station_codes if code and code.strip()]
-                        
+                        entity_field = self._get_entity_key_for_api(config.name)
+                        station_codes = []
+                        for station in stations:
+                            code = station.get(entity_field, "")
+
+                            # Champs de secours pour certaines APIs
+                            if not code:
+                                if config.name == "hydrometry":
+                                    code = station.get("code_entite") or station.get("code_station")
+                                elif config.name in {"piezometry", "ground_water_quality"}:
+                                    code = station.get("code_bss") or station.get("bss_id")
+                                elif config.name == "hydrobiology":
+                                    code = station.get("code_station_hydrobio")
+                                elif config.name == "prelevements":
+                                    code = station.get("code_ouvrage")
+                                else:
+                                    code = station.get("code_station")
+
+                            if code and isinstance(code, str) and code.strip():
+                                station_codes.append(code.strip())
+
                         if not station_codes:
                             self.logger.warning(f"⚠️ Aucun code station valide trouvé pour {endpoint_name}")
                     else:
@@ -692,7 +804,7 @@ class HubeauIngestionService:
             "ground_water_quality": "code_bss",
             "temperature": "code_station",
             "onde": "code_station",
-            "hydrobiology": "code_station",
+            "hydrobiology": "code_station_hydrobio",
             "prelevements": "code_ouvrage"
         }
         return entity_keys.get(api_name, "code_station")
@@ -705,13 +817,17 @@ class HubeauIngestionService:
         metrics: Optional[IngestionMetrics] = None  # ✅ CORRECTIF D
     ):
         """Sauvegarde les données dans MinIO"""
+        if self.minio_client is None:
+            self._save_to_local(api_name, date_partition, results, metrics)
+            return
+
         try:
             # Créer le bucket s'il n'existe pas
             try:
                 self.minio_client.head_bucket(Bucket=self.minio_bucket)
             except ClientError:
                 self.minio_client.create_bucket(Bucket=self.minio_bucket)
-            
+
             # Sauvegarder les métadonnées d'ingestion
             key = f"{api_name}/{date_partition}/ingestion_metadata.json"
             metadata = {
@@ -722,14 +838,14 @@ class HubeauIngestionService:
                 "total_records": sum(r.get('records_count', 0) for r in results.values()),
                 "metrics": metrics.dict() if metrics else {}  # ✅ CORRECTIF D
             }
-            
+
             self.minio_client.put_object(
                 Bucket=self.minio_bucket,
                 Key=key,
-                Body=json.dumps(metadata, indent=2),
+                Body=json.dumps(metadata, indent=2).encode("utf-8"),
                 ContentType='application/json'
             )
-            
+
             # Sauvegarder les données brutes pour chaque endpoint
             for endpoint_name, endpoint_result in results.items():
                 if endpoint_result.get('records_count', 0) > 0:
@@ -738,10 +854,10 @@ class HubeauIngestionService:
                     self.minio_client.put_object(
                         Bucket=self.minio_bucket,
                         Key=data_key,
-                        Body=json.dumps(endpoint_result.get('data', []), indent=2),
+                        Body=json.dumps(endpoint_result.get('data', []), indent=2).encode("utf-8"),
                         ContentType='application/json'
                     )
-                    
+
                     # Métadonnées de l'endpoint
                     endpoint_metadata_key = f"{api_name}/{date_partition}/{endpoint_name}_metadata.json"
                     endpoint_metadata = {
@@ -751,17 +867,69 @@ class HubeauIngestionService:
                         "partition_date": date_partition,
                         "execution_date": datetime.now().isoformat()
                     }
-                    
+
                     self.minio_client.put_object(
                         Bucket=self.minio_bucket,
                         Key=endpoint_metadata_key,
-                        Body=json.dumps(endpoint_metadata, indent=2),
+                        Body=json.dumps(endpoint_metadata, indent=2).encode("utf-8"),
                         ContentType='application/json'
                     )
-            
+
             self.logger.info(f"💾 Données sauvegardées dans MinIO: {key}")
             self.logger.info(f"📊 {len(results)} endpoints avec données brutes sauvegardés")
-            
+
         except Exception as e:
             self.logger.error(f"Erreur sauvegarde MinIO: {e}")
             raise
+
+    def _save_to_local(
+        self,
+        api_name: str,
+        date_partition: str,
+        results: Dict[str, Any],
+        metrics: Optional[IngestionMetrics] = None,
+    ) -> None:
+        """Persist data to the filesystem when MinIO is unavailable."""
+        if self.local_fallback_dir is None:
+            self.logger.warning("Aucun backend de stockage disponible pour %s/%s", api_name, date_partition)
+            return
+
+        base_dir = self.local_fallback_dir / api_name / date_partition
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        metadata = {
+            "api_name": api_name,
+            "partition_date": date_partition,
+            "execution_date": datetime.now().isoformat(),
+            "results_by_endpoint": results,
+            "total_records": sum(r.get('records_count', 0) for r in results.values()),
+            "metrics": metrics.dict() if metrics else {},
+        }
+
+        metadata_path = base_dir / "ingestion_metadata.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        for endpoint_name, endpoint_result in results.items():
+            if endpoint_result.get('records_count', 0) == 0:
+                continue
+
+            data_path = base_dir / f"{endpoint_name}_data.json"
+            data_path.write_text(
+                json.dumps(endpoint_result.get('data', []), indent=2),
+                encoding="utf-8",
+            )
+
+            endpoint_metadata = {
+                "endpoint_name": endpoint_name,
+                "records_count": endpoint_result.get('records_count', 0),
+                "api_name": api_name,
+                "partition_date": date_partition,
+                "execution_date": datetime.now().isoformat(),
+            }
+            metadata_endpoint_path = base_dir / f"{endpoint_name}_metadata.json"
+            metadata_endpoint_path.write_text(
+                json.dumps(endpoint_metadata, indent=2),
+                encoding="utf-8",
+            )
+
+        self.logger.info("💾 Données sauvegardées en local: %s", base_dir)
