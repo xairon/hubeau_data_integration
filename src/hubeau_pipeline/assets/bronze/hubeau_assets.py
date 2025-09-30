@@ -13,7 +13,25 @@ from .hubeau_client import HubeauIngestionService
 from .hubeau_configs import get_all_hubeau_configs
 
 # Configuration des partitions journalières
-DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2024-09-01")
+# Compromis : 3 ans d'historique (~1100 partitions)
+# Note: Température/Hydrobiologie/Piézométrie ont données historiques
+DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
+
+# ⚠️ HYDROMÉTRIE : API v2 limitée aux 30 derniers jours SEULEMENT
+# Restriction Hub'Eau : "date can't be < 1 month from now"
+from datetime import datetime, timedelta
+from dagster import StaticPartitionsDefinition
+
+HYDROMETRY_RECENT_PARTITIONS = DailyPartitionsDefinition(
+    start_date=(datetime.now() - timedelta(days=29)).strftime("%Y-%m-%d"),
+    end_offset=0  # Jusqu'à aujourd'hui
+)
+
+# 💧 PRÉLÈVEMENTS : Partitions annuelles (déclarations de volumes annuels)
+# Note: Dagster n'a pas YearlyPartitionsDefinition, on utilise StaticPartitionsDefinition
+YEARLY_PARTITIONS = StaticPartitionsDefinition(
+    ["2020", "2021", "2022", "2023", "2024", "2025"]
+)
 
 # ====================================
 # HELPER FUNCTIONS
@@ -21,8 +39,16 @@ DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2024-09-01")
 
 async def ingest_hubeau_api(context: AssetExecutionContext, api_name: str) -> Dict[str, Any]:
     """Helper function pour l'ingestion d'une API Hub'Eau"""
-    day = context.partition_key
-    context.log.info(f"🚀 Début ingestion {api_name} Hub'Eau pour {day}")
+    partition_key = context.partition_key
+    
+    # Pour prélèvements : partition_key = "2024" (année)
+    # Pour autres APIs : partition_key = "2024-09-29" (date)
+    if len(partition_key) == 4:  # Année seulement (ex: "2024")
+        day = f"{partition_key}-01-01"  # Utiliser 1er janvier comme date de référence
+    else:
+        day = partition_key
+    
+    context.log.info(f"🚀 Début ingestion {api_name} Hub'Eau pour {partition_key}")
 
     try:
         # Récupération de la configuration
@@ -41,7 +67,7 @@ async def ingest_hubeau_api(context: AssetExecutionContext, api_name: str) -> Di
         context.log.error(f"❌ Erreur ingestion {api_name}: {str(e)}")
         return {
             "execution_date": datetime.now().isoformat(),
-            "partition_date": day,
+            "partition_date": partition_key,  # Utiliser partition_key au lieu de day
             "api_name": api_name,
             "status": "error",
             "error": str(e),
@@ -53,19 +79,21 @@ async def ingest_hubeau_api(context: AssetExecutionContext, api_name: str) -> Di
 # ====================================
 
 @asset(
-    partitions_def=DAILY_PARTITIONS,
+    partitions_def=HYDROMETRY_RECENT_PARTITIONS,  # ⚠️ 30 jours max (restriction API v2)
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
-    description="🌊 Ingestion Hydrométrie Hub'Eau (débits et niveaux des cours d'eau)"
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
+    description="🌊 Ingestion Hydrométrie Hub'Eau (débits et niveaux - ⚠️ 30 derniers jours uniquement)"
 )
 async def hubeau_hydrometry_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingestion hydrométrie Hub'Eau avec vraies APIs"""
+    """Ingestion hydrométrie Hub'Eau - API v2 limitée aux 30 derniers jours"""
     return await ingest_hubeau_api(context, "hydrometry")
 
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
     description="🏔️ Ingestion Piézométrie Hub'Eau (niveaux des nappes phréatiques)"
 )
 async def hubeau_piezometry_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -76,6 +104,7 @@ async def hubeau_piezometry_bronze(context: AssetExecutionContext) -> Dict[str, 
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
     description="🌊 Ingestion Qualité Cours d'Eau Hub'Eau (analyses physico-chimiques)"
 )
 async def hubeau_water_quality_surface_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -86,6 +115,7 @@ async def hubeau_water_quality_surface_bronze(context: AssetExecutionContext) ->
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
     description="🌊 Ingestion Qualité Nappes Hub'Eau (analyses physico-chimiques)"
 )
 async def hubeau_water_quality_groundwater_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -96,6 +126,7 @@ async def hubeau_water_quality_groundwater_bronze(context: AssetExecutionContext
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
     description="🌡️ Ingestion Température Hub'Eau (température des cours d'eau)"
 )
 async def hubeau_temperature_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -106,6 +137,7 @@ async def hubeau_temperature_bronze(context: AssetExecutionContext) -> Dict[str,
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
     description="🌊 Ingestion ONDE Hub'Eau (Opération Nationale Des Étiages)"
 )
 async def hubeau_onde_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -116,6 +148,7 @@ async def hubeau_onde_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
     description="🐟 Ingestion Hydrobiologie Hub'Eau (indices biologiques)"
 )
 async def hubeau_hydrobiology_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -123,13 +156,14 @@ async def hubeau_hydrobiology_bronze(context: AssetExecutionContext) -> Dict[str
     return await ingest_hubeau_api(context, "hydrobiology")
 
 @asset(
-    partitions_def=DAILY_PARTITIONS,
+    partitions_def=YEARLY_PARTITIONS,  # 💧 Partitions ANNUELLES (données de volumes annuels)
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
-    description="💧 Ingestion Prélèvements Hub'Eau (prélèvements en eau)"
+    tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
+    description="💧 Ingestion Prélèvements Hub'Eau (volumes annuels de prélèvements)"
 )
 async def hubeau_prelevements_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingestion prélèvements Hub'Eau avec vraies APIs"""
+    """Ingestion prélèvements Hub'Eau - Données annuelles de volumes prélevés"""
     return await ingest_hubeau_api(context, "prelevements")
 
 @asset(

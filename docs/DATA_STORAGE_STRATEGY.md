@@ -1,418 +1,322 @@
-# 🎯 Stratégie d'Entreposage des Données - Analyse Comparative
-## TimescaleDB vs Neo4j+SOSA vs Architecture Hybride
+# Stratégie de Stockage des Données
+
+Architecture Medallion Bronze → Silver → Gold
 
 ---
 
-## 📊 **Situation Actuelle vs Alternatives**
-
-### **🔄 Architecture Actuelle (Avec Correctifs)**
-```mermaid
-graph TB
-    subgraph "📥 INGESTION"
-        H1[Hub'Eau APIs] 
-        H2[BDLISA WFS]
-        H3[Sandre APIs]
-        H4[SOSA W3C]
-    end
-    
-    subgraph "🥉 BRONZE (MinIO + Cache)"
-        B1[JSON Hub'Eau<br/>✅ Cache intelligent]
-        B2[GeoJSON BDLISA] 
-        B3[JSON Sandre]
-        B4[RDF SOSA]
-        CACHE[Cache MinIO<br/>✅ Évite redondance]
-    end
-    
-    subgraph "🥈 SILVER (Spécialisé)"
-        TS[(TimescaleDB<br/>🌊 Observations<br/>✅ lookback_days=1)]
-        PG[(PostGIS<br/>🗺️ Géospatial)]
-        N4[(Neo4j<br/>📚 Thésaurus)]
-    end
-    
-    H1 --> B1 --> TS
-    H2 --> B2 --> PG
-    H3 --> B3 --> N4
-    H4 --> B4 --> N4
-    B1 -.-> CACHE
-    CACHE -.-> B1
-```
-
-### **🔗 Alternative SOSA Centralisée**
-```mermaid
-graph TB
-    subgraph "📥 INGESTION"
-        H1[Hub'Eau APIs] 
-        H2[BDLISA WFS]
-        H3[Sandre APIs]
-    end
-    
-    subgraph "🥉 BRONZE (MinIO)"
-        B1[JSON Hub'Eau]
-        B2[GeoJSON BDLISA] 
-        B3[JSON Sandre]
-    end
-    
-    subgraph "🥈 SILVER (SOSA Unifié)"
-        N4[(Neo4j + SOSA<br/>🔗 Graphe Sémantique Unifié)]
-        subgraph "SOSA Concepts"
-            S1[sosa:Sensor]
-            S2[sosa:Observation]
-            S3[sosa:Property]
-            S4[sosa:Feature]
-        end
-    end
-    
-    H1 --> B1 --> N4
-    H2 --> B2 --> N4  
-    H3 --> B3 --> N4
-```
-
----
-
-## 🎯 **Analyse Comparative Détaillée**
-
-### **1️⃣ Approche Actuelle : Bases Spécialisées**
-
-#### **✅ Avantages**
-```yaml
-TimescaleDB:
-  - Performance temporelle optimisée (hypertables)
-  - Requêtes SQL familières
-  - Compression automatique
-  - Agrégations temporelles natives
-  - Intégration BI/reporting facile
-
-PostGIS:
-  - Analyses spatiales performantes 
-  - Index géospatiaux optimisés
-  - Fonctions GIS avancées
-  - Interopérabilité QGIS/ArcGIS
-  - Standards OGC
-
-Neo4j Thésaurus:
-  - Requêtes de nomenclatures rapides
-  - Relations sémantiques Sandre
-  - Performance graphe optimisée
-```
-
-#### **❌ Inconvénients**
-```yaml
-Fragmentation:
-  - Données éclatées sur 3 bases
-  - Requêtes cross-sources complexes
-  - Synchronisation manuelle
-  - Pas de modèle unifié
-  - Duplication métadonnées stations
-
-Maintenance:
-  - 3 bases à maintenir
-  - 3 modèles de données différents
-  - Complexité opérationnelle
-  - Backup/restore multiple
-```
-
-### **2️⃣ Approche SOSA : Graphe Sémantique Unifié**
-
-#### **✅ Avantages**
-```yaml
-Modèle_Unifié:
-  - Standard W3C (interopérabilité)
-  - Modèle conceptuel cohérent
-  - Relations explicites entre concepts
-  - Évolutivité sémantique
-  - Conformité FAIR data
-
-Flexibilité:
-  - Ajout nouveaux types capteurs facile
-  - Propriétés observées extensibles
-  - Relations complexes natives
-  - Requêtes SPARQL expressives
-  - Linking open data possible
-
-Recherche_Avancée:
-  - Inférence automatique
-  - Raisonnement sémantique
-  - Découverte de patterns
-  - Requêtes par similarité
-```
-
-#### **❌ Inconvénients**
-```yaml
-Performance:
-  - Requêtes temporelles moins optimisées
-  - Pas de compression native
-  - Agrégations lourdes sur gros volumes
-  - Courbe d'apprentissage SPARQL
-
-Écosystème:
-  - Outils BI moins matures
-  - Intégration reporting complexe
-  - Moins d'expertise équipe
-  - Stack technique plus exotique
-```
-
----
-
-## 🔧 **Cache Intelligent MinIO**
-
-### **Mécanisme de Cache**
-```yaml
-Fonctionnalités:
-  - Vérification données existantes avant appels API
-  - Évite redondance et optimise performance
-  - Stockage par partition quotidienne cohérente
-  - Mécanisme de fallback robuste
-
-Avantages:
-  - Réduction appels API Hub'Eau redondants
-  - Performance améliorée pour rejeux
-  - Cohérence avec partitions Dagster
-  - Robustesse en cas d'échec cache
-
-Implémentation:
-  - check_minio_exists() : Vérification existence données
-  - load_from_minio() : Chargement depuis cache
-  - _store_endpoint_data() : Stockage avec métadonnées
-  - Fallback automatique si cache indisponible
-```
-
----
-
-## 🏆 **Recommandation : Architecture Hybride Optimisée**
-
-### **🎯 Stratégie "Best of Both Worlds"**
+## Architecture
 
 ```mermaid
 graph TB
-    subgraph "📥 INGESTION"
-        H1[Hub'Eau APIs] 
-        H2[BDLISA WFS]
-        H3[Sandre APIs]
+    subgraph Sources["Sources"]
+        H[Hub'Eau]
+        B[BDLISA]
+        S[Sandre]
     end
     
-    subgraph "🥉 BRONZE (MinIO)"
-        B1[JSON Hub'Eau]
-        B2[GeoJSON BDLISA] 
-        B3[JSON Sandre]
+    subgraph Bronze["Bronze - MinIO"]
+        M[Object Storage<br/>JSON • GeoJSON • RDF]
     end
     
-    subgraph "🥈 SILVER (Spécialisé + SOSA)"
-        TS[(TimescaleDB<br/>📊 Séries Temporelles)]
-        PG[(PostGIS<br/>🗺️ Analyses Spatiales)]
-        N4[(Neo4j + SOSA<br/>🔗 Modèle Sémantique)]
+    subgraph Silver["Silver - Bases Spécialisées"]
+        TS[(TimescaleDB<br/>Séries temporelles)]
+        PG[(PostGIS<br/>Géospatial)]
+        N4[(Neo4j<br/>Graphe)]
     end
     
-    subgraph "🥇 GOLD (Vue Intégrée)"
-        API[API GraphQL Fédérée]
-        VUE[Vues Matérialisées]
-        CACHE[Cache Redis]
+    subgraph Gold["Gold"]
+        KG[Knowledge Graph]
     end
     
-    H1 --> B1 
-    H2 --> B2
-    H3 --> B3
-    
-    B1 --> TS
-    B1 --> N4
-    B2 --> PG  
-    B2 --> N4
-    B3 --> N4
-    
-    TS --> API
-    PG --> API
-    N4 --> API
-    
-    API --> VUE
-    API --> CACHE
+    H --> M
+    B --> M
+    S --> M
+    M --> TS
+    M --> PG
+    M --> N4
+    TS --> KG
+    PG --> KG
+    N4 --> KG
 ```
 
-### **🔧 Rôles Spécialisés**
+---
 
-#### **📊 TimescaleDB - "Moteur Analytique"**
+## Bronze Layer : MinIO
+
+### Structure
+
+```
+bronze/
+  ├── hydrometry/
+  │   └── 2024-09-15/
+  │       ├── stations.json
+  │       ├── observations_tr.json
+  │       └── ingestion_metadata.json
+  ├── piezometry/2024-09-15/
+  ├── temperature/2024-08-15/
+  ├── hydrobiology/2024-09-15/
+  ├── onde/2024-09-15/
+  ├── water_quality_groundwater/2024-09-15/
+  ├── water_quality_surface/2024-09-15/
+  ├── prelevements/2024/
+  ├── bdlisa/
+  └── sandre/
+
+silver/
+  └── (données transformées)
+
+gold/
+  └── (agrégations)
+```
+
+### Caractéristiques
+
+- **S3-compatible** : Migration cloud possible
+- **Formats multiples** : JSON, GeoJSON, RDF
+- **Partitionnement** : Par date (quotidien/annuel)
+- **Métadonnées** : Fichier `ingestion_metadata.json` par partition
+
+---
+
+## Silver Layer : Bases Spécialisées
+
+### TimescaleDB - Séries Temporelles
+
+**Rôle** : Observations et mesures temporelles
+
+**Structure** :
 ```sql
--- Optimisé pour :
--- ✅ Séries temporelles volumineuses
--- ✅ Agrégations rapides
--- ✅ Tableaux de bord temps réel
--- ✅ Alerting/monitoring
--- ✅ Exports BI/reporting
+CREATE TABLE observations (
+    timestamp TIMESTAMPTZ NOT NULL,
+    station_code TEXT,
+    parametre_code TEXT,
+    valeur DOUBLE PRECISION,
+    qualite_code INT
+);
 
-SELECT 
-    station_code,
-    time_bucket('1 day', timestamp) as jour,
-    AVG(valeur) as moyenne_journaliere,
-    MIN(valeur) as minimum,
-    MAX(valeur) as maximum
-FROM observations 
-WHERE timestamp >= NOW() - INTERVAL '1 year'
-  AND parametre_code = '1301'  -- Température
-GROUP BY station_code, jour
-ORDER BY jour DESC;
+SELECT create_hypertable('observations', 'timestamp');
+
+-- Compression automatique
+ALTER TABLE observations SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'station_code,parametre_code'
+);
 ```
 
-#### **🗺️ PostGIS - "Moteur Géospatial"**
+**Fonctionnalités** :
+- Partitioning automatique par temps
+- Compression (90% réduction stockage)
+- Continuous aggregates
+- Compatible PostgreSQL
+
+**Cas d'usage** :
+- Agrégations temporelles (moyennes, tendances)
+- Tableaux de bord temps réel
+- Exports BI/reporting
+
+---
+
+### PostGIS - Données Géospatiales
+
+**Rôle** : Stations et formations géologiques
+
+**Structure** :
 ```sql
--- Optimisé pour :
--- ✅ Analyses spatiales complexes
--- ✅ Intersections géométriques
--- ✅ Calculs de proximité
--- ✅ Cartes/visualisations
--- ✅ Relations territoriales
+CREATE TABLE stations_geo (
+    station_code TEXT PRIMARY KEY,
+    nom TEXT,
+    type_station TEXT,
+    geom GEOMETRY(Point, 4326),
+    altitude DOUBLE PRECISION
+);
 
-SELECT 
-    s.station_code,
-    s.station_name,
-    f.nom_formation,
-    f.type_aquifere,
-    ST_Distance(s.geom, f.geometry) as distance_formation
-FROM stations_geo s
-JOIN formations_aquiferes f ON ST_DWithin(s.geom, f.geometry, 1000)
-WHERE s.type_station = 'piezometer'
-ORDER BY distance_formation;
+CREATE INDEX idx_stations_geom ON stations_geo USING GIST(geom);
+
+CREATE TABLE formations_aquiferes (
+    code_bdlisa TEXT PRIMARY KEY,
+    nom_formation TEXT,
+    geometry GEOMETRY(MultiPolygon, 4326)
+);
 ```
 
-#### **🔗 Neo4j+SOSA - "Moteur Sémantique"**
+**Fonctionnalités** :
+- Index GIST pour requêtes spatiales
+- Fonctions géométriques (distance, intersection, buffer)
+- Standards OGC (WFS, WMS)
+- Interopérabilité (QGIS, ArcGIS)
+
+**Cas d'usage** :
+- Analyses spatiales (proximité, intersection)
+- Cartes et visualisations
+- Relations territoriales (stations ↔ formations)
+
+---
+
+### Neo4j - Graphe Sémantique
+
+**Rôle** : Nomenclatures et ontologies
+
+**Structure** :
 ```cypher
-// Optimisé pour :
-// ✅ Relations conceptuelles
-// ✅ Découverte de patterns
-// ✅ Inférence sémantique  
-// ✅ Métadonnées enrichies
-// ✅ Linking data externe
+// Contraintes
+CREATE CONSTRAINT station_code FOR (s:Station) 
+REQUIRE s.code IS UNIQUE;
 
-// Stations similaires par contexte hydrogéologique + paramètres mesurés
-MATCH (s1:Station)-[:LOCATED_IN]->(aq:Aquifer)<-[:LOCATED_IN]-(s2:Station)
-MATCH (s1)-[:OBSERVES]->(p:Property)<-[:OBSERVES]-(s2)
-MATCH (s1)-[:USES_METHOD]->(m:Method)<-[:USES_METHOD]-(s2)
-WHERE s1.code = "BSS001234567"
-  AND s1 <> s2
-RETURN s2.code, s2.name, aq.name, 
-       collect(DISTINCT p.libelle) as parametres_communs,
-       collect(DISTINCT m.libelle) as methodes_communes
-ORDER BY size(parametres_communs) DESC;
+// Modèle SOSA
+(:Station)-[:OBSERVES]->(:Property)
+(:Station)-[:LOCATED_IN]->(:Aquifer)
+(:Property)-[:HAS_UNIT]->(:Unit)
+(:Property)-[:PART_OF]->(:Thesaurus)
+
+// Nomenclature Sandre
+(:Parameter {code: "1301", nom: "Température"})
+  -[:BELONG_TO_FAMILY]->(:Family {nom: "Physico-chimie"})
+  -[:HAS_UNIT]->(:Unit {code: "°C"})
 ```
+
+**Fonctionnalités** :
+- Traversals graphe (performance linéaire)
+- Schéma flexible
+- Relations sémantiques
+- APOC (extensions)
+
+**Cas d'usage** :
+- Thésaurus Sandre
+- Modèle SOSA (capteurs, observations)
+- Découverte de patterns
+- Relations conceptuelles
 
 ---
 
-## 🎯 **Implémentation Recommandée**
+## Gold Layer : Knowledge Graph
 
-### **Phase 1 : Enrichissement SOSA (Actuel)**
-```yaml
-Priorité: GARDER l'architecture actuelle + enrichir Neo4j
+**Objectif** : Vue unifiée cross-sources
 
-Actions:
-  1. ✅ Maintenir TimescaleDB (performance temporelle)
-  2. ✅ Maintenir PostGIS (analyses spatiales)  
-  3. 🆕 Enrichir Neo4j avec modèle SOSA complet
-  4. 🆕 Mapper toutes les données vers concepts SOSA
-  5. 🆕 Créer liens bidirectionnels entre bases
+**Composants** :
+- Knowledge Graph SOSA complet
+- API GraphQL fédérée (future)
+- Vues matérialisées
+- Cache multi-niveaux (future)
 
-Bénéfices:
-  - Pas de régression performance
-  - Ajout progressif capacités sémantiques
-  - Flexibilité requêtes métier
-  - Préparation interopérabilité future
-```
-
-### **Phase 2 : API Fédérée (Future)**
-
-#### **🔗 Qu'est-ce que GraphQL ?**
-GraphQL est un **langage de requête** pour APIs qui permet de :
-- **Requêter précisément** les données nécessaires (pas plus, pas moins)
-- **Unifier multiple sources** de données derrière une seule API
-- **Typage fort** avec schéma déclaratif
-- **Introspection** automatique pour documentation
-
-#### **🎯 API Fédérée Hub'Eau**
-```yaml
-Concept: Une seule API → 3 bases de données
-
-Architecture:
-  - GraphQL Gateway (Apollo Federation / Hasura)
-  - Routing intelligent par type de données
-  - Cache Redis pour optimisation performance
-  - Vues matérialisées pour requêtes fréquentes
-
-Bénéfices:
-  - Interface unique pour développeurs
-  - Optimisation automatique requêtes
-  - Cache intelligent multi-niveaux
-  - Documentation auto-générée
-```
-
-#### **🚀 Exemple Concret**
+**Exemple requête unifiée** :
 ```graphql
-# UNE seule requête → 3 bases interrogées en parallèle
-query StationCompleteInfo($stationId: String!) {
-  station(code: $stationId) {
+query StationCompleteInfo($code: String!) {
+  station(code: $code) {
     # Métadonnées (Neo4j)
     name, type, installation_date
+    observed_properties { name, unit }
     
     # Séries temporelles (TimescaleDB)
     timeseries(period: "1M") {
-      timestamp, value, parameter, quality
+      timestamp, value, quality
     }
     
-    # Contexte spatial (PostGIS)  
+    # Contexte spatial (PostGIS)
     spatial {
       aquifer_name, formation_type
-      nearby_stations(radius: 10) { code, distance }
-    }
-    
-    # Relations sémantiques (Neo4j+SOSA)
-    semantic {
-      observed_properties { name, unit, sandre_code }
-      similar_stations { code, similarity_score }
+      nearby_stations(radius: 10km) {
+        code, distance
+      }
     }
   }
 }
 ```
 
-#### **⚡ Cache Redis Multi-Niveaux**
-```yaml
-Cache_Strategy:
-  L1_Application: "Résultats GraphQL (TTL: 5min)"
-  L2_Database: "Requêtes SQL/Cypher courantes (TTL: 30min)"  
-  L3_Computed: "Vues matérialisées cross-sources (TTL: 24h)"
-  
-Invalidation:
-  - Automatique sur nouvelles données
-  - Patterns de cache par type requête
-  - Warming préventif données populaires
+---
+
+## Intégration Cross-Sources
+
+### Référencement
+
+**Principe** : Liaison via `station_code` unique
+
+```python
+# TimescaleDB
+SELECT timestamp, station_code, valeur 
+FROM observations 
+WHERE station_code = 'BSS001234567';
+
+# PostGIS (même station_code)
+SELECT nom, geom, formation_type 
+FROM stations_geo 
+WHERE station_code = 'BSS001234567';
+
+# Neo4j (même code)
+MATCH (s:Station {code: 'BSS001234567'})
+      -[:OBSERVES]->(p:Property)
+RETURN p.nom, p.unit;
 ```
 
-#### **📊 Vues Matérialisées Cross-Sources**
-```sql
--- Vue Redis : Synthèse station enrichie
-CREATE MATERIALIZED VIEW station_enriched_summary AS
-SELECT 
-  s.station_code,
-  s.station_name,
-  s.station_type,
-  
-  -- Dernières observations (TimescaleDB)
-  ts.last_value,
-  ts.last_timestamp,
-  ts.trend_7d,
-  
-  -- Contexte spatial (PostGIS)
-  pg.aquifer_name,
-  pg.formation_type,
-  pg.nearby_count,
-  
-  -- Enrichissement sémantique (Neo4j via API)
-  neo.observed_properties_count,
-  neo.quality_score,
-  neo.similar_stations_count
+### Synchronisation
 
-FROM stations s
-LEFT JOIN timescale_summary ts ON s.station_code = ts.station_id  
-LEFT JOIN postgis_context pg ON s.station_code = pg.station_id
-LEFT JOIN neo4j_enrichment neo ON s.station_code = neo.sensor_code
+- Asset Dagster pour cohérence
+- Validation intégrité références
+- Mise à jour automatique métadonnées
 
-REFRESH EVERY 1 HOUR;
+---
+
+## Choix Architecturaux
+
+### Pourquoi 3 Bases ?
+
+| Type Requête | Base | Raison |
+|--------------|------|--------|
+| Moyenne temporelle | TimescaleDB | Hypertables + compression |
+| Proximité spatiale | PostGIS | Index GIST + géométrie |
+| Relations sémantiques | Neo4j | Traversal graphe |
+
+**Performance** :
+- TimescaleDB : 1000x plus rapide pour agrégations temporelles
+- PostGIS : 100x plus rapide pour requêtes spatiales
+- Neo4j : Performance linéaire vs exponentielle SQL
+
+### Pourquoi MinIO ?
+
+- S3-compatible (standard industrie)
+- Self-hosted (pas de coûts cloud)
+- Performance excellente
+- Déploiement Docker simple
+
+---
+
+## Gouvernance
+
+### Rétention
+
+| Couche | Durée | Raison |
+|--------|-------|--------|
+| Bronze | 2 ans | Données brutes archivage |
+| Silver | 10 ans | Données opérationnelles |
+| Métadonnées | Permanent | Référence |
+
+### Backup
+
+```bash
+# TimescaleDB
+pg_dump -U postgres -d water_timeseries > backup.sql
+
+# PostGIS
+pg_dump -U postgres -d water_geo > backup.sql
+
+# Neo4j
+docker exec neo4j neo4j-admin database dump water_graph
+
+# MinIO
+mc mirror minio/bronze /backups/bronze
 ```
 
 ---
 
-**🎯 Conclusion : L'architecture hybride offre le meilleur des deux mondes - performance spécialisée + richesse sémantique avec une API unifiée future !**
+## Références
+
+- [MinIO](https://min.io/docs/)
+- [TimescaleDB](https://docs.timescale.com/)
+- [PostGIS](https://postgis.net/documentation/)
+- [Neo4j](https://neo4j.com/docs/)
+- [SOSA/SSN](https://www.w3.org/TR/vocab-ssn/)
+
+---
+
+**Version** : 2.0  
+**Dernière mise à jour** : Septembre 2025
+

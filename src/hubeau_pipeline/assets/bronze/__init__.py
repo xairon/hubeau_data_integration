@@ -16,7 +16,7 @@ from .hubeau_assets import (
     hubeau_ingestion_summary
 )
 
-# Sources externes (legacy)
+# Sources externes (référentiels géographiques et thesaurus)
 from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
 from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 
@@ -33,10 +33,10 @@ hubeau_bronze_assets = [
     hubeau_ingestion_summary
 ]
 
-# Assets externes (legacy)
+# Assets externes (référentiels complémentaires)
 external_bronze_assets = [
-    bdlisa_geographic_bronze_real,
-    sandre_thesaurus_bronze_real
+    bdlisa_geographic_bronze_real,  # BDLISA : Formations géologiques aquifères
+    sandre_thesaurus_bronze_real     # Sandre : Nomenclatures et référentiels
 ]
 
 # Tous les assets bronze
@@ -55,7 +55,7 @@ __all__ = [
     "hubeau_prelevements_bronze",
     "hubeau_ingestion_summary",
     
-    # Assets externes (legacy)
+    # Assets externes (référentiels)
     "external_bronze_assets",
     "bdlisa_geographic_bronze_real",
     "sandre_thesaurus_bronze_real",

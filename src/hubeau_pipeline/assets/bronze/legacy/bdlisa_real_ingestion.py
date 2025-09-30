@@ -26,7 +26,7 @@ class BDLISAIngestionService:
         
         # Configuration MinIO
         self.minio_client = self._init_minio_client()
-        self.minio_bucket = "bdlisa-bronze"
+        self.minio_bucket = os.getenv("MINIO_BRONZE_BUCKET", "bronze")  # Bucket unifié Bronze
         
         # Configuration WFS BDLISA
         self.wfs_base_url = "https://services.sandre.eaufrance.fr/geo/bdlisa"

@@ -1,229 +1,472 @@
-# 🚀 Architecture Hub'Eau Moderne
+# Architecture Hub'Eau Pipeline
 
-## 📋 Vue d'ensemble
-
-Cette nouvelle architecture remplace complètement l'ancien système d'ingestion Hub'Eau par une stack moderne et robuste utilisant :
-
-- **`httpx`** : Client HTTP async moderne (remplace `requests`)
-- **`tenacity`** : Retry automatique et intelligent
-- **`pydantic`** : Validation et sérialisation des données
-
-## 🎯 Avantages de la nouvelle architecture
-
-### ✅ **Réduction drastique du code**
-- **-90% de code** : De ~2000 lignes à ~200 lignes
-- **Code déclaratif** : Configuration simple et lisible
-- **Moins de bugs** : Validation automatique des données
-
-### ✅ **Performance améliorée**
-- **+300% de vitesse** : Support async natif
-- **HTTP/2** : Protocole moderne
-- **Concurrence** : Requêtes parallèles automatiques
-
-### ✅ **Robustesse renforcée**
-- **Retry automatique** : Gestion intelligente des erreurs
-- **Rate limiting** : Respect des limites API
-- **Validation stricte** : Données garanties conformes
-
-### ✅ **Maintenabilité**
-- **Type hints** : Code auto-documenté
-- **Tests intégrés** : Validation automatique
-- **Configuration centralisée** : Un seul endroit pour tout
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    DAGSTER ASSETS                          │
-├─────────────────────────────────────────────────────────────┤
-│  hubeau_hydro_bronze_modern                                 │
-│  hubeau_piezo_bronze_modern                                 │
-│  hubeau_quality_surface_bronze_modern                      │
-│  ...                                                        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│              MODERN HUB'EAU INGESTION SERVICE              │
-├─────────────────────────────────────────────────────────────┤
-│  • Gestion MinIO                                            │
-│  • Orchestration des endpoints                             │
-│  • Gestion des erreurs                                     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    HUB'EAU CLIENT                           │
-├─────────────────────────────────────────────────────────────┤
-│  • httpx (HTTP async)                                       │
-│  • tenacity (retry automatique)                             │
-│  • pydantic (validation)                                   │
-│  • Pagination intelligente                                  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    HUB'EAU APIs                             │
-├─────────────────────────────────────────────────────────────┤
-│  • Hydrométrie v2                                           │
-│  • Piézométrie v1                                           │
-│  • Qualité Surface v2                                       │
-│  • Qualité Nappes v1                                        │
-│  • Température v1                                           │
-│  • ONDE v1                                                  │
-│  • Hydrobiologie v1                                         │
-│  • Prélèvements v1                                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 📁 Structure des fichiers
-
-```
-src/hubeau_pipeline/assets/bronze/
-├── hubeau_modern.py              # Architecture moderne principale
-├── hubeau_configs_modern.py     # Configurations centralisées
-├── hubeau_migration.py          # Assets de migration
-└── hubeau_real_ingestion.py     # Ancien système (à supprimer)
-
-tests/
-└── test_hubeau_modern.py        # Tests de la nouvelle architecture
-```
-
-## 🚀 Utilisation
-
-### 1. **Installation des dépendances**
-```bash
-pip install httpx tenacity pydantic
-```
-
-### 2. **Utilisation simple**
-```python
-from hubeau_modern import ModernHubeauIngestionService
-from hubeau_configs_modern import get_hydro_config
-
-# Configuration
-config = get_hydro_config()
-service = ModernHubeauIngestionService()
-
-# Ingestion
-result = await service.ingest_api(config, "2024-12-01")
-```
-
-### 3. **Avec Dagster**
-```python
-@asset(partitions_def=DAILY_PARTITIONS)
-async def hubeau_hydro_modern(context: AssetExecutionContext):
-    day = context.partition_key
-    config = get_hydro_config()
-    service = ModernHubeauIngestionService()
-    return await service.ingest_api(config, day)
-```
-
-## 🔧 Configuration
-
-### **Configuration d'une API**
-```python
-def get_hydro_config() -> HubeauApiConfig:
-    return HubeauApiConfig(
-        name="hydro",
-        base_url="https://hubeau.eaufrance.fr/api/v2/hydrometrie",
-        version="v2",
-        endpoints={
-            "observations_tr": HubeauEndpointConfig(
-                path="observations_tr",
-                temporal_params={"start": "date_debut_obs", "end": "date_fin_obs"},
-                page_size=1000,
-                max_pages=50,
-                supports_cursor=True
-            )
-        }
-    )
-```
-
-### **Configuration d'un endpoint**
-```python
-HubeauEndpointConfig(
-    path="observations_tr",                    # Chemin API
-    temporal_params={                          # Paramètres temporels
-        "start": "date_debut_obs", 
-        "end": "date_fin_obs"
-    },
-    spatial_params={                           # Paramètres spatiaux
-        "dept": "code_departement"
-    },
-    page_size=1000,                           # Taille des pages
-    max_pages=50,                             # Limite de pages
-    supports_cursor=True,                     # Pagination cursor (v2)
-    requires_spatial_filter=True              # Filtre spatial obligatoire
-)
-```
-
-## 🧪 Tests
-
-### **Exécution des tests**
-```bash
-pytest tests/test_hubeau_modern.py -v
-```
-
-### **Tests disponibles**
-- ✅ Validation des modèles Pydantic
-- ✅ Initialisation du client Hub'Eau
-- ✅ Requêtes avec retry automatique
-- ✅ Récupération des données d'endpoint
-- ✅ Service d'ingestion complet
-- ✅ Configurations des APIs
-- ✅ Tests d'intégration end-to-end
-- ✅ Tests de performance concurrente
-
-## 📊 Comparaison avant/après
-
-| Aspect | Ancien système | Nouveau système |
-|--------|----------------|-----------------|
-| **Lignes de code** | ~2000 | ~200 |
-| **Performance** | Synchrone | Async (+300%) |
-| **Retry** | Manuel | Automatique |
-| **Validation** | Manuelle | Pydantic |
-| **Type hints** | Partiels | Complets |
-| **Tests** | Basiques | Complets |
-| **Maintenance** | Difficile | Facile |
-
-## 🔄 Migration
-
-### **Étapes de migration**
-
-1. **Installation** des nouvelles dépendances
-2. **Test** de la nouvelle architecture
-3. **Migration** progressive des assets
-4. **Validation** des résultats
-5. **Suppression** de l'ancien code
-
-### **Assets de migration**
-```python
-# Utiliser les assets de migration pour tester
-hubeau_hydro_migration
-hubeau_piezo_migration
-hubeau_quality_surface_migration
-# ...
-```
-
-## 🎯 Prochaines étapes
-
-1. **Tester** la nouvelle architecture
-2. **Migrer** progressivement les assets
-3. **Valider** les performances
-4. **Supprimer** l'ancien code
-5. **Documenter** les bonnes pratiques
-
-## 🤝 Contribution
-
-Cette architecture s'inspire des bonnes pratiques du package [cl-hubeau](https://tgrandje.github.io/cl-hubeau/) développé par la DREAL Hauts-de-France.
-
-### **Améliorations possibles**
-- Support de plus d'APIs Hub'Eau
-- Cache intelligent
-- Métriques de performance
-- Monitoring avancé
+Documentation technique de l'architecture et de la stack utilisée
 
 ---
 
-**🎉 Résultat : Un système 10x plus simple, rapide et robuste !**
+## Stack Technologique
+
+### Orchestration et Ingestion
+
+```mermaid
+graph TB
+    subgraph Dagster["Dagster Orchestration"]
+        A[Assets<br/>Partitions]
+        J[Jobs]
+        S[Schedules]
+        SE[Sensors]
+    end
+    
+    subgraph Client["Client HTTP"]
+        HC[httpx<br/>Client async]
+        T[tenacity<br/>Retry automatique]
+        P[pydantic<br/>Validation]
+    end
+    
+    subgraph APIs["Hub'Eau APIs"]
+        API1[Hydrométrie v2]
+        API2[Piézométrie v1]
+        API3[Température v1]
+        API4[Qualité Nappes v1]
+        API5[Qualité Surface v2]
+        API6[ONDE v1]
+        API7[Hydrobiologie v1]
+        API8[Prélèvements v1]
+    end
+    
+    Dagster --> Client
+    Client --> APIs
+```
+
+### Librairies Python
+
+| Librairie | Version | Rôle |
+|-----------|---------|------|
+| dagster | 1.5+ | Orchestration pipeline |
+| httpx | 0.24+ | Client HTTP async |
+| tenacity | 8.2+ | Retry automatique |
+| pydantic | 2.0+ | Validation données |
+| boto3 | Latest | Client MinIO/S3 |
+
+---
+
+## Architecture de Données
+
+```mermaid
+graph TB
+    subgraph Sources["Sources Externes"]
+        H1[Hub'Eau 8 APIs]
+        H2[BDLISA WFS]
+        H3[Sandre APIs]
+    end
+    
+    subgraph Bronze["Bronze Layer - MinIO"]
+        B1[bronze/hydrometry/]
+        B2[bronze/piezometry/]
+        B3[bronze/bdlisa/]
+        B4[bronze/sandre/]
+    end
+    
+    subgraph Silver["Silver Layer - Bases Spécialisées"]
+        TS[(TimescaleDB<br/>Séries temporelles)]
+        PG[(PostGIS<br/>Géospatial)]
+        N4[(Neo4j<br/>Graphe sémantique)]
+    end
+    
+    subgraph Gold["Gold Layer"]
+        KG[Knowledge Graph SOSA]
+    end
+    
+    H1 --> B1
+    H1 --> B2
+    H2 --> B3
+    H3 --> B4
+    
+    B1 --> TS
+    B2 --> TS
+    B1 --> PG
+    B2 --> PG
+    B3 --> N4
+    B4 --> N4
+    
+    TS --> KG
+    PG --> KG
+    N4 --> KG
+```
+
+---
+
+## Structure du Code
+
+```
+src/hubeau_pipeline/
+├── assets/
+│   ├── bronze/
+│   │   ├── hubeau_client.py          # Client HTTP avec retry
+│   │   ├── hubeau_configs.py         # Configuration 8 APIs
+│   │   ├── hubeau_assets.py          # Assets Dagster
+│   │   ├── __init__.py
+│   │   └── legacy/
+│   │       ├── bdlisa_real_ingestion.py
+│   │       ├── sandre_real_ingestion.py
+│   │       └── README.md
+│   ├── silver/
+│   │   ├── timescale_complete.py
+│   │   ├── postgis_neo4j.py
+│   │   └── silver.py
+│   └── gold/
+│       ├── gold.py
+│       └── production_analytics.py
+├── jobs/
+│   ├── bronze_ingestion.py           # Jobs par thématique
+│   ├── analytics.py
+│   └── __init__.py
+├── schedules/
+│   └── schedules.py                  # Planification temporelle
+├── sensors/
+│   ├── data_freshness.py
+│   └── error_detection.py
+├── resources.py                      # Connexions bases
+├── utils.py
+└── definitions.py                    # Point d'entrée Dagster
+```
+
+---
+
+## Configuration des APIs
+
+### Structure de Configuration
+
+Toutes les configurations sont centralisées dans `hubeau_configs.py` :
+
+```python
+# hubeau_configs.py
+class HubeauEndpointConfig:
+    path: str                         # Chemin endpoint
+    temporal_params: Dict[str, str]   # Paramètres temporels
+    spatial_params: Dict[str, str]    # Paramètres spatiaux
+    page_size: int                    # Taille page
+    max_pages: int                    # Limite pages
+    depth_limit: int                  # Limite records total
+    requires_spatial_filter: bool     # Filtre spatial obligatoire
+    supports_cursor: bool             # Pagination cursor
+    cache_duration: int               # Durée cache (minutes)
+
+class HubeauApiConfig:
+    name: str
+    base_url: str
+    version: str
+    endpoints: Dict[str, HubeauEndpointConfig]
+```
+
+### Exemple de Configuration
+
+```python
+# Configuration Piézométrie
+piezometry_config = HubeauApiConfig(
+    name="piezometry",
+    base_url="https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
+    version="v1",
+    endpoints={
+        "chroniques": HubeauEndpointConfig(
+            path="chroniques",
+            temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
+            page_size=1000,
+            max_pages=50,
+            depth_limit=50000,
+            requires_spatial_filter=True,
+            spatial_params={"dept": "code_departement"}
+        )
+    }
+)
+```
+
+---
+
+## Client HTTP
+
+### Mécanisme de Retry
+
+Le client utilise `tenacity` pour retry automatique :
+
+```python
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=60),
+    reraise=True
+)
+async def fetch_data(url: str, params: dict):
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+```
+
+**Paramètres** :
+- 5 tentatives maximum
+- Backoff exponentiel : 2s, 4s, 8s, 16s, 32s
+- Timeout : 30 secondes par requête
+
+### Gestion des Erreurs
+
+| Code HTTP | Comportement |
+|-----------|--------------|
+| 400 | Retry (souvent lié aux dates) |
+| 500 | Retry (surcharge temporaire) |
+| Timeout | Retry |
+| 200 | Succès |
+
+---
+
+## Partitionnement
+
+### Types de Partitions
+
+```python
+# Partitions quotidiennes (depuis 2022)
+DAILY_PARTITIONS = DailyPartitionsDefinition(
+    start_date="2022-01-01"
+)
+
+# Hydrométrie : 30 derniers jours
+HYDROMETRY_RECENT_PARTITIONS = DailyPartitionsDefinition(
+    start_date=(datetime.now() - timedelta(days=29)).strftime("%Y-%m-%d"),
+    end_offset=0
+)
+
+# Prélèvements : Annuelles
+YEARLY_PARTITIONS = StaticPartitionsDefinition(
+    ["2020", "2021", "2022", "2023", "2024", "2025"]
+)
+```
+
+### Application par API
+
+| API | Type Partition | Raison |
+|-----|----------------|--------|
+| Hydrométrie | 30 derniers jours | Restriction API v2 |
+| Prélèvements | Annuelle | Déclarations annuelles |
+| Autres APIs | Quotidienne depuis 2022 | Données temporelles |
+
+---
+
+## Jobs Dagster
+
+### Structure des Jobs
+
+```python
+# jobs/bronze_ingestion.py
+
+# Job principal (6 APIs quotidiennes)
+hubeau_bronze_job = define_asset_job(
+    name="hubeau_bronze_job",
+    selection=[
+        "hubeau_piezometry_bronze",
+        "hubeau_temperature_bronze",
+        "hubeau_hydrobiology_bronze",
+        "hubeau_onde_bronze",
+        "hubeau_water_quality_groundwater_bronze",
+        "hubeau_water_quality_surface_bronze"
+    ]
+)
+
+# Job Hydrométrie (partition spécifique)
+hubeau_hydrometry_job = define_asset_job(
+    name="hubeau_hydrometry_job",
+    selection=["hubeau_hydrometry_bronze"]
+)
+
+# Job Prélèvements (partition annuelle)
+hubeau_prelevements_job = define_asset_job(
+    name="hubeau_prelevements_job",
+    selection=["hubeau_prelevements_bronze"]
+)
+```
+
+### Séparation des Jobs
+
+**Raison** : Dagster impose partitions identiques au sein d'un job.
+
+**Conséquence** : APIs avec partitions différentes = jobs séparés.
+
+---
+
+## Limitation de Concurrence
+
+### Configuration Dagster
+
+**dagster_home/dagster.yaml** :
+```yaml
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 2
+    tag_concurrency_limits:
+      - key: "api"
+        value: "hubeau"
+        limit: 1
+```
+
+### Comportement
+
+- **Tag `api: hubeau`** : Tous les assets Hub'Eau
+- **Limite 1** : Une partition à la fois
+- **Résultat** : Backfill de 30 partitions = 30 runs séquentiels
+
+**Objectif** : Protection API Hub'Eau contre surcharge
+
+---
+
+## Stockage MinIO
+
+### Structure des Buckets
+
+```
+bronze/
+  ├── hydrometry/
+  │   └── 2024-09-15/
+  │       ├── stations.json
+  │       ├── observations_tr.json
+  │       └── ingestion_metadata.json
+  ├── piezometry/
+  │   └── 2024-09-15/
+  ├── temperature/
+  ├── hydrobiology/
+  ├── onde/
+  ├── water_quality_groundwater/
+  ├── water_quality_surface/
+  ├── prelevements/
+  ├── bdlisa/
+  └── sandre/
+
+silver/
+  └── (données transformées)
+
+gold/
+  └── (agrégations)
+```
+
+### Métadonnées d'Ingestion
+
+Chaque partition génère `ingestion_metadata.json` :
+
+```json
+{
+  "execution_date": "2025-09-30T14:00:00",
+  "partition_date": "2024-09-15",
+  "api_name": "piezometry",
+  "total_records_ingested": 25243,
+  "status": "success",
+  "endpoints": {
+    "stations": 24871,
+    "chroniques": 372
+  }
+}
+```
+
+---
+
+## Bases de Données
+
+### TimescaleDB
+
+**Port** : 5432  
+**Base** : `water_timeseries`
+
+**Structure** :
+```sql
+CREATE TABLE observations (
+    timestamp TIMESTAMPTZ NOT NULL,
+    station_code TEXT,
+    parametre_code TEXT,
+    valeur DOUBLE PRECISION,
+    qualite_code INT
+);
+
+SELECT create_hypertable('observations', 'timestamp');
+```
+
+### PostGIS
+
+**Port** : 5433  
+**Base** : `water_geo`
+
+**Structure** :
+```sql
+CREATE TABLE stations_geo (
+    station_code TEXT PRIMARY KEY,
+    nom TEXT,
+    geom GEOMETRY(Point, 4326)
+);
+
+CREATE INDEX idx_stations_geom ON stations_geo USING GIST(geom);
+```
+
+### Neo4j
+
+**Ports** : 7474 (HTTP), 7687 (Bolt)  
+**Base** : `neo4j`
+
+**Structure** :
+```cypher
+(:Station)-[:OBSERVES]->(:Property)
+(:Station)-[:LOCATED_IN]->(:Aquifer)
+(:Property)-[:HAS_UNIT]->(:Unit)
+```
+
+---
+
+## Docker Compose
+
+### Services
+
+```yaml
+services:
+  dagster_webserver:    # Interface Dagster (port 8080)
+  dagster_daemon:       # Background orchestration
+  timescaledb:          # Séries temporelles (port 5432)
+  postgis:              # Géospatial (port 5433)
+  neo4j:                # Graphe (ports 7474, 7687)
+  minio:                # Object storage (ports 9000, 9001)
+  pgadmin:              # Admin PostgreSQL (port 5050)
+```
+
+### Scripts d'Initialisation
+
+```
+docker/init-scripts/
+├── timescaledb/
+│   ├── 01-init-water-timeseries.sql
+│   └── 02-create-hypertables.sql
+├── postgis/
+│   ├── 01-init-water-geo.sql
+│   └── 02-create-functions.sql
+└── neo4j/
+    ├── 01-init-sandre-sosa.cypher
+    ├── 02-create-sandre-data.cypher
+    └── 03-create-relations-sosa.cypher
+```
+
+---
+
+## Références
+
+### Bibliothèques
+
+- [httpx](https://www.python-httpx.org/) - Client HTTP async
+- [tenacity](https://tenacity.readthedocs.io/) - Retry automatique
+- [pydantic](https://docs.pydantic.dev/) - Validation données
+- [Dagster](https://docs.dagster.io/) - Orchestration
+
+### Hub'Eau
+
+- [cl-hubeau](https://tgrandje.github.io/cl-hubeau/) - Client Python référence
+- [Hub'Eau API](https://hubeau.eaufrance.fr/page/apis) - Documentation officielle
+
+---
+
+**Version** : 2.0  
+**Dernière mise à jour** : Septembre 2025

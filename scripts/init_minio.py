@@ -96,37 +96,23 @@ def init_minio_complete():
         print("❌ Impossible de se connecter à MinIO")
         return False
     
-    # Buckets à créer selon notre architecture
+    # Architecture simplifiée : UN bucket par couche (Bronze/Silver/Gold)
+    # Utilise des préfixes pour organiser les données (hubeau/, bdlisa/, sandre/, etc.)
     buckets_config = [
         {
-            'name': 'hubeau-bronze',
-            'description': 'Données brutes Hub\'Eau (JSON)',
+            'name': 'bronze',
+            'description': 'Couche Bronze - Données brutes (Hub\'Eau, BDLISA, Sandre, SOSA)',
             'setup_policy': True
         },
         {
-            'name': 'bdlisa-bronze', 
-            'description': 'Données brutes BDLISA (GML)',
+            'name': 'silver',
+            'description': 'Couche Silver - Données nettoyées et transformées',
             'setup_policy': True
         },
         {
-            'name': 'sandre-bronze',
-            'description': 'Données brutes Sandre (JSON)',
+            'name': 'gold',
+            'description': 'Couche Gold - Données analytiques et agrégées',
             'setup_policy': True
-        },
-        {
-            'name': 'sosa-bronze',
-            'description': 'Ontologies SOSA/SSN (RDF)',
-            'setup_policy': True
-        },
-        {
-            'name': 'pipeline-logs',
-            'description': 'Logs et métadonnées pipeline',
-            'setup_policy': False
-        },
-        {
-            'name': 'backup-data',
-            'description': 'Sauvegardes et archives',
-            'setup_policy': False
         }
     ]
     
@@ -144,12 +130,13 @@ def init_minio_complete():
                 setup_bucket_policy(client, bucket_name)
         
     # Test de stockage
-    test_bucket = 'hubeau-bronze'
+    test_bucket = 'bronze'
     test_data = {
         'initialization': True,
         'timestamp': datetime.now().isoformat(),
         'pipeline': 'Hub\'Eau Data Integration',
-        'version': '1.0',
+        'version': '2.0',
+        'architecture': 'Simplified - One bucket per layer (bronze/silver/gold)',
         'buckets_created': [b['name'] for b in buckets_config],
         'status': 'MinIO ready for production'
     }
