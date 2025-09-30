@@ -1,5 +1,5 @@
 # Configuration Dagster pour Hub'Eau
-# Configuration simple pour le développement
+# Configuration avec limitations pour protéger les APIs externes
 
 storage:
   postgres:
@@ -8,6 +8,17 @@ storage:
       db_name: dagster
       username: postgres
       password: BrgmDagster2024!
+
+# Limitation des exécutions concurrentes pour éviter de surcharger Hub'Eau
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 2  # ✅ Maximum 2 partitions en parallèle (protection API Hub'Eau)
+    tag_concurrency_limits:
+      - key: "api"
+        value: "hubeau"
+        limit: 1  # ✅ Une seule exécution Hub'Eau à la fois
 
 telemetry:
   enabled: false

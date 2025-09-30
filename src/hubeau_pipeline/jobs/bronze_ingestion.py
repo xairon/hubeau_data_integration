@@ -6,36 +6,45 @@ Jobs correspondant à la nouvelle structure des assets
 from dagster import AssetSelection, define_asset_job
 
 # ================================
-# JOB 1 : HUB'EAU BRONZE COMPLET
+# JOB 1 : HUB'EAU BRONZE COMPLET (sans Hydrométrie)
 # ================================
+# Note: Hydrométrie exclu car partitions différentes (30 jours vs 3 ans)
 
 hubeau_bronze_job = define_asset_job(
     name="hubeau_bronze_job",
-    description="🌊 Hub'Eau Bronze - Toutes les APIs Hub'Eau",
+    description="🌊 Hub'Eau Bronze - APIs avec partitions quotidiennes",
     selection=AssetSelection.assets(
-        "hubeau_hydrometry_bronze",
+        # "hubeau_hydrometry_bronze",   # ❌ Exclu - partitions 30 jours (restriction API)
+        # "hubeau_prelevements_bronze",  # ❌ Exclu - partitions annuelles (données annuelles)
         "hubeau_piezometry_bronze",
         "hubeau_water_quality_surface_bronze",
         "hubeau_water_quality_groundwater_bronze",
         "hubeau_temperature_bronze",
         "hubeau_onde_bronze",
         "hubeau_hydrobiology_bronze",
-        "hubeau_prelevements_bronze",
         "hubeau_ingestion_summary",
     ),
 )
 
 # ================================
-# JOB 2 : HUB'EAU HYDROLOGIE
+# JOB 1B : HYDROMÉTRIE (30 jours seulement)
 # ================================
+
+hubeau_hydrometry_job = define_asset_job(
+    name="hubeau_hydrometry_job",
+    description="🌊 Hydrométrie Hub'Eau - ⚠️ 30 derniers jours uniquement (restriction API v2)",
+    selection=AssetSelection.assets("hubeau_hydrometry_bronze"),
+)
+
+# ================================
+# JOB 2 : HUB'EAU HYDROLOGIE (Piézométrie uniquement)
+# ================================
+# Note: Hydrométrie a son propre job (partitions incompatibles)
 
 hubeau_hydrology_job = define_asset_job(
     name="hubeau_hydrology_job",
-    description="🌊 Hub'Eau Hydrologie - Hydrométrie et Piézométrie",
-    selection=AssetSelection.assets(
-        "hubeau_hydrometry_bronze",
-        "hubeau_piezometry_bronze",
-    ),
+    description="🏔️ Hub'Eau Hydrologie - Piézométrie uniquement",
+    selection=AssetSelection.assets("hubeau_piezometry_bronze"),
 )
 
 # ================================
@@ -107,12 +116,13 @@ sandre_bronze_job = define_asset_job(
 
 # Jobs Hub'Eau
 hubeau_jobs = [
-    hubeau_bronze_job,
-    hubeau_hydrology_job,
-    hubeau_water_quality_job,
-    hubeau_environment_job,
-    hubeau_prelevements_job,
-    hubeau_summary_job
+    hubeau_bronze_job,           # Toutes APIs sauf Hydrométrie
+    hubeau_hydrometry_job,       # Hydrométrie seule (30 jours max)
+    hubeau_hydrology_job,        # Piézométrie uniquement
+    hubeau_water_quality_job,    # Qualité Eau
+    hubeau_environment_job,      # Température, ONDE, Hydrobiologie
+    hubeau_prelevements_job,     # Prélèvements
+    hubeau_summary_job           # Synthèse
 ]
 
 # Jobs externes (legacy)

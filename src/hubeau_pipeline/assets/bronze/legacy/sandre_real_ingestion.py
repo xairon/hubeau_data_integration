@@ -26,7 +26,7 @@ class SandreIngestionService:
         
         # Configuration MinIO
         self.minio_client = self._init_minio_client()
-        self.minio_bucket = "sandre-bronze"
+        self.minio_bucket = os.getenv("MINIO_BRONZE_BUCKET", "bronze")  # Bucket unifié Bronze
         
         # Configuration APIs Sandre
         self.sandre_base_url = "https://api.sandre.eaufrance.fr"

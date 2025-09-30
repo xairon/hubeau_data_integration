@@ -25,7 +25,14 @@ def get_all_hubeau_configs() -> Dict[str, HubeauApiConfig]:
     }
 
 def get_hydrometry_config() -> HubeauApiConfig:
-    """Configuration API Hydrométrie"""
+    """
+    Configuration API Hydrométrie
+    
+    ⚠️ RESTRICTION CRITIQUE API v2 : Accès limité aux 30 derniers jours UNIQUEMENT
+    - Erreur 400 si date_debut_obs < 30 jours
+    - Pas d'accès à l'historique ancien
+    - Utiliser obs_elab pour données élaborées (même restriction)
+    """
     return HubeauApiConfig(
         name="hydrometry",
         base_url="https://hubeau.eaufrance.fr/api/v2/hydrometrie",
@@ -208,9 +215,10 @@ def get_temperature_config() -> HubeauApiConfig:
                        path="chronique",
                        temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
                        page_size=1000,
-                       max_pages=20,
+                       max_pages=100,  # Augmenté pour récupération nationale
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour chroniques
+                       requires_spatial_filter=False,  # ❌ L'API ne supporte PAS le filtre code_departement
+                       depth_limit=200000  # Limite très élevée pour chroniques nationales
                    )
         }
     )
@@ -310,11 +318,11 @@ def get_prelevements_config() -> HubeauApiConfig:
                        path="chroniques",
                        temporal_params={"start": "annee_min", "end": "annee_max"},  # CORRIGÉ: paramètres temporels annuels
                        page_size=1000,
-                       max_pages=20,
+                       max_pages=100,  # ✅ Augmenté pour éviter troncature (100k records/groupe max)
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour chroniques
+                       depth_limit=500000  # ✅ Augmenté pour permettre récupération complète
                    )
         }
     )

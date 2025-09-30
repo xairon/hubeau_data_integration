@@ -1,158 +1,322 @@
-# 🌊 Hub'Eau Data Integration Pipeline
-## Pipeline de Données Hydrologiques Françaises - Architecture Moderne
+# Hub'Eau Data Integration Pipeline
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-311/)
-[![Dagster](https://img.shields.io/badge/orchestrator-Dagster-orange.svg)](https://dagster.io/)
-[![Docker](https://img.shields.io/badge/deployment-Docker-blue.svg)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+Pipeline d'intégration des données hydrologiques françaises - Architecture Bronze/Silver/Gold avec Dagster
 
 ---
 
-## 🎯 **Vision & Objectifs**
+## Vue d'Ensemble
 
-Ce pipeline **modernise l'intégration des données hydrologiques françaises** en unifiant **8 APIs Hub'Eau officielles** avec les **référentiels nationaux** (BDLISA géologique, Sandre thématique) et les **standards internationaux** (SOSA/SSN W3C).
+Pipeline intégrant **8 APIs Hub'Eau** avec gestion des erreurs, retry automatique, et limitation de concurrence pour protéger les APIs externes.
 
-### **🌟 Pourquoi ce Projet ?**
+### Caractéristiques
 
-#### **🔄 Défis Actuels**
-- **Fragmentation** : Données éparpillées sur 8+ APIs différentes
-- **Hétérogénéité** : Formats, unités, nomenclatures variables
-- **Volume** : 140K+ observations/jour en production
-- **Complexité** : Croisement spatial, temporel, thématique difficile
-
-#### **🚀 Solutions Apportées**
-- **Pipeline unifié** : Ingestion automatisée 8 APIs Hub'Eau
-- **Architecture moderne** : Dagster + Docker + bases spécialisées
-- **Modèle sémantique** : Standards W3C pour interopérabilité
-- **Architecture modulaire** : Scaling et maintenance optimisés
+- **8 APIs Hub'Eau** intégrées avec configurations optimisées
+- **Architecture Medallion** : Bronze (MinIO) → Silver (DBs spécialisées) → Gold
+- **Retry automatique** avec Tenacity (gestion erreurs HTTP)
+- **Limitation de concurrence** (protection Hub'Eau)
+- **Partitions adaptées** par API (quotidiennes, 30 jours, annuelles)
 
 ---
 
-## 📊 **Sources de Données Intégrées**
+## Architecture
 
-### **🌊 8 APIs Hub'Eau Officielles**
-| **API** | **Stations** | **Données** | **Fréquence** |
-|---------|--------------|-------------|---------------|
-| **🏔️ Piézométrie** | ~1,500 | Niveaux nappes | Horaire |
-| **🌊 Hydrométrie** | ~3,000 | Débits/hauteurs | Temps réel |
-| **🧪 Qualité Surface** | ~2,000 | Analyses physicochimiques | Hebdomadaire |
-| **🧪 Qualité Nappes** | ~1,200 | Analyses souterraines | Mensuelle |
-| **🌡️ Température** | ~800 | Température continue | Horaire |
-| **🌊 Écoulement ONDE** | ~3,200 | Observations visuelles | Saisonnière |
-| **🐟 Hydrobiologie** | ~1,500 | Indices biologiques | Campagnes |
-| **🚰 Prélèvements** | National | Volumes prélevés | Déclarations |
+```mermaid
+graph TB
+    subgraph Sources["Sources Externes"]
+        H1[Hub'Eau APIs]
+        H2[BDLISA]
+        H3[Sandre]
+    end
+    
+    subgraph Orchestration["Orchestration"]
+        D[Dagster<br/>Assets • Jobs • Schedules]
+    end
+    
+    subgraph Bronze["Bronze Layer"]
+        M[MinIO Object Storage<br/>JSON • GeoJSON • RDF]
+    end
+    
+    subgraph Silver["Silver Layer"]
+        TS[(TimescaleDB<br/>Séries temporelles)]
+        PG[(PostGIS<br/>Géospatial)]
+        N4[(Neo4j<br/>Graphe sémantique)]
+    end
+    
+    subgraph Gold["Gold Layer"]
+        KG[Knowledge Graph<br/>SOSA]
+    end
+    
+    H1 --> D
+    H2 --> D
+    H3 --> D
+    D --> M
+    M --> TS
+    M --> PG
+    M --> N4
+    TS --> KG
+    PG --> KG
+    N4 --> KG
+```
 
-### **🗺️ Référentiels Nationaux**
-- **BDLISA** (BRGM) : Formations aquifères, contexte hydrogéologique
-- **Sandre** (OFB) : Nomenclatures officielles, thésaurus eau
+### Stack Technologique
 
-### **🔗 Standards Internationaux**
-- **SOSA/SSN** (W3C) : Ontologie capteurs/observations pour interopérabilité
+**Orchestration**
+- Dagster 1.5+ : Pipeline, assets, jobs, schedules
+
+**Bronze (Data Lake)**
+- MinIO : Object Storage S3-compatible
+- httpx : Client HTTP async
+- tenacity : Retry automatique
+- pydantic : Validation données
+
+**Silver (Bases spécialisées)**
+- TimescaleDB : Séries temporelles
+- PostGIS : Données géospatiales
+- Neo4j : Graphe sémantique
+
+**Infrastructure**
+- Docker Compose : Multi-container orchestration
 
 ---
 
-## 🚀 **Quick Start**
+## APIs Hub'Eau Intégrées
 
-### **⚡ Démarrage Rapide (5 minutes)**
+| API | Stations | Fréquence | Partitions | Restriction |
+|-----|----------|-----------|------------|-------------|
+| Hydrométrie | 10,943 | Temps réel | 30 derniers jours | API v2 limitée |
+| Piézométrie | 24,871 | Horaire/Quotidienne | Depuis 2022 | - |
+| Température | 849 | Sporadique | Depuis 2022 | - |
+| Qualité Nappes | 52,472 | Trimestrielle | Depuis 2022 | - |
+| Qualité Cours d'Eau | 20,000+ | Continue | Depuis 2022 | - |
+| Hydrobiologie | 20,546 | Saisonnière | Depuis 2022 | - |
+| ONDE | 3,548 | Mensuelle | Depuis 2022 | - |
+| Prélèvements | National | Annuelle | Annuelles | - |
+
+📖 [Documentation fréquences complètes](docs/HUBEAU_DATA_FREQUENCIES.md)
+
+---
+
+## Quick Start
+
+### Prérequis
+
+- Docker & Docker Compose
+- 10 GB d'espace disque minimum
+- Connexion Internet (accès APIs Hub'Eau)
+
+### Installation
 
 ```bash
-# 1. Clone du repository
-git clone https://github.com/your-org/hubeau-pipeline
-cd hubeau-pipeline
+# Cloner le repository
+git clone <repo>
+cd brgm
 
-# 2. Configuration environnement
+# Configuration
 cp env.example .env
-# Éditer .env avec vos credentials
+# Éditer .env si nécessaire
 
-# 3. Démarrage infrastructure complète
+# Démarrer les services
 docker-compose up -d
 
-# 4. Vérification santé
-docker-compose exec timescaledb pg_isready
-docker-compose exec neo4j cypher-shell "RETURN 'Neo4j ready'"
-docker-compose exec postgis pg_isready -p 5432
-
-# 5. Interface Dagster
-open http://localhost:3000
+# Vérifier l'état
+docker-compose ps
 ```
 
-### **🎛️ Services Disponibles**
-| **Service** | **URL** | **Usage** |
-|-------------|---------|-----------|
-| **Dagster UI** | http://localhost:3000 | Interface orchestration |
-| **MinIO Console** | http://localhost:9001 | Stockage objets |
-| **Neo4j Browser** | http://localhost:7474 | Exploration graphe |
-| **pgAdmin** | http://localhost:5050 | Administration PostgreSQL |
-| **TimescaleDB** | localhost:5432 | Connexion directe |
-| **PostGIS** | localhost:5433 | Connexion directe |
+### Accès aux Interfaces
+
+| Service | URL | Identifiants |
+|---------|-----|--------------|
+| Dagster UI | http://localhost:8080 | - |
+| MinIO Console | http://localhost:9001 | admin / BrgmMinio2024! |
+| Neo4j Browser | http://localhost:7474 | neo4j / BrgmNeo4j2024! |
+| pgAdmin | http://localhost:5050 | admin@brgm.fr / BrgmPgAdmin2024! |
 
 ---
 
-## 📊 **Architecture & Performance**
+## Structure du Projet
 
-### **🥉🥈🥇 Medallion Architecture**
-- **Bronze** : Données brutes (MinIO Object Storage)
-- **Silver** : Bases spécialisées (TimescaleDB + PostGIS + Neo4j)
-- **Gold** : Knowledge Graph unifié (SOSA/Future)
+```
+brgm/
+├── src/hubeau_pipeline/
+│   ├── assets/
+│   │   ├── bronze/
+│   │   │   ├── hubeau_client.py      # Client HTTP (httpx + tenacity)
+│   │   │   ├── hubeau_configs.py     # Configurations APIs
+│   │   │   ├── hubeau_assets.py      # Assets Dagster
+│   │   │   └── legacy/
+│   │   │       ├── bdlisa_real_ingestion.py
+│   │   │       └── sandre_real_ingestion.py
+│   │   ├── silver/                   # Transformations
+│   │   └── gold/                     # Analytics
+│   ├── jobs/
+│   │   └── bronze_ingestion.py       # Jobs par thématique
+│   ├── schedules/
+│   │   └── schedules.py              # Planification
+│   ├── sensors/
+│   │   ├── data_freshness.py
+│   │   └── error_detection.py
+│   ├── resources.py                  # Connexions bases
+│   └── definitions.py
+│
+├── docker/
+│   ├── dagster/Dockerfile
+│   └── init-scripts/                 # Scripts SQL/Cypher init
+│
+├── docs/                             # Documentation
+├── dagster_home/
+│   └── dagster.yaml                  # Config concurrence
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
+```
 
-### **🎯 Configuration Développement**
+---
+
+## Configuration
+
+### Limitation de Concurrence
+
+**dagster_home/dagster.yaml** :
 ```yaml
-APIs_Intégrées: 8 (Hub'Eau + externes)
-Sources_Données: 11 total
-Bases_Spécialisées: 3 (TimescaleDB + PostGIS + Neo4j)
-Orchestration: Dagster (assets + jobs + schedules)
-Cache_Intelligent: ✅ Vérification données existantes avant appels API
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 2
+    tag_concurrency_limits:
+      - key: "api"
+        value: "hubeau"
+        limit: 1  # Une partition Hub'Eau à la fois
+```
+
+**Résultat** : Protection contre surcharge des APIs Hub'Eau
+
+### Buckets MinIO
+
+```
+bronze/   # Données brutes
+  ├── hydrometry/2024-09-15/
+  ├── piezometry/2024-09-15/
+  ├── temperature/2024-08-15/
+  └── ...
+
+silver/   # Données transformées
+
+gold/     # Agrégations
 ```
 
 ---
 
-## 🔬 **Vision Future : Knowledge Graph & IA**
+## Jobs Dagster
 
-### **🧠 Couche SOSA/KG (Non Implémentée)**
+| Job | Description | APIs |
+|-----|-------------|------|
+| `hubeau_bronze_job` | APIs quotidiennes | 6 APIs |
+| `hubeau_hydrometry_job` | Hydrométrie | Hydrométrie (30j) |
+| `hubeau_environment_job` | Environnement | Température, ONDE, Hydrobio |
+| `hubeau_water_quality_job` | Qualité eau | Cours d'eau + Nappes |
+| `hubeau_prelevements_job` | Prélèvements | Prélèvements (annuel) |
 
-Cette couche représente l'**évolution future** du pipeline vers un **Knowledge Graph unifié** :
+### Lancer une Ingestion
 
-#### **🎯 Objectifs Visionnaires**
-- **Business Intelligence** : Dashboards cross-sources unifiés
-- **Machine Learning** : Entraînement modèles sur graphe enrichi
-- **Explicabilité** : Traçabilité complète observations
-- **Recherche Naturelle** : Interface conversationnelle LLM
+```bash
+# Via Dagster UI
+http://localhost:8080 → Jobs → Launch Run
 
-#### **🚀 Technologies Envisagées**
-- **GraphRAG** : Retrieval-Augmented Generation sur graphe
-- **Neo4j Vector Search** : Embeddings sémantiques
-- **LangChain/LlamaIndex** : Orchestration LLM + graphe
+# Via CLI
+docker-compose exec dagster_webserver dagster asset materialize \
+  --select hubeau_piezometry_bronze \
+  --partition 2024-09-15
+```
+
+### Backfill Historique
+
+```bash
+docker-compose exec dagster_webserver dagster asset materialize \
+  --select hubeau_piezometry_bronze \
+  --partition-range 2024-09-01:2024-09-30
+```
+
+**Note** : Les runs sont séquentiels (1 à la fois) pour protéger Hub'Eau
 
 ---
 
-## 📚 **Documentation Complète**
+## Restrictions API
 
-### **📖 Guides Techniques**
-- [📊 Sources de Données Complètes](docs/DATA_SOURCES_COMPLETE.md)
-- [🏗️ Architecture Technique](docs/TECHNICAL_ARCHITECTURE.md)  
-- [🔗 Vision SOSA/Knowledge Graph](docs/SOSA_FUTURE_VISION.md)
-- [🎯 Stratégie Stockage Données](docs/DATA_STORAGE_STRATEGY.md)
+### Hydrométrie v2
+
+```
+Accès limité aux 30 derniers jours UNIQUEMENT
+Erreur 400 si date < 30 jours
+Source: API Hub'Eau v2
+```
+
+### Données Sporadiques
+
+Certaines APIs ont des données intermittentes :
+- **Température** : 50-80% des jours sans données
+- **Hydrobiologie** : 70% des jours sans données (saisonnier)
+- **Qualité Nappes** : 95%+ des jours sans données (trimestriel)
+
+**Comportement normal** : Les agrégations se font en couches Silver/Gold
 
 ---
 
-## 🔧 **Développement**
+## Documentation
 
-### **📁 Structure**
-```
-src/hubeau_pipeline/
-├── assets/              # Assets Dagster (Bronze/Silver/Gold)
-│   ├── bronze/
-│   │   ├── hubeau_configs.py      # ✅ Configurations centralisées
-│   │   ├── hubeau_real_ingestion.py # ✅ Ingestion 8 APIs Hub'Eau
-│   │   ├── bdlisa_real_ingestion.py  # ✅ Référentiel géologique
-│   │   └── sandre_real_ingestion.py  # ✅ Nomenclatures Sandre
-│   ├── silver/          # Transformations spécialisées
-│   └── gold/            # Analytics & KG (Future)
-├── jobs/                # Jobs orchestration
-├── resources.py         # Connexions bases données (sans Redis)
-├── schedules/           # Planification temporelle
-└── sensors/             # Surveillance & alerting
-```
+### Guides Principaux
 
-### **🧪 Tests**
-```
+- [📊 Fréquences de Mise à Jour](docs/HUBEAU_DATA_FREQUENCIES.md)
+- [🌊 Sources de Données](docs/DATA_SOURCES_COMPLETE.md)
+- [🏗️ Architecture Technique](docs/TECHNICAL_ARCHITECTURE.md)
+- [💾 Stratégie de Stockage](docs/DATA_STORAGE_STRATEGY.md)
+- [🚀 Architecture](docs/ARCHITECTURE_MODERNE.md)
+
+### Documents de Référence
+
+- [🔗 Vision SOSA/KG](docs/SOSA_FUTURE_VISION.md)
+- [✅ Correctifs Hydrobiologie](docs/HYDROBIO_FIXES_COMPLETE.md)
+- [🔍 Code Review](docs/CODE_REVIEW.md)
+
+---
+
+## Bases de Données
+
+### Connexions Directes
+
+| Base | Port | Utilisateur | Base de données |
+|------|------|-------------|-----------------|
+| TimescaleDB | 5432 | postgres | water_timeseries |
+| PostGIS | 5433 | postgres | water_geo |
+| Neo4j | 7687 | neo4j | neo4j |
+
+### Initialisation
+
+Les scripts d'initialisation sont dans `docker/init-scripts/` :
+- TimescaleDB : Hypertables et compression
+- PostGIS : Extensions spatiales et fonctions
+- Neo4j : Contraintes et données Sandre/SOSA
+
+---
+
+## Ressources Externes
+
+### Hub'Eau Officiel
+
+- [Portail Hub'Eau](https://hubeau.eaufrance.fr/page/apis)
+- [Documentation APIs](https://hubeau.eaufrance.fr/page/apis)
+
+### Bibliothèques de Référence
+
+- [cl-hubeau](https://tgrandje.github.io/cl-hubeau/) - Client Python référence
+- [Dagster](https://docs.dagster.io/) - Documentation orchestration
+
+### Open Data
+
+- [data.gouv.fr - Hub'Eau](https://www.data.gouv.fr/dataservices/)
+
+---
+
+## License
+
+MIT License

@@ -397,10 +397,13 @@ class HubeauClient:
                 # Chunking systématique si trop de codes (évite URL too long)
                 # Hydrobiologie : limite URL ≈2083 caractères → chunks plus petits
                 # Hydrométrie observations_tr : beaucoup de données par station → chunks réduits
+                # Température : API sensible aux URL longues → chunks réduits
                 if api_name_actual == "hydrobiology":
                     MAX_CODES_PER_REQUEST = 25
                 elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
                     MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter surcharge
+                elif api_name_actual == "temperature":
+                    MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter erreurs 500
                 else:
                     MAX_CODES_PER_REQUEST = 50
                 

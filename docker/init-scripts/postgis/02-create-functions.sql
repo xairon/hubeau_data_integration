@@ -199,14 +199,26 @@ CREATE TRIGGER update_stations_geo_updated_at BEFORE UPDATE
 -- ==========================================
 
 -- Utilisateur lecture seule pour les dashboards
-CREATE USER IF NOT EXISTS geo_dashboard_user WITH PASSWORD 'GeoDashboard2024!';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'geo_dashboard_user') THEN
+    CREATE USER geo_dashboard_user WITH PASSWORD 'GeoDashboard2024!';
+  END IF;
+END
+$$;
 GRANT CONNECT ON DATABASE water_geo TO geo_dashboard_user;
 GRANT USAGE ON SCHEMA public TO geo_dashboard_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO geo_dashboard_user;
 GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA public TO geo_dashboard_user;
 
 -- Utilisateur analytics géospatial
-CREATE USER IF NOT EXISTS geo_analytics_user WITH PASSWORD 'GeoAnalytics2024!';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'geo_analytics_user') THEN
+    CREATE USER geo_analytics_user WITH PASSWORD 'GeoAnalytics2024!';
+  END IF;
+END
+$$;
 GRANT CONNECT ON DATABASE water_geo TO geo_analytics_user;
 GRANT USAGE ON SCHEMA public TO geo_analytics_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO geo_analytics_user;
