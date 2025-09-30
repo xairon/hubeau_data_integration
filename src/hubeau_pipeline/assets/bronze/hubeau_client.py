@@ -5,16 +5,15 @@ Architecture robuste et performante pour l'ingestion des données Hub'Eau
 
 import asyncio
 import json
+import os
 import random
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import httpx
 from tenacity import (
-    retry, 
-    stop_after_attempt, 
-    wait_exponential, 
+    stop_after_attempt,
+    wait_exponential,
     retry_if_exception_type,
     before_sleep_log,
     AsyncRetrying  # ✅ CORRECTIF C: Pour retries dynamiques
@@ -22,6 +21,7 @@ from tenacity import (
 from pydantic import BaseModel, Field, validator
 from dagster import get_dagster_logger
 import boto3
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 logger = get_dagster_logger()
@@ -165,14 +165,16 @@ class HubeauClient:
         self.logger.info(f"🌍 Récupération stations {endpoint_name} pour TOUT LE TERRITOIRE FRANÇAIS")
         self.logger.info(f"📊 Découpage spatial: {len(all_departments)} départements en {len(dept_chunks)} groupes (chunk_size={chunk_size})")
         
+        spatial_param_key = self._resolve_spatial_param(endpoint_config)
+
         for i, dept_chunk in enumerate(dept_chunks):
             self.logger.info(f"🌍 Groupe {i+1}/{len(dept_chunks)}: départements {dept_chunk}")
-            
+
             # Paramètres pour ce chunk
             params = {
-                "format": "json", 
+                "format": "json",
                 "size": endpoint_config.page_size,
-                endpoint_config.spatial_params["dept"]: ",".join(dept_chunk)
+                spatial_param_key: ",".join(dept_chunk)
             }
             
             # Récupérer toutes les pages pour ce chunk
@@ -227,14 +229,16 @@ class HubeauClient:
                     raise
                 self.logger.error(f"Erreur page {page}: {e}")
                 break
-        
-        # ✅ CORRECTIF: Warning si on atteint max_pages (possible troncature)
-        if page > endpoint_config.max_pages and len(all_data) == endpoint_config.max_pages * params["size"]:
+
+        expected_records_cap = endpoint_config.max_pages * params.get("size", endpoint_config.page_size)
+        if page > endpoint_config.max_pages and len(all_data) >= expected_records_cap:
             self.logger.warning(
-                f"⚠️ TRONCATURE: max_pages={endpoint_config.max_pages} atteint pour {endpoint_config.path}. "
-                f"Récupéré {len(all_data)} records, mais il pourrait y en avoir plus !"
+                "⚠️ TRONCATURE: max_pages=%s atteint pour %s. Récupéré %s records, mais il pourrait y en avoir plus !",
+                endpoint_config.max_pages,
+                endpoint_config.path,
+                len(all_data),
             )
-        
+
         return all_data
     
     async def get_observations(
@@ -300,7 +304,7 @@ class HubeauClient:
         if endpoint_config.requires_spatial_filter and endpoint_config.spatial_params:
             # APPROCHE SPATIALE (départements)
             all_departments = self._get_french_departments()
-        
+
             # Chunking adaptatif selon la profondeur limite et l'API
             depth_limit = getattr(endpoint_config, 'depth_limit', None)
             
@@ -322,15 +326,15 @@ class HubeauClient:
             MAX_CONCURRENT_SPATIAL = 4 if self.config.name == "hydrobiology" else 10
             semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPATIAL)
             self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT_SPATIAL} requêtes simultanées")
-            
+
+            spatial_param_key = self._resolve_spatial_param(endpoint_config)
+
             async def fetch_dept_chunk(i, dept_chunk):
                 async with semaphore:
                     try:
                         chunk_params = params.copy()
-                        if "dept" in endpoint_config.spatial_params:
-                            dept_key = endpoint_config.spatial_params["dept"]
-                            chunk_params[dept_key] = ",".join(dept_chunk)
-                        
+                        chunk_params[spatial_param_key] = ",".join(dept_chunk)
+
                         chunk_data = await self._fetch_all_pages(endpoint_config, chunk_params)
                         self.logger.info(f"✅ Groupe {i+1}/{len(dept_chunks)}: {len(chunk_data)} observations")
                         return chunk_data
@@ -342,7 +346,7 @@ class HubeauClient:
                             for dept in dept_chunk:
                                 try:
                                     one_params = params.copy()
-                                    one_params[dept_key] = dept
+                                    one_params[spatial_param_key] = dept
                                     one_data = await self._fetch_all_pages(endpoint_config, one_params)
                                     merged.extend(one_data)
                                 except Exception as ee:
@@ -371,7 +375,15 @@ class HubeauClient:
         elif entity_codes:
             # APPROCHE PAR CODES D'ENTITÉS
             api_name_actual = api_name or self.config.name
-            if api_name_actual in ["hydrometry", "piezometry", "ground_water_quality", "prelevements", "temperature", "onde", "hydrobiology"]:  # ✅ CORRECTIF: Ajout hydrometry
+            if api_name_actual in [
+                "hydrometry",
+                "piezometry",
+                "ground_water_quality",
+                "prelevements",
+                "temperature",
+                "onde",
+                "hydrobiology",
+            ]:
                 entity_key = self._get_entity_key_for_api(api_name_actual)
                 self.logger.info(f"📊 Approche avec {entity_key} pour observations {endpoint_name}")
                 
@@ -521,6 +533,20 @@ class HubeauClient:
         }
         return entity_keys.get(api_name, "code_station")
 
+    def _resolve_spatial_param(self, endpoint_config: HubeauEndpointConfig) -> str:
+        """Retourne la clé de paramètre spatial attendue par l'endpoint."""
+        spatial_params = endpoint_config.spatial_params or {}
+        if "dept" in spatial_params:
+            return spatial_params["dept"]
+
+        if spatial_params:
+            # Prendre le premier paramètre disponible (ex: bbox, code_commune, etc.)
+            return next(iter(spatial_params.values()))
+
+        raise ValueError(
+            f"Endpoint {endpoint_config.path} requiert un filtre spatial mais aucun paramètre n'est défini"
+        )
+
 # ====================================
 # MÉTRIQUES D'OBSERVABILITÉ (CORRECTIF D)
 # ====================================
@@ -558,22 +584,42 @@ class IngestionMetrics(BaseModel):
 
 class HubeauIngestionService:
     """Service d'ingestion Hub'Eau pour la couche Bronze"""
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        minio_resource: Optional[Dict[str, Any]] = None,
+        bucket: Optional[str] = None,
+    ):
         self.logger = logger
-        self.minio_client = self._init_minio_client()
-        self.minio_bucket = "hubeau-bronze"
-    
+        self.minio_client, detected_bucket = self._resolve_minio_client(minio_resource)
+        default_bucket = os.getenv("MINIO_BRONZE_BUCKET") or detected_bucket or "bronze"
+        self.minio_bucket = bucket or default_bucket
+
+        if not self.minio_bucket:
+            raise ValueError("MinIO bucket must be provided through resources or environment")
+
+    def _resolve_minio_client(
+        self, minio_resource: Optional[Dict[str, Any]]
+    ) -> tuple[BaseClient, Optional[str]]:
+        """Initialise le client MinIO via ressource Dagster ou variables d'environnement."""
+        if minio_resource is not None:
+            client = minio_resource.get("client")
+            bucket = minio_resource.get("bucket")
+            if client is None or bucket is None:
+                raise ValueError("The provided MinIO resource must expose 'client' and 'bucket' keys")
+            return client, bucket
+
+        return self._init_minio_client(), None
+
     def _init_minio_client(self):
         """Initialisation client MinIO"""
         try:
-            import os
             client = boto3.client(
                 's3',
-                endpoint_url='http://minio:9000',
+                endpoint_url=os.getenv('MINIO_ENDPOINT', 'http://minio:9000'),
                 aws_access_key_id=os.getenv('MINIO_USER', 'admin'),
                 aws_secret_access_key=os.getenv('MINIO_PASS', 'BrgmMinio2024!'),
-                region_name='us-east-1'
+                region_name=os.getenv('MINIO_REGION', 'us-east-1')
             )
             client.list_buckets()
             return client
@@ -723,13 +769,16 @@ class HubeauIngestionService:
         metrics: Optional[IngestionMetrics] = None  # ✅ CORRECTIF D
     ):
         """Sauvegarde les données dans MinIO"""
+        if self.minio_client is None or self.minio_bucket is None:
+            raise RuntimeError("MinIO client is not configured")
+
         try:
             # Créer le bucket s'il n'existe pas
             try:
                 self.minio_client.head_bucket(Bucket=self.minio_bucket)
             except ClientError:
                 self.minio_client.create_bucket(Bucket=self.minio_bucket)
-            
+
             # Sauvegarder les métadonnées d'ingestion
             key = f"{api_name}/{date_partition}/ingestion_metadata.json"
             metadata = {
@@ -740,14 +789,14 @@ class HubeauIngestionService:
                 "total_records": sum(r.get('records_count', 0) for r in results.values()),
                 "metrics": metrics.dict() if metrics else {}  # ✅ CORRECTIF D
             }
-            
+
             self.minio_client.put_object(
                 Bucket=self.minio_bucket,
                 Key=key,
-                Body=json.dumps(metadata, indent=2),
+                Body=json.dumps(metadata, indent=2).encode("utf-8"),
                 ContentType='application/json'
             )
-            
+
             # Sauvegarder les données brutes pour chaque endpoint
             for endpoint_name, endpoint_result in results.items():
                 if endpoint_result.get('records_count', 0) > 0:
@@ -756,10 +805,10 @@ class HubeauIngestionService:
                     self.minio_client.put_object(
                         Bucket=self.minio_bucket,
                         Key=data_key,
-                        Body=json.dumps(endpoint_result.get('data', []), indent=2),
+                        Body=json.dumps(endpoint_result.get('data', []), indent=2).encode("utf-8"),
                         ContentType='application/json'
                     )
-                    
+
                     # Métadonnées de l'endpoint
                     endpoint_metadata_key = f"{api_name}/{date_partition}/{endpoint_name}_metadata.json"
                     endpoint_metadata = {
@@ -769,17 +818,17 @@ class HubeauIngestionService:
                         "partition_date": date_partition,
                         "execution_date": datetime.now().isoformat()
                     }
-                    
+
                     self.minio_client.put_object(
                         Bucket=self.minio_bucket,
                         Key=endpoint_metadata_key,
-                        Body=json.dumps(endpoint_metadata, indent=2),
+                        Body=json.dumps(endpoint_metadata, indent=2).encode("utf-8"),
                         ContentType='application/json'
                     )
-            
+
             self.logger.info(f"💾 Données sauvegardées dans MinIO: {key}")
             self.logger.info(f"📊 {len(results)} endpoints avec données brutes sauvegardés")
-            
+
         except Exception as e:
             self.logger.error(f"Erreur sauvegarde MinIO: {e}")
             raise
