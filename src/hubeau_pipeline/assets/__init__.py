@@ -4,7 +4,7 @@ Bronze → Silver → Gold avec optimisations
 """
 
 # Import des assets par couche - VERSION RÉELLE (Bronze seulement)
-from .bronze import production_bronze_assets
+from .bronze import all_bronze_assets
 
 # Silver et Gold temporairement désactivés (imports cassés)
 # from .silver import (
@@ -19,7 +19,7 @@ from .bronze import production_bronze_assets
 # Assets de production (calculs réels)
 production_assets = [
     # Bronze - Assets réels avec vraies connexions
-    *production_bronze_assets,
+    *all_bronze_assets,
     
     # Silver - À réimplémenter avec vraies transformations
     # piezo_timescale_optimized,

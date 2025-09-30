@@ -1,65 +1,65 @@
 """
-Assets Bronze - Ingestion RÉELLE avec connexions APIs
-Hub'Eau + BDLISA + Sandre avec gestion d'erreurs professionnelle
+Assets Bronze Hub'Eau - Architecture moderne et claire
+httpx + tenacity + pydantic pour une ingestion robuste et performante
 """
 
-# Hub'Eau APIs - Implémentation réelle (4 APIs principales existantes)
-from .hubeau_real_ingestion import (
-    hubeau_piezo_bronze_real,
-    hubeau_hydro_bronze_real,
-    hubeau_quality_groundwater_bronze_real,
-    hubeau_temperature_bronze_real,
-    hubeau_quality_surface_bronze_real,
-    hubeau_onde_bronze_real,
-    hubeau_hydrobiologie_bronze_real,
-    hubeau_prelevements_bronze_real
+# Assets Hub'Eau Bronze
+from .hubeau_assets import (
+    hubeau_hydrometry_bronze,
+    hubeau_piezometry_bronze,
+    hubeau_water_quality_surface_bronze,
+    hubeau_water_quality_groundwater_bronze,
+    hubeau_temperature_bronze,
+    hubeau_onde_bronze,
+    hubeau_hydrobiology_bronze,
+    hubeau_prelevements_bronze,
+    hubeau_ingestion_summary
 )
 
-# Sources externes - Implémentation réelle
-from .bdlisa_real_ingestion import bdlisa_geographic_bronze_real
-from .sandre_real_ingestion import sandre_thesaurus_bronze_real
+# Sources externes (legacy)
+from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
+from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 
-# Assets de production RÉELS - TOUTES LES 8 APIs HUB'EAU
-production_bronze_assets = [
-    # Hub'Eau 4 APIs principales existantes
-    hubeau_piezo_bronze_real,
-    hubeau_hydro_bronze_real,
-    hubeau_quality_groundwater_bronze_real,
-    hubeau_temperature_bronze_real,
-    
-    # Hub'Eau 4 nouvelles APIs refactorisées
-    hubeau_quality_surface_bronze_real,
-    hubeau_onde_bronze_real,
-    hubeau_hydrobiologie_bronze_real,
-    hubeau_prelevements_bronze_real,
-    
-    # Sources externes
+# Assets de production Hub'Eau
+hubeau_bronze_assets = [
+    hubeau_hydrometry_bronze,
+    hubeau_piezometry_bronze,
+    hubeau_water_quality_surface_bronze,
+    hubeau_water_quality_groundwater_bronze,
+    hubeau_temperature_bronze,
+    hubeau_onde_bronze,
+    hubeau_hydrobiology_bronze,
+    hubeau_prelevements_bronze,
+    hubeau_ingestion_summary
+]
+
+# Assets externes (legacy)
+external_bronze_assets = [
     bdlisa_geographic_bronze_real,
     sandre_thesaurus_bronze_real
 ]
 
-# Hub'Eau APIs complémentaires (à implémenter si besoin)
-# from .hubeau_complementary import (
-#     hubeau_ecoulement_bronze,
-#     hubeau_hydrobiologie_bronze,
-#     hubeau_prelevements_bronze,
-# )
+# Tous les assets bronze
+all_bronze_assets = hubeau_bronze_assets + external_bronze_assets
 
 __all__ = [
-    # Assets de production réels
-    "production_bronze_assets",
+    # Assets Hub'Eau Bronze
+    "hubeau_bronze_assets",
+    "hubeau_hydrometry_bronze",
+    "hubeau_piezometry_bronze",
+    "hubeau_water_quality_surface_bronze",
+    "hubeau_water_quality_groundwater_bronze",
+    "hubeau_temperature_bronze",
+    "hubeau_onde_bronze",
+    "hubeau_hydrobiology_bronze",
+    "hubeau_prelevements_bronze",
+    "hubeau_ingestion_summary",
     
-    # Hub'Eau 8 APIs complètes
-    "hubeau_piezo_bronze_real",
-    "hubeau_hydro_bronze_real", 
-    "hubeau_quality_groundwater_bronze_real",
-    "hubeau_temperature_bronze_real",
-    "hubeau_quality_surface_bronze_real",
-    "hubeau_onde_bronze_real",
-    "hubeau_hydrobiologie_bronze_real",
-    "hubeau_prelevements_bronze_real",
-    
-    # Externes
+    # Assets externes (legacy)
+    "external_bronze_assets",
     "bdlisa_geographic_bronze_real",
-    "sandre_thesaurus_bronze_real"
+    "sandre_thesaurus_bronze_real",
+    
+    # Tous les assets
+    "all_bronze_assets"
 ]
