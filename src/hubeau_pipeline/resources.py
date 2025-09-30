@@ -1,15 +1,65 @@
-"""
-Ressources Dagster pour l'intégration Hub'Eau
-Connexions aux bases de données et services externes
-"""
+"""Dagster resources for external dependencies used by the Hub'Eau pipeline."""
+
+import logging
+import os
+from typing import Any, Dict
 
 import boto3
-import psycopg
 import httpx
-from neo4j import GraphDatabase
+import psycopg
 from dagster import resource
-# from dagster._utils import merge_dicts  # Non disponible dans cette version
-from typing import Dict, Any
+from neo4j import GraphDatabase
+
+
+logger = logging.getLogger(__name__)
+
+
+def _build_pg_dsn() -> str:
+    """Compose the PostgreSQL DSN from environment variables."""
+    password = os.getenv("PG_PASSWORD")
+    if not password:
+        logger.warning("PG_PASSWORD not set; using default password for local development")
+        password = "postgres"
+
+    user = os.getenv("PG_USER", "postgres")
+    host = os.getenv("PG_HOST", "timescaledb")
+    port = os.getenv("PG_PORT", "5432")
+    database = os.getenv("PG_DATABASE", "water")
+    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
+
+def _build_neo4j_config() -> Dict[str, str]:
+    """Return the default Neo4j configuration from environment variables."""
+    password = os.getenv("NEO4J_PASSWORD")
+    if not password:
+        logger.warning("NEO4J_PASSWORD not set; using default password for local development")
+        password = "neo4j"
+
+    return {
+        "dsn": os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+        "user": os.getenv("NEO4J_USER", "neo4j"),
+        "password": password,
+    }
+
+
+def _build_s3_config() -> Dict[str, str]:
+    """Return the default MinIO/S3 configuration from environment variables."""
+    endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+    access_key = os.getenv("MINIO_USER")
+    secret_key = os.getenv("MINIO_PASS")
+    bucket = os.getenv("MINIO_BRONZE_BUCKET", "bronze")
+
+    if not access_key or not secret_key:
+        logger.warning("MINIO credentials not set; using default development credentials")
+        access_key = access_key or "admin"
+        secret_key = secret_key or "admin123"
+
+    return {
+        "endpoint_url": endpoint,
+        "access_key": access_key,
+        "secret_key": secret_key,
+        "bucket": bucket,
+    }
 
 
 @resource
@@ -45,12 +95,14 @@ def neo4j_driver(init_context):
     )
 
 
-@resource(config_schema={
-    "endpoint_url": str, 
-    "access_key": str, 
-    "secret_key": str, 
-    "bucket": str
-})
+@resource(
+    config_schema={
+        "endpoint_url": str,
+        "access_key": str,
+        "secret_key": str,
+        "bucket": str,
+    }
+)
 def s3_client(init_context):
     """Client S3/MinIO pour le data lake"""
     config = init_context.resource_config
@@ -70,18 +122,7 @@ def s3_client(init_context):
 # Configuration des ressources avec variables d'environnement
 RESOURCES = {
     "http_client": http_client,
-    "pg": pg_conn.configured({
-        "dsn": "postgresql://postgres:{{ env.PG_PASSWORD }}@timescaledb:5432/water"
-    }),
-    "neo4j": neo4j_driver.configured({
-        "dsn": "bolt://neo4j:7687",
-        "user": "neo4j",
-        "password": "{{ env.NEO4J_PASSWORD }}"
-    }),
-    "s3": s3_client.configured({
-        "endpoint_url": "http://minio:9000",
-        "access_key": "{{ env.MINIO_USER }}",
-        "secret_key": "{{ env.MINIO_PASS }}",
-        "bucket": "bronze"
-    }),
+    "pg": pg_conn.configured({"dsn": _build_pg_dsn()}),
+    "neo4j": neo4j_driver.configured(_build_neo4j_config()),
+    "s3": s3_client.configured(_build_s3_config()),
 }
