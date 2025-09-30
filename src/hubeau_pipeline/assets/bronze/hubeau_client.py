@@ -228,6 +228,13 @@ class HubeauClient:
                 self.logger.error(f"Erreur page {page}: {e}")
                 break
         
+        # ✅ CORRECTIF: Warning si on atteint max_pages (possible troncature)
+        if page > endpoint_config.max_pages and len(all_data) == endpoint_config.max_pages * params["size"]:
+            self.logger.warning(
+                f"⚠️ TRONCATURE: max_pages={endpoint_config.max_pages} atteint pour {endpoint_config.path}. "
+                f"Récupéré {len(all_data)} records, mais il pourrait y en avoir plus !"
+            )
+        
         return all_data
     
     async def get_observations(
@@ -296,13 +303,12 @@ class HubeauClient:
         
             # Chunking adaptatif selon la profondeur limite et l'API
             depth_limit = getattr(endpoint_config, 'depth_limit', None)
-            if depth_limit is None:
-                depth_limit = 20000
             
+            # ✅ Stratégie de chunking pour approche spatiale
             # Hydrobiologie : chunk_size = 1 pour éviter les 500
             if self.config.name == "hydrobiology":
                 chunk_size = 1
-            elif depth_limit <= 10000:
+            elif depth_limit and depth_limit <= 10000:
                 chunk_size = 1  # 1 département pour les APIs avec limite 10k
             else:
                 chunk_size = 5  # 5 départements pour les autres APIs
@@ -365,7 +371,7 @@ class HubeauClient:
         elif entity_codes:
             # APPROCHE PAR CODES D'ENTITÉS
             api_name_actual = api_name or self.config.name
-            if api_name_actual in ["piezometry", "ground_water_quality", "prelevements", "temperature", "onde", "hydrobiology"]:
+            if api_name_actual in ["hydrometry", "piezometry", "ground_water_quality", "prelevements", "temperature", "onde", "hydrobiology"]:  # ✅ CORRECTIF: Ajout hydrometry
                 entity_key = self._get_entity_key_for_api(api_name_actual)
                 self.logger.info(f"📊 Approche avec {entity_key} pour observations {endpoint_name}")
                 
@@ -376,7 +382,13 @@ class HubeauClient:
                 
                 # Chunking systématique si trop de codes (évite URL too long)
                 # Hydrobiologie : limite URL ≈2083 caractères → chunks plus petits
-                MAX_CODES_PER_REQUEST = 25 if api_name_actual == "hydrobiology" else 50
+                # Hydrométrie observations_tr : beaucoup de données par station → chunks réduits
+                if api_name_actual == "hydrobiology":
+                    MAX_CODES_PER_REQUEST = 25
+                elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
+                    MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter surcharge
+                else:
+                    MAX_CODES_PER_REQUEST = 50
                 
                 if len(entity_codes) > MAX_CODES_PER_REQUEST:
                     # Découpage systématique en chunks avec parallélisation
@@ -385,7 +397,13 @@ class HubeauClient:
                     
                     # Parallélisation avec asyncio.gather() pour accélérer l'ingestion
                     # Hydrobiologie : API sensible → parallélisme réduit
-                    MAX_CONCURRENT = 4 if api_name_actual == "hydrobiology" else 15
+                    # Hydrométrie observations_tr : beaucoup de chunks → parallélisme modéré
+                    if api_name_actual == "hydrobiology":
+                        MAX_CONCURRENT = 4
+                    elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
+                        MAX_CONCURRENT = 8  # ✅ CORRECTIF: Parallélisme modéré pour ~245 chunks
+                    else:
+                        MAX_CONCURRENT = 15
                     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
                     self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT} requêtes simultanées")
                     

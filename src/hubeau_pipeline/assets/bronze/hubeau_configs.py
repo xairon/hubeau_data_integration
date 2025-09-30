@@ -53,23 +53,23 @@ def get_hydrometry_config() -> HubeauApiConfig:
                        path="observations_tr",
                        temporal_params={"start": "date_debut_obs", "end": "date_fin_obs"},
                        page_size=1000,
-                       max_pages=50,
+                       max_pages=50,  # Limite raisonnable par station (50k records max)
                        supports_cursor=True,
                        realtime_cache_duration=15,
                        cache_duration=30,
-                       requires_spatial_filter=True,  # ✅ CORRECTIF: Nécessite filtre spatial
-                       spatial_params={"dept": "code_departement"},
-                       depth_limit=100000  # Limite très élevée pour observations
+                       # ✅ CORRECTIF: Désactiver filtre spatial, utiliser approche par code_entite
+                       requires_spatial_filter=False,
+                       depth_limit=None
                    ),
                    "obs_elab": HubeauEndpointConfig(
                        path="obs_elab",
                        temporal_params={"start": "date_debut_obs_elab", "end": "date_fin_obs_elab"},
                        page_size=1000,
-                       max_pages=20,
+                       max_pages=50,  # Limite raisonnable par station (50k records max)
                        cache_duration=30,
-                       requires_spatial_filter=True,  # ✅ CORRECTIF: Nécessite filtre spatial
-                       spatial_params={"dept": "code_departement"},
-                       depth_limit=50000  # Limite élevée pour observations élaborées
+                       # ✅ CORRECTIF: Désactiver filtre spatial, utiliser approche par code_entite
+                       requires_spatial_filter=False,
+                       depth_limit=None
                    )
         }
     )
