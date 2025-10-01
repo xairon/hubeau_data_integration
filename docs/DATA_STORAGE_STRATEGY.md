@@ -1,79 +1,224 @@
-# Stratégie de stockage & gouvernance des données
+# Stratégies de Stockage
 
-Dernière vérification : 2024-09-30
+## Architecture Medallion
 
-Cette note décrit la structure de stockage Bronze, la politique de rétention et les contrôles qualité associés. Elle s'applique aux environnements locaux et aux déploiements sur l'infrastructure BRGM.
+### Bronze Layer (MinIO)
+**Rôle :** Stockage des données brutes Hub'Eau
+**Format :** JSON préservant structure originale
+**Organisation :** `{api_name}/{date_partition}/{endpoint_name}_data.json`
 
----
+#### Structure MinIO
+```
+bronze/
+├── hydrometry/
+│   ├── 2024-09-30/
+│   │   ├── referentiel_stations_data.json
+│   │   ├── observations_tr_data.json
+│   │   └── obs_elab_data.json
+│   └── ingestion_metadata.json
+├── piezometry/
+│   └── 2024-09-30/
+└── ...
+```
 
-## 1. Buckets & répertoires
+#### Métadonnées d'Ingestion
+```json
+{
+  "api_name": "hydrometry",
+  "partition_date": "2024-09-30",
+  "execution_date": "2024-09-30T10:30:00Z",
+  "total_records": 150000,
+  "results_by_endpoint": {
+    "referentiel_stations": {"records_count": 15000},
+    "observations_tr": {"records_count": 100000},
+    "obs_elab": {"records_count": 35000}
+  },
+  "metrics": {
+    "departements_traites": 101,
+    "chunks_total": 245,
+    "erreurs_http_500": 0
+  }
+}
+```
 
-### 1.1 MinIO / S3 (défaut)
+### Silver Layer (Specialized DBs)
 
-- **Bucket** : `bronze` (configurable via `MINIO_BRONZE_BUCKET`).
-- **Structure** : `s3://<bucket>/<api>/<partition>/`.
-  - `ingestion_metadata.json` : résumé global de la partition (statut, métriques, erreurs).
-  - `<endpoint>_data.json` : payload brut pour chaque endpoint (stations, observations, analyses...).
-  - `<endpoint>_metadata.json` : informations techniques (nombre d'enregistrements, date d'exécution).
-- **Versionning** : activer le versionning S3 pour tracer les corrections (recommandé en production).
+#### TimescaleDB (Time Series)
+**Rôle :** Données temporelles optimisées pour requêtes analytiques
+**Compression :** 90% réduction sur données historiques
+**Partitioning :** Hypertables par API et année
 
-### 1.2 Fallback local
+##### Schémas Principaux
+```sql
+-- Hydrométrie
+CREATE TABLE hydrometry_observations (
+    code_entite TEXT,
+    date_obs TIMESTAMPTZ,
+    resultat DOUBLE PRECISION,
+    code_qualification TEXT,
+    PRIMARY KEY (code_entite, date_obs)
+);
 
-- **Répertoire** : `HUBEAU_LOCAL_CACHE` (défaut `./data/hubeau_bronze`).
-- **Structure miroir** : identique au bucket S3 pour faciliter les diff et rechargements.
-- **Utilisation** : activé automatiquement si la connexion MinIO échoue. Les logs Dagster mentionnent le chemin de fallback.
+-- Piézométrie
+CREATE TABLE piezometry_chroniques (
+    code_bss TEXT,
+    date_mesure TIMESTAMPTZ,
+    niveau_nappe_eau DOUBLE PRECISION,
+    profondeur_nappe DOUBLE PRECISION,
+    PRIMARY KEY (code_bss, date_mesure)
+);
+```
 
----
+##### Hypertables
+```sql
+-- Conversion en hypertables pour compression
+SELECT create_hypertable('hydrometry_observations', 'date_obs');
+SELECT create_hypertable('piezometry_chroniques', 'date_mesure');
 
-## 2. Gouvernance des partitions
+-- Compression automatique après 7 jours
+SELECT add_compression_policy('hydrometry_observations', INTERVAL '7 days');
+```
 
-| Type d'asset | Partition | Exemple de chemin |
-| --- | --- | --- |
-| Hydrométrie (30 jours) | `recent_30days` | `bronze/hydrometry/recent_30days/ingestion_metadata.json` |
-| Quotidien (`DailyPartitionsDefinition`) | `YYYY-MM-DD` | `bronze/piezometry/2024-09-29/chroniques_data.json` |
-| Mensuel (`YYYY-MM`) | `YYYY-MM` | `bronze/onde/2024-08/observations_data.json` |
-| Annuel | `YYYY` | `bronze/qualite_rivieres/2024/analyse_pc_data.json` |
+#### PostGIS (Geospatial)
+**Rôle :** Géométries et requêtes spatiales
+**Indexes :** GIST pour performances spatiales
+**Projections :** WGS84 (EPSG:4326) et Lambert93 (EPSG:2154)
 
-> Les partitions futures sont automatiquement ignorées (statut `skipped_future_partition`). Une partition « vide » génère tout de même `ingestion_metadata.json` avec `status=no_data`.
+##### Schémas Principaux
+```sql
+-- Stations avec géométries
+CREATE TABLE stations_geo (
+    code_station TEXT PRIMARY KEY,
+    libelle_station TEXT,
+    code_departement TEXT,
+    code_commune TEXT,
+    longitude DOUBLE PRECISION,
+    latitude DOUBLE PRECISION,
+    geom GEOMETRY(POINT, 4326)
+);
 
----
+-- Index spatial
+CREATE INDEX idx_stations_geom ON stations_geo USING GIST (geom);
+```
 
-## 3. Rétention & archivage
+##### Fonctions Spatiales
+```sql
+-- Requêtes spatiales optimisées
+SELECT * FROM stations_geo 
+WHERE ST_DWithin(geom, ST_Point(2.3522, 48.8566), 0.01);
 
-| Environnement | Rétention recommandée | Archivage |
-| --- | --- | --- |
-| Local développeur | 90 jours (purge manuelle des partitions anciennes) | Export ponctuel vers disque externe/Serveur NAS. |
-| Plateforme BRGM | 2 ans minimum pour les données Bronze | Sauvegarde quotidienne du bucket (MinIO client `mc mirror`). |
-| Cloud | Selon politique institutionnelle | Utiliser lifecycle policies S3 (transition vers Glacier/Deep Archive après 1 an). |
+-- Agrégations par département
+SELECT code_departement, COUNT(*) 
+FROM stations_geo 
+GROUP BY code_departement;
+```
 
-Les couches Silver/Gold héritent des politiques de TimescaleDB/Neo4j (dump quotidien + snapshots hebdomadaires).
+#### Neo4j (Graph)
+**Rôle :** Relations sémantiques Sandre/SOSA
+**Modèle :** Entités et relations complexes
+**Indexes :** Sur propriétés et relations
 
----
+##### Modèle de Données
+```cypher
+// Stations
+CREATE CONSTRAINT station_code IF NOT EXISTS 
+FOR (s:Station) REQUIRE s.code_station IS UNIQUE;
 
-## 4. Contrôles qualité
+// Relations Sandre/SOSA
+CREATE (s:Station {code_station: "12345678"})
+CREATE (d:Departement {code_departement: "75"})
+CREATE (s)-[:LOCATED_IN]->(d);
+```
 
-1. **Complétude** : vérifiez que chaque ingestion produit `ingestion_metadata.json`. L'absence du fichier signale une erreur non gérée.
-2. **Volumes** : suivre `total_records_ingested` pour détecter des variations anormales (rupture de série).
-3. **Erreurs** : toute erreur est listée dans le champ `errors` de `ingestion_metadata.json` et dans les logs Dagster. Documenter la résolution.
-4. **Schéma** : lors de changements Hub'Eau (nouvelles colonnes), mettre à jour les transformations Silver/Gold et documenter dans `DATA_SOURCES_COMPLETE.md`.
+##### Requêtes Graph
+```cypher
+// Traversée de graphe
+MATCH (s:Station)-[:LOCATED_IN]->(d:Departement)
+WHERE d.code_departement = "75"
+RETURN s.code_station, s.libelle_station;
+```
 
----
+### Gold Layer (Analytics)
+**Rôle :** Agrégations et métriques métier
+**Format :** Vues matérialisées et APIs
+**Refresh :** Automatique via Dagster
 
-## 5. Rechargements & corrections
+#### Vues Matérialisées
+```sql
+-- Indicateurs qualité données
+CREATE MATERIALIZED VIEW data_quality_metrics AS
+SELECT 
+    api_name,
+    partition_date,
+    total_records,
+    records_with_null_values,
+    records_with_errors,
+    (records_with_errors::float / total_records) * 100 as error_rate
+FROM ingestion_metadata
+WHERE partition_date >= CURRENT_DATE - INTERVAL '30 days';
+```
 
-1. **Identifier la partition** à rejouer (ex : `piezometry`, `2024-09-10`).
-2. **Purger** la partition dans MinIO (`mc rm --recursive --force s3/bronze/piezometry/2024-09-10`).
-3. **Relancer** l'asset concerné via Dagster (`materialize --partition ...`).
-4. **Documenter** l'opération dans le journal scientifique (raison, impact).
+#### APIs Consommatrices
+```python
+# API REST pour applications
+@app.get("/api/v1/stations/{departement}")
+async def get_stations_by_departement(departement: str):
+    query = """
+    SELECT code_station, libelle_station, longitude, latitude
+    FROM stations_geo 
+    WHERE code_departement = %s
+    """
+    return await db.fetch_all(query, (departement,))
+```
 
----
+## Stratégies de Partitioning
 
-## 6. Exposition des données
+### Temporel
+- **Daily :** Hydrométrie, piézométrie, température
+- **Annual :** Qualité eaux, hydrobiologie, ONDE, prélèvements
+- **Hybrid :** Hydrobiologie (campagnes saisonnières)
 
-- **Partage interne** : utiliser MinIO Console (droits lecture seule) ou synchroniser le bucket vers un NAS interne.
-- **Diffusion publique** : prévoir une étape d'anonymisation/filtrage selon les licences Hub'Eau et les contraintes de diffusion.
-- **API interne** : future exposition via FastAPI/TimescaleDB (voir `SOSA_FUTURE_VISION.md`).
+### Spatial
+- **Départements :** Chunking par groupes de départements
+- **Bbox :** Requêtes par bounding box pour APIs géospatiales
+- **Communes :** Filtrage par code commune si supporté
 
----
+### Par API
+- **Volume élevé :** Chunking systématique (hydrométrie, piézométrie)
+- **Volume modéré :** Chunking adaptatif (qualité, température)
+- **Volume faible :** Requêtes directes (ONDE, hydrobiologie)
 
-Le respect de cette stratégie garantit la traçabilité scientifique et facilite les audits des travaux Hub'Eau.
+## Optimisations de Performance
+
+### Compression
+- **TimescaleDB :** Compression automatique après 7 jours
+- **MinIO :** Compression gzip sur fichiers JSON
+- **Neo4j :** Compression native des données
+
+### Indexes
+- **TimescaleDB :** B-tree sur clés temporelles, BRIN sur valeurs
+- **PostGIS :** GIST sur géométries, B-tree sur codes
+- **Neo4j :** Indexes sur propriétés fréquemment requêtées
+
+### Cache
+- **Redis :** Cache des requêtes fréquentes
+- **PostgreSQL :** Buffer pool optimisé
+- **Neo4j :** Cache des traversées de graphe
+
+## Backup et Récupération
+
+### Stratégies
+- **MinIO :** Backup quotidien vers S3 externe
+- **TimescaleDB :** pg_dump avec compression
+- **PostGIS :** pg_dump avec schémas spatiaux
+- **Neo4j :** Neo4j backup avec compression
+
+### Rétention
+- **Bronze :** 2 ans (données brutes)
+- **Silver :** 5 ans (données transformées)
+- **Gold :** 10 ans (agrégations métier)
+
+### Monitoring
+- **Espace disque :** Alertes sur seuils (80%, 90%, 95%)
+- **Performance :** Monitoring des requêtes lentes
+- **Intégrité :** Vérification automatique des checksums
