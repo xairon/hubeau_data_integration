@@ -1,5 +1,6 @@
 """Tests ciblés pour le service d'ingestion Bronze Hub'Eau."""
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -7,7 +8,8 @@ import boto3
 import pytest
 from botocore.stub import ANY, Stubber
 
-from hubeau_pipeline.assets.bronze.hubeau_client import HubeauIngestionService
+from hubeau_pipeline.assets.bronze.hubeau_client import HubeauIngestionService, IngestionMetrics
+from hubeau_pipeline.assets.bronze.hubeau_configs import get_hydrobiology_config
 
 
 def _build_stubbed_s3_client():
@@ -119,3 +121,70 @@ def test_local_fallback_is_used(tmp_path, monkeypatch):
 
     metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
     assert metadata["total_records"] == 1
+
+
+def test_ingestion_persists_metadata_for_empty_partitions(tmp_path, monkeypatch):
+    """Même sans données, une partition traitée doit laisser une trace."""
+
+    monkeypatch.setenv("MINIO_USER", "test")
+    monkeypatch.setenv("MINIO_PASS", "test")
+    monkeypatch.setenv("HUBEAU_LOCAL_CACHE", str(tmp_path))
+
+    def _raise_minio(self):
+        raise RuntimeError("minio indisponible")
+
+    monkeypatch.setattr(
+        HubeauIngestionService,
+        "_init_minio_client",
+        _raise_minio,
+        raising=False,
+    )
+
+    class DummyClient:
+        """Client Hub'Eau minimal qui renvoie des listes vides."""
+
+        def __init__(self, config):
+            self.metrics = IngestionMetrics()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get_stations(self, endpoint_name):
+            return []
+
+        async def get_observations(
+            self,
+            endpoint_name,
+            entity_codes,
+            date_partition,
+            api_name=None,
+            realtime=False,
+            partition_key=None,
+        ):
+            return []
+
+    monkeypatch.setattr(
+        "hubeau_pipeline.assets.bronze.hubeau_client.HubeauClient",
+        DummyClient,
+    )
+
+    async def _run_test():
+        service = HubeauIngestionService()
+        config = get_hydrobiology_config()
+
+        result = await service.ingest_api_data(config, "2024-01-01")
+
+        expected_dir = Path(tmp_path, config.name, "2024-01-01")
+        metadata_file = expected_dir / "ingestion_metadata.json"
+
+        assert metadata_file.exists()
+
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        assert metadata["total_records"] == 0
+        assert result["status"] == "no_data"
+        assert result["errors"] == []
+
+    asyncio.run(_run_test())

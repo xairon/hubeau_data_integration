@@ -1,322 +1,79 @@
-# Stratégie de Stockage des Données
+# Stratégie de stockage & gouvernance des données
 
-Architecture Medallion Bronze → Silver → Gold
+Dernière vérification : 2024-09-30
 
----
-
-## Architecture
-
-```mermaid
-graph TB
-    subgraph Sources["Sources"]
-        H[Hub'Eau]
-        B[BDLISA]
-        S[Sandre]
-    end
-    
-    subgraph Bronze["Bronze - MinIO"]
-        M[Object Storage<br/>JSON • GeoJSON • RDF]
-    end
-    
-    subgraph Silver["Silver - Bases Spécialisées"]
-        TS[(TimescaleDB<br/>Séries temporelles)]
-        PG[(PostGIS<br/>Géospatial)]
-        N4[(Neo4j<br/>Graphe)]
-    end
-    
-    subgraph Gold["Gold"]
-        KG[Knowledge Graph]
-    end
-    
-    H --> M
-    B --> M
-    S --> M
-    M --> TS
-    M --> PG
-    M --> N4
-    TS --> KG
-    PG --> KG
-    N4 --> KG
-```
+Cette note décrit la structure de stockage Bronze, la politique de rétention et les contrôles qualité associés. Elle s'applique aux environnements locaux et aux déploiements sur l'infrastructure BRGM.
 
 ---
 
-## Bronze Layer : MinIO
+## 1. Buckets & répertoires
 
-### Structure
+### 1.1 MinIO / S3 (défaut)
 
-```
-bronze/
-  ├── hydrometry/
-  │   └── 2024-09-15/
-  │       ├── stations.json
-  │       ├── observations_tr.json
-  │       └── ingestion_metadata.json
-  ├── piezometry/2024-09-15/
-  ├── temperature/2024-08-15/
-  ├── hydrobiology/2024-09-15/
-  ├── onde/2024-09-15/
-  ├── water_quality_groundwater/2024-09-15/
-  ├── water_quality_surface/2024-09-15/
-  ├── prelevements/2024/
-  ├── bdlisa/
-  └── sandre/
+- **Bucket** : `bronze` (configurable via `MINIO_BRONZE_BUCKET`).
+- **Structure** : `s3://<bucket>/<api>/<partition>/`.
+  - `ingestion_metadata.json` : résumé global de la partition (statut, métriques, erreurs).
+  - `<endpoint>_data.json` : payload brut pour chaque endpoint (stations, observations, analyses...).
+  - `<endpoint>_metadata.json` : informations techniques (nombre d'enregistrements, date d'exécution).
+- **Versionning** : activer le versionning S3 pour tracer les corrections (recommandé en production).
 
-silver/
-  └── (données transformées)
+### 1.2 Fallback local
 
-gold/
-  └── (agrégations)
-```
-
-### Caractéristiques
-
-- **S3-compatible** : Migration cloud possible
-- **Formats multiples** : JSON, GeoJSON, RDF
-- **Partitionnement** : Par date (quotidien/annuel)
-- **Métadonnées** : Fichier `ingestion_metadata.json` par partition
+- **Répertoire** : `HUBEAU_LOCAL_CACHE` (défaut `./data/hubeau_bronze`).
+- **Structure miroir** : identique au bucket S3 pour faciliter les diff et rechargements.
+- **Utilisation** : activé automatiquement si la connexion MinIO échoue. Les logs Dagster mentionnent le chemin de fallback.
 
 ---
 
-## Silver Layer : Bases Spécialisées
+## 2. Gouvernance des partitions
 
-### TimescaleDB - Séries Temporelles
+| Type d'asset | Partition | Exemple de chemin |
+| --- | --- | --- |
+| Hydrométrie (30 jours) | `recent_30days` | `bronze/hydrometry/recent_30days/ingestion_metadata.json` |
+| Quotidien (`DailyPartitionsDefinition`) | `YYYY-MM-DD` | `bronze/piezometry/2024-09-29/chroniques_data.json` |
+| Mensuel (`YYYY-MM`) | `YYYY-MM` | `bronze/onde/2024-08/observations_data.json` |
+| Annuel | `YYYY` | `bronze/qualite_rivieres/2024/analyse_pc_data.json` |
 
-**Rôle** : Observations et mesures temporelles
-
-**Structure** :
-```sql
-CREATE TABLE observations (
-    timestamp TIMESTAMPTZ NOT NULL,
-    station_code TEXT,
-    parametre_code TEXT,
-    valeur DOUBLE PRECISION,
-    qualite_code INT
-);
-
-SELECT create_hypertable('observations', 'timestamp');
-
--- Compression automatique
-ALTER TABLE observations SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'station_code,parametre_code'
-);
-```
-
-**Fonctionnalités** :
-- Partitioning automatique par temps
-- Compression (90% réduction stockage)
-- Continuous aggregates
-- Compatible PostgreSQL
-
-**Cas d'usage** :
-- Agrégations temporelles (moyennes, tendances)
-- Tableaux de bord temps réel
-- Exports BI/reporting
+> Les partitions futures sont automatiquement ignorées (statut `skipped_future_partition`). Une partition « vide » génère tout de même `ingestion_metadata.json` avec `status=no_data`.
 
 ---
 
-### PostGIS - Données Géospatiales
+## 3. Rétention & archivage
 
-**Rôle** : Stations et formations géologiques
+| Environnement | Rétention recommandée | Archivage |
+| --- | --- | --- |
+| Local développeur | 90 jours (purge manuelle des partitions anciennes) | Export ponctuel vers disque externe/Serveur NAS. |
+| Plateforme BRGM | 2 ans minimum pour les données Bronze | Sauvegarde quotidienne du bucket (MinIO client `mc mirror`). |
+| Cloud | Selon politique institutionnelle | Utiliser lifecycle policies S3 (transition vers Glacier/Deep Archive après 1 an). |
 
-**Structure** :
-```sql
-CREATE TABLE stations_geo (
-    station_code TEXT PRIMARY KEY,
-    nom TEXT,
-    type_station TEXT,
-    geom GEOMETRY(Point, 4326),
-    altitude DOUBLE PRECISION
-);
-
-CREATE INDEX idx_stations_geom ON stations_geo USING GIST(geom);
-
-CREATE TABLE formations_aquiferes (
-    code_bdlisa TEXT PRIMARY KEY,
-    nom_formation TEXT,
-    geometry GEOMETRY(MultiPolygon, 4326)
-);
-```
-
-**Fonctionnalités** :
-- Index GIST pour requêtes spatiales
-- Fonctions géométriques (distance, intersection, buffer)
-- Standards OGC (WFS, WMS)
-- Interopérabilité (QGIS, ArcGIS)
-
-**Cas d'usage** :
-- Analyses spatiales (proximité, intersection)
-- Cartes et visualisations
-- Relations territoriales (stations ↔ formations)
+Les couches Silver/Gold héritent des politiques de TimescaleDB/Neo4j (dump quotidien + snapshots hebdomadaires).
 
 ---
 
-### Neo4j - Graphe Sémantique
+## 4. Contrôles qualité
 
-**Rôle** : Nomenclatures et ontologies
-
-**Structure** :
-```cypher
-// Contraintes
-CREATE CONSTRAINT station_code FOR (s:Station) 
-REQUIRE s.code IS UNIQUE;
-
-// Modèle SOSA
-(:Station)-[:OBSERVES]->(:Property)
-(:Station)-[:LOCATED_IN]->(:Aquifer)
-(:Property)-[:HAS_UNIT]->(:Unit)
-(:Property)-[:PART_OF]->(:Thesaurus)
-
-// Nomenclature Sandre
-(:Parameter {code: "1301", nom: "Température"})
-  -[:BELONG_TO_FAMILY]->(:Family {nom: "Physico-chimie"})
-  -[:HAS_UNIT]->(:Unit {code: "°C"})
-```
-
-**Fonctionnalités** :
-- Traversals graphe (performance linéaire)
-- Schéma flexible
-- Relations sémantiques
-- APOC (extensions)
-
-**Cas d'usage** :
-- Thésaurus Sandre
-- Modèle SOSA (capteurs, observations)
-- Découverte de patterns
-- Relations conceptuelles
+1. **Complétude** : vérifiez que chaque ingestion produit `ingestion_metadata.json`. L'absence du fichier signale une erreur non gérée.
+2. **Volumes** : suivre `total_records_ingested` pour détecter des variations anormales (rupture de série).
+3. **Erreurs** : toute erreur est listée dans le champ `errors` de `ingestion_metadata.json` et dans les logs Dagster. Documenter la résolution.
+4. **Schéma** : lors de changements Hub'Eau (nouvelles colonnes), mettre à jour les transformations Silver/Gold et documenter dans `DATA_SOURCES_COMPLETE.md`.
 
 ---
 
-## Gold Layer : Knowledge Graph
+## 5. Rechargements & corrections
 
-**Objectif** : Vue unifiée cross-sources
-
-**Composants** :
-- Knowledge Graph SOSA complet
-- API GraphQL fédérée (future)
-- Vues matérialisées
-- Cache multi-niveaux (future)
-
-**Exemple requête unifiée** :
-```graphql
-query StationCompleteInfo($code: String!) {
-  station(code: $code) {
-    # Métadonnées (Neo4j)
-    name, type, installation_date
-    observed_properties { name, unit }
-    
-    # Séries temporelles (TimescaleDB)
-    timeseries(period: "1M") {
-      timestamp, value, quality
-    }
-    
-    # Contexte spatial (PostGIS)
-    spatial {
-      aquifer_name, formation_type
-      nearby_stations(radius: 10km) {
-        code, distance
-      }
-    }
-  }
-}
-```
+1. **Identifier la partition** à rejouer (ex : `piezometry`, `2024-09-10`).
+2. **Purger** la partition dans MinIO (`mc rm --recursive --force s3/bronze/piezometry/2024-09-10`).
+3. **Relancer** l'asset concerné via Dagster (`materialize --partition ...`).
+4. **Documenter** l'opération dans le journal scientifique (raison, impact).
 
 ---
 
-## Intégration Cross-Sources
+## 6. Exposition des données
 
-### Référencement
-
-**Principe** : Liaison via `station_code` unique
-
-```python
-# TimescaleDB
-SELECT timestamp, station_code, valeur 
-FROM observations 
-WHERE station_code = 'BSS001234567';
-
-# PostGIS (même station_code)
-SELECT nom, geom, formation_type 
-FROM stations_geo 
-WHERE station_code = 'BSS001234567';
-
-# Neo4j (même code)
-MATCH (s:Station {code: 'BSS001234567'})
-      -[:OBSERVES]->(p:Property)
-RETURN p.nom, p.unit;
-```
-
-### Synchronisation
-
-- Asset Dagster pour cohérence
-- Validation intégrité références
-- Mise à jour automatique métadonnées
+- **Partage interne** : utiliser MinIO Console (droits lecture seule) ou synchroniser le bucket vers un NAS interne.
+- **Diffusion publique** : prévoir une étape d'anonymisation/filtrage selon les licences Hub'Eau et les contraintes de diffusion.
+- **API interne** : future exposition via FastAPI/TimescaleDB (voir `SOSA_FUTURE_VISION.md`).
 
 ---
 
-## Choix Architecturaux
-
-### Pourquoi 3 Bases ?
-
-| Type Requête | Base | Raison |
-|--------------|------|--------|
-| Moyenne temporelle | TimescaleDB | Hypertables + compression |
-| Proximité spatiale | PostGIS | Index GIST + géométrie |
-| Relations sémantiques | Neo4j | Traversal graphe |
-
-**Performance** :
-- TimescaleDB : 1000x plus rapide pour agrégations temporelles
-- PostGIS : 100x plus rapide pour requêtes spatiales
-- Neo4j : Performance linéaire vs exponentielle SQL
-
-### Pourquoi MinIO ?
-
-- S3-compatible (standard industrie)
-- Self-hosted (pas de coûts cloud)
-- Performance excellente
-- Déploiement Docker simple
-
----
-
-## Gouvernance
-
-### Rétention
-
-| Couche | Durée | Raison |
-|--------|-------|--------|
-| Bronze | 2 ans | Données brutes archivage |
-| Silver | 10 ans | Données opérationnelles |
-| Métadonnées | Permanent | Référence |
-
-### Backup
-
-```bash
-# TimescaleDB
-pg_dump -U postgres -d water_timeseries > backup.sql
-
-# PostGIS
-pg_dump -U postgres -d water_geo > backup.sql
-
-# Neo4j
-docker exec neo4j neo4j-admin database dump water_graph
-
-# MinIO
-mc mirror minio/bronze /backups/bronze
-```
-
----
-
-## Références
-
-- [MinIO](https://min.io/docs/)
-- [TimescaleDB](https://docs.timescale.com/)
-- [PostGIS](https://postgis.net/documentation/)
-- [Neo4j](https://neo4j.com/docs/)
-- [SOSA/SSN](https://www.w3.org/TR/vocab-ssn/)
-
----
-
-**Version** : 2.0  
-**Dernière mise à jour** : Septembre 2025
-
+Le respect de cette stratégie garantit la traçabilité scientifique et facilite les audits des travaux Hub'Eau.

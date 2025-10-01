@@ -1,575 +1,151 @@
-# Pipeline Hub'Eau - Documentation Complète
+# Pipeline Hub'Eau – Détails d'implémentation
 
-**Dernière mise à jour :** 1er octobre 2025  
-**Statut :** ✅ Production Ready
+Dernière vérification : 2024-09-30
 
----
-
-## 📋 Table des Matières
-
-1. [Vue d'Ensemble](#vue-densemble)
-2. [Architecture des Partitions](#architecture-des-partitions)
-3. [Configuration par API](#configuration-par-api)
-4. [Optimisations Critiques](#optimisations-critiques)
-5. [Jobs et Schedules](#jobs-et-schedules)
-6. [Mode d'Emploi](#mode-demploi)
-7. [Troubleshooting](#troubleshooting)
+Ce document décrit le fonctionnement interne du pipeline Hub'Eau : client HTTP, service d'ingestion, assets Dagster, jobs et tests. Il fournit également les paramètres clés à ajuster selon les études scientifiques.
 
 ---
 
-## 🎯 Vue d'Ensemble
+## 1. Client Hub'Eau (`HubeauClient`)
 
-Le pipeline Hub'Eau ingère **8 APIs** du portail [Hub'Eau](https://hubeau.eaufrance.fr) vers MinIO (couche Bronze).
+Emplacement : `src/hubeau_pipeline/assets/bronze/hubeau_client.py`
 
-### APIs Supportées
+### 1.1 Caractéristiques principales
 
-| API | Source | Version | Données |
-|-----|--------|---------|---------|
-| Hydrométrie | hubeau.eaufrance.fr | v2 | Débits et niveaux des cours d'eau |
-| Piézométrie | hubeau.eaufrance.fr | v1 | Niveaux des nappes phréatiques |
-| Température | hubeau.eaufrance.fr | v1 | Température des cours d'eau |
-| ONDE | hubeau.eaufrance.fr | v1 | Observatoire National Des Étiages |
-| Qualité Cours d'Eau | hubeau.eaufrance.fr | v2 | Analyses physico-chimiques |
-| Qualité Nappes | hubeau.eaufrance.fr | v1 | Analyses physico-chimiques |
-| Hydrobiologie | hubeau.eaufrance.fr | v1 | Indices biologiques |
-| Prélèvements | hubeau.eaufrance.fr | v1 | Volumes de prélèvements |
+- **Client httpx asynchrone** avec timeout configurable (`config.timeout`, défaut 60s).
+- **Retry exponentiel avec jitter** (tenacity) sur les erreurs réseau ou HTTP (`HTTPError`, `TimeoutException`).
+- **Sémaphore global** (`GLOBAL_HUBEAU_SEMAPHORE = 10`) pour plafonner les requêtes concurrentes sur l'ensemble des assets.
+- **Pagination hybride** : support natif de la pagination page/offset et de la pagination par curseur (`supports_cursor=True`).
+- **Validation Pydantic** des réponses (`HubeauApiResponse`, `HubeauStation`, `HubeauObservation`). Les listes vides sont autorisées pour représenter des fenêtres sans données.
+- **Métriques d'ingestion** : chaque requête alimente `IngestionMetrics` (nombre de requêtes, volume retourné, durée cumulative) utilisé pour l'audit.
 
----
+### 1.2 Configuration (`HubeauApiConfig`, `HubeauEndpointConfig`)
 
-## 📊 Architecture des Partitions
+- Définies dans `hubeau_configs.py`.
+- Paramètres clés : `page_size`, `max_pages`, `supports_cursor`, `temporal_params`, `spatial_params`, `requires_spatial_filter`, `rate_limit_delay` (délai fixe entre deux requêtes).
+- Les endpoints exposent `end_offset_days` pour gérer des fenêtres fermées/exclusives (ex : hydrobiologie +1 jour).
 
-### Princip: **Partitions Alignées sur la Fréquence Réelle des Données**
+### 1.3 Gestion des erreurs
 
-| Type Partition | APIs | Nombre | Format | Raison |
-|----------------|------|--------|--------|--------|
-| **NON partitionné** | Hydrométrie | - | - | API limitée aux 30 derniers jours (restriction v2) |
-| **Quotidiennes** | Piézométrie, Température | ~1100 | `2024-09-30` | Séries temporelles continues |
-| **Annuelles** | ONDE, Qualité×2, Hydrobiologie, Prélèvements | 6 | `2024` | Campagnes/déclarations annuelles |
-
-### Détails par Type
-
-#### NON Partitionné : Hydrométrie
-
-```python
-@asset(group_name="bronze_hubeau")
-async def hubeau_hydrometry_bronze(context):
-    # Récupère automatiquement les 30 derniers jours
-    date_30_days_ago = (datetime.now() - timedelta(days=30))
-```
-
-**Raison** : L'API v2 refuse les requêtes > 30 jours dans le passé
-
-#### Quotidiennes : Piézométrie, Température
-
-```python
-DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
-```
-
-**Exemple** :
-- Partition `2024-09-30` → Données du 30 septembre 2024
-- ~1100 partitions sur 3 ans
-
-#### Annuelles : ONDE, Qualité, Hydrobiologie, Prélèvements
-
-```python
-YEARLY_PARTITIONS = StaticPartitionsDefinition(
-    ["2020", "2021", "2022", "2023", "2024", "2025"]
-)
-```
-
-**Exemple** :
-- Partition `2024` → **TOUTES** les campagnes/analyses de 2024
-- Fenêtre API : `[2024-01-01 → 2025-01-01[`
-- Les dates réelles de chaque prélèvement/campagne sont dans les données
-
-**Pourquoi annuel pour ONDE ?**
-- ~6 campagnes/an (mai-octobre)
-- Partition `2024` récupère toutes les campagnes estivales 2024
-- Plus simple que 12 partitions mensuelles (dont 6 vides)
+- Toute erreur de page est encapsulée dans `HubeauPageFetchError` et fait échouer l'ingestion si `bubble_exceptions=True`.
+- Les logs redigent les paramètres sensibles (`page`, `cursor`) mais conservent les filtres pour faciliter le debugging.
 
 ---
 
-## ⚙️ Configuration par API
+## 2. Service d'ingestion (`HubeauIngestionService`)
 
-### Hydrométrie
+### 2.1 Responsabilités
 
-```python
-Endpoints:
-  - referentiel_stations : Métadonnées stations
-  - observations_tr : Observations temps réel
-  - obs_elab : Observations élaborées
+- Préparer la configuration MinIO/S3 ou le fallback local (`./data/hubeau_bronze`).
+- Récupérer séquentiellement **stations** puis **observations** pour chaque endpoint pertinent.
+- Enregistrer systématiquement les métadonnées d'exécution, y compris pour les partitions sans données (`status = "no_data"`).
+- Propager un statut `partial_success` en cas d'erreurs partielles (stations KO mais observations OK, etc.).
 
-Partitions: NON partitionné (30 derniers jours auto)
-Chunking: 25 codes/requête
-Parallélisme: 8 requêtes simultanées
-max_pages: None (illimité)
+### 2.2 Structure de sortie
+
+```json
+{
+  "execution_date": "2024-09-30T10:15:00",
+  "partition_date": "2024-09-29",
+  "api_name": "piezometry",
+  "total_records_ingested": 12345,
+  "results_by_endpoint": {
+    "stations": {"records_count": 200, "data": [...]},
+    "chroniques": {"records_count": 12145, "data": [...]}},
+  "status": "success",
+  "metrics": {"request_count": 12, "bytes_downloaded": 5_200_000},
+  "errors": []
+}
 ```
 
-### Piézométrie
+Ces structures sont écrites telles quelles dans `ingestion_metadata.json` pour assurer un audit complet.
 
-```python
-Endpoints:
-  - stations : Métadonnées
-  - chroniques_tr : Chroniques temps réel
-  - chroniques : Chroniques élaborées
+### 2.3 Stockage
 
-Partitions: Quotidiennes
-Chunking: 50 codes/requête
-Parallélisme: 15 requêtes simultanées
-max_pages: None (illimité)
-```
-
-### Température
-
-```python
-Endpoints:
-  - station : Métadonnées
-  - chronique : Séries temporelles
-
-Partitions: Quotidiennes
-Chunking: 25 codes/requête
-Parallélisme: 15 requêtes simultanées
-max_pages: None (illimité)
-```
-
-### ONDE
-
-```python
-Endpoints:
-  - stations : Métadonnées
-  - observations : Observations écoulement
-
-Partitions: Annuelles (récupère toutes campagnes de l'année)
-Approche: Départementale (101 départements)
-Chunking: Départemental (5 depts/requête)
-Parallélisme: 6 requêtes simultanées
-max_pages: None (illimité)
-Rate limiting: 0.7s + 5 retries
-```
-
-### Qualité Cours d'Eau
-
-```python
-Endpoints:
-  - station_pc : Métadonnées
-  - analyse_pc : Analyses physico-chimiques
-
-Partitions: Annuelles (récupère tous prélèvements de l'année)
-Approche: Départementale
-max_pages: None (illimité)
-```
-
-### Qualité Nappes
-
-```python
-Endpoints:
-  - stations : Métadonnées
-  - analyses : Analyses physico-chimiques
-
-Partitions: Annuelles (récupère tous prélèvements de l'année)
-Approche: Départementale
-max_pages: None (illimité)
-```
-
-### Hydrobiologie
-
-```python
-Endpoints:
-  - stations_hydrobio : Métadonnées
-  - indices : Indices biologiques
-  - taxons : Taxons observés
-
-Partitions: Annuelles (récupère toutes campagnes de l'année)
-Approche: Départementale (1 dept/requête - API sensible)
-Chunking codes: 25 stations/requête
-Parallélisme: 4 requêtes simultanées
-max_pages: None (illimité)
-Rate limiting: 0.6s + 5 retries
-```
-
-### Prélèvements
-
-```python
-Endpoints:
-  - points_prelevement : Métadonnées
-  - chroniques : Volumes annuels
-
-Partitions: Annuelles
-Approche: Départementale (1 dept/requête)
-Parallélisme: 15 requêtes simultanées
-max_pages: None (illimité)
-Paramètres temporels: annee_min, annee_max
-```
+- **MinIO** : bucket `bronze`, clés `api/partition/`.
+  - `ingestion_metadata.json`
+  - `<endpoint>_data.json`
+  - `<endpoint>_metadata.json`
+- **Fallback local** : miroir de la structure MinIO sous `HUBEAU_LOCAL_CACHE` (défaut `./data/hubeau_bronze`).
 
 ---
 
-## 🚀 Optimisations Critiques
+## 3. Assets Dagster
 
-### 1. Sémaphore Global
+Emplacement : `src/hubeau_pipeline/assets/bronze/hubeau_assets.py`
 
-**Problème** : 6+ APIs en parallèle → 50-70 requêtes simultanées → Erreurs 500 massives
+### 3.1 Partitionnement
 
-**Solution** :
-```python
-GLOBAL_HUBEAU_SEMAPHORE = asyncio.Semaphore(10)
+| Asset | Partition | Fenêtre Hub'Eau | Remarques |
+| --- | --- | --- | --- |
+| `hubeau_hydrometry_bronze` | Pas de partition (fenêtre glissante 30 jours) | API hydrométrie v2 – limitation officielle Hub'Eau | Calcul automatique des 30 derniers jours à chaque run. |
+| `hubeau_piezometry_bronze` | Quotidienne (`DailyPartitionsDefinition`) | Données temps réel + historique | Ignore les dates futures, partition clé format `YYYY-MM-DD`. |
+| `hubeau_temperature_bronze` | Quotidienne | Temps réel stations thermométriques | Idem piézométrie. |
+| `hubeau_onde_bronze` | Mensuelle (utilise `StaticPartitionsDefinition` avec `YYYY-MM`) | Campagnes estivales ONDE | Les partitions futures sont ignorées par sécurité. |
+| `hubeau_water_quality_surface_bronze` | Annuelle (`StaticPartitionsDefinition`) | Campagnes physico-chimiques surface | Combinaison station + analyses. |
+| `hubeau_water_quality_groundwater_bronze` | Annuelle | Analyses chimie nappes | Filtre département obligatoire. |
+| `hubeau_hydrobiology_bronze` | Annuelle | Indices biologiques et taxons | Gestion des codes stations spécifiques. |
+| `hubeau_prelevements_bronze` | Annuelle | Déclarations volumes prélevés | Agrégation par ouvrage. |
 
-# Appliqué dans chaque requête HTTP
-async with GLOBAL_HUBEAU_SEMAPHORE:
-    response = await self.client.get(url, params=params)
-```
+> Les partitions disponibles sont déclarées dans `YEARLY_PARTITIONS` et doivent être mises à jour chaque nouvelle campagne.
 
-**Impact** : Max 10 requêtes simultanées vers Hub'Eau, tous clients confondus
+### 3.2 Jobs & Schedules
 
-### 2. Fenêtres Temporelles Adaptées
+- `jobs/bronze_ingestion.py` : compose les assets Bronze en jobs (`hubeau_bronze_daily_job`, `hubeau_bronze_yearly_job`).
+- `schedules/` :
+  - `bronze_daily_schedule` (execution quotidienne à 04:00 UTC).
+  - `bronze_yearly_schedule` (exécution annuelle début janvier pour l'année précédente).
+- Les schedules utilisent les filtres Dagster pour matérialiser automatiquement les partitions manquantes.
 
-**Partitions Annuelles** :
-```python
-Partition "2024"
-→ Détection: len(partition_key) == 4
-→ Fenêtre: [2024-01-01 → 2025-01-01[
-→ Récupère TOUTES les données de l'année
-```
+### 3.3 Tags & Concurrence
 
-**Partitions Quotidiennes** :
-```python
-Partition "2024-09-30"
-→ Fenêtre: [2024-09-30 → 2024-10-01[
-→ Récupère données du jour
-```
-
-**Hydrométrie (Non Partitionné)** :
-```python
-Calcul auto: (now - 30 jours) → now
-→ Respecte restriction API v2
-```
-
-### 3. Pagination Illimitée
-
-**Configuration** :
-```python
-# TOUS les endpoints de données
-max_pages = None  # Pas de limite
-depth_limit = None  # Pas de cap global
-```
-
-**Garantie** : **AUCUNE troncature** - Récupération complète de toutes les données
-
-### 4. Chunking Adaptatif
-
-| API | Chunk Size | Raison |
-|-----|------------|--------|
-| ONDE | 3 codes | API très sensible aux erreurs 500 |
-| Hydrobiologie | 25 codes | URLs longues |
-| Hydrométrie | 25 codes | Beaucoup de données/station |
-| Température | 25 codes | API sensible |
-| Autres | 50 codes | Standard |
-
-### 5. Parallélisme Contrôlé
-
-| API | Parallélisme Local | Limité par Sémaphore Global |
-|-----|-------------------|----------------------------|
-| Hydrométrie | 8 | ✅ 10 max |
-| Piézométrie | 15 | ✅ 10 max |
-| Température | 15 | ✅ 10 max |
-| ONDE | 6 (spatial) / 2 (codes) | ✅ 10 max |
-| Hydrobiologie | 4 | ✅ 10 max |
-| Autres | 10-15 | ✅ 10 max |
+Tous les assets Bronze portent `tags={"api": "hubeau"}`. Cela permet d'appliquer des règles de taux (`run_queue_config`) et d'éviter d'exécuter simultanément plus d'un asset Hub'Eau par instance Dagster si besoin.
 
 ---
 
-## 📅 Jobs et Schedules
+## 4. Tests & assurance qualité
 
-### Jobs Disponibles (10)
-
-**1 job par API/Source** - Architecture simple
-
-```python
-# Hub'Eau (8)
-hubeau_hydrometry_job           # NON partitionné
-hubeau_piezometry_job            # Quotidien
-hubeau_temperature_job           # Quotidien
-hubeau_onde_job                  # Annuel
-hubeau_water_quality_surface_job # Annuel
-hubeau_water_quality_groundwater_job # Annuel
-hubeau_hydrobiology_job          # Annuel
-hubeau_prelevements_job          # Annuel
-
-# Externes (2)
-bdlisa_bronze_job                # Mensuel
-sandre_bronze_job                # Mensuel
-```
-
-### Schedules Automatiques
-
-| Schedule | Fréquence | Cron | Heure | Job |
-|----------|-----------|------|-------|-----|
-| **hydrometry_schedule** | Quotidien | `0 6 * * *` | 6h | Hydrométrie |
-| **piezometry_schedule** | Quotidien | `0 6 * * *` | 6h | Piézométrie |
-| **temperature_schedule** | Quotidien | `0 6 * * *` | 6h | Température |
-| **onde_schedule** | Annuel | `0 7 15 1 *` | 15 jan 7h | ONDE |
-| **water_quality_surface_schedule** | Annuel | `0 8 15 1 *` | 15 jan 8h | Qualité Surface |
-| **water_quality_groundwater_schedule** | Annuel | `0 8 15 1 *` | 15 jan 8h | Qualité Nappes |
-| **hydrobiology_schedule** | Annuel | `0 10 15 1 *` | 15 jan 10h | Hydrobiologie |
-| **prelevements_schedule** | Annuel | `0 9 15 1 *` | 15 jan 9h | Prélèvements |
-| **bdlisa_schedule** | Mensuel | `0 8 1 * *` | 1er 8h | BDLISA |
-| **sandre_schedule** | Mensuel | `0 9 1 * *` | 1er 9h | Sandre |
-
-**Schedules annuels** : 15 janvier pour récupérer les données de l'année précédente
+- `tests/test_hubeau_client.py` : couvre la pagination, l'extraction des curseurs, la gestion des erreurs HTTP.
+- `tests/test_hubeau_ingestion_service.py` : vérifie la persistance MinIO/local, la production des métadonnées et les statuts (`no_data`, `partial_success`).
+- Les fixtures sous `tests/fixtures/` répliquent des extraits JSON Hub'Eau officiels pour garantir la conformité.
+- `pytest` est exécuté dans CI et doit passer sans accès réseau.
 
 ---
 
-## 🚀 Mode d'Emploi
+## 5. Paramétrages scientifiques
 
-### Lancer une Ingestion Manuelle
+### 5.1 Filtres spatiaux
 
-#### APIs Quotidiennes (Piézométrie, Température)
+- Certains endpoints (`requires_spatial_filter=True`) imposent de passer par une boucle départementale (`dept`, `code_departement`). Le service applique automatiquement la liste complète des départements métropolitains + DROM.
+- Ajuster la liste dans `HubeauIngestionService._get_french_departments()` si des études nécessitent des territoires additionnels.
 
-```
-1. Aller dans Dagster UI (http://localhost:8080)
-2. Jobs → Sélectionner hubeau_piezometry_job (ou temperature)
-3. Launch Run
-4. Sélectionner partition : 2024-09-30
-5. Launch
-```
+### 5.2 Fenêtres temporelles
 
-#### APIs Annuelles (ONDE, Qualité, Hydrobiologie, Prélèvements)
+- Les paramètres `temporal_params` définissent les champs début/fin à envoyer.
+- Pour les assets annuels, l'ingestion envoie `[YYYY-01-01, YYYY-12-31]` (ou `end_offset_days` si l'API attend une borne exclusive).
+- Les assets quotidiens utilisent la partition comme fenêtre `[day, day+1)`.
 
-```
-1. Aller dans Dagster UI
-2. Jobs → Sélectionner hubeau_onde_job (ou autre annuel)
-3. Launch Run  
-4. Sélectionner partition : 2024 (ou 2023, 2022, etc.)
-5. Launch
+### 5.3 Respect des limites Hub'Eau
 
-→ Récupère TOUTES les campagnes/analyses de l'année sélectionnée
-```
-
-#### Hydrométrie (Non Partitionné)
-
-```
-1. Jobs → hubeau_hydrometry_job
-2. Launch Run (pas de partition à choisir)
-→ Récupère automatiquement les 30 derniers jours
-```
-
-### Backfill Historique
-
-#### Exemple : Hydrobiologie 2020-2024
-
-```
-1. hubeau_hydrobiology_job
-2. Launch Backfill
-3. Sélectionner partitions : 2020, 2021, 2022, 2023, 2024
-4. Launch
-→ 5 runs pour 5 ans de données
-```
-
-#### Exemple : Température 3 derniers mois
-
-```
-1. hubeau_temperature_job
-2. Launch Backfill
-3. Sélectionner plage : [2024-07-01 ... 2024-09-30]
-4. Launch
-→ ~90 runs (1 par jour)
-```
+- `rate_limit_delay` (par défaut 0.5s) est paramétrable par API.
+- `max_retries` (3 tentatives) doit rester bas pour éviter les boucles longues en cas de maintenance Hub'Eau.
+- Pour des études intensives, planifier les runs hors heures de bureau et prévenir l'équipe Hub'Eau si la charge augmente.
 
 ---
 
-## 🔧 Configuration Technique
+## 6. Extension du pipeline
 
-### Fichiers Clés
-
-```
-src/hubeau_pipeline/
-├── assets/bronze/
-│   ├── hubeau_assets.py      # Définition des assets + partitions
-│   ├── hubeau_client.py      # Client HTTP + logique ingestion
-│   └── hubeau_configs.py     # Configuration des 8 APIs
-├── jobs/
-│   ├── bronze_ingestion.py   # Définition des 10 jobs
-│   └── __init__.py
-└── schedules/
-    └── schedules.py           # Définition des schedules auto
-```
-
-### Variables d'Environnement
-
-```bash
-# MinIO (stockage Bronze)
-MINIO_ENDPOINT=http://minio:9000
-MINIO_USER=admin
-MINIO_PASS=BrgmMinio2024!
-MINIO_BRONZE_BUCKET=bronze
-```
+1. **Ajouter un endpoint** : étendre `HubeauEndpointConfig` (ex : nouveaux paramètres) et mettre à jour `DATA_SOURCES_COMPLETE.md`.
+2. **Nouveau type d'asset** : créer un asset Bronze/Silver/Gold dans `src/hubeau_pipeline/assets/` et déclarer son partitionnement.
+3. **Transformation Silver** : utiliser `psycopg` via la ressource `pg` pour insérer les données Bronze dans TimescaleDB (procédure décrite dans `DATA_STORAGE_STRATEGY.md`).
+4. **Analyses Gold** : voir `SOSA_FUTURE_VISION.md` pour aligner les entités sur l'ontologie SOSA et alimenter Neo4j.
 
 ---
 
-## ⚙️ Détails Techniques
+## 7. Points de vigilance
 
-### Gestion des Partitions Annuelles
+- Surveiller régulièrement les changements de schéma des APIs Hub'Eau (nouvelles colonnes, champs dépréciés).
+- Documenter toute modification dans la configuration (nouveau filtre, changement de `page_size`).
+- Vérifier les volumes MinIO : un accroissement soudain peut indiquer une évolution du format Hub'Eau.
 
-**Conversion** :
-```python
-partition_key = "2024"                # Partition sélectionnée
-→ day = "2024-01-01"                  # Date de référence (1er janvier)
-→ Détection: len(partition_key) == 4  # Partition annuelle
-→ Fenêtre: [2024-01-01 → 2025-01-01[  # Année complète
-```
-
-**APIs concernées** :
-- ONDE : `date_debut_observation`, `date_fin_observation`
-- Qualité Surface/Nappes : `date_debut_prelevement`, `date_fin_prelevement`
-- Hydrobiologie : `date_debut_prelevement`, `date_fin_prelevement`
-- Prélèvements : `annee_min`, `annee_max` (gestion spéciale)
-
-### Protection Contre Surcharge API
-
-**Sémaphore Global** :
-```python
-# Maximum 10 requêtes simultanées vers Hub'Eau
-GLOBAL_HUBEAU_SEMAPHORE = asyncio.Semaphore(10)
-
-# Appliqué dans CHAQUE requête HTTP
-async with GLOBAL_HUBEAU_SEMAPHORE:
-    response = await self.client.get(url)
-```
-
-**Pourquoi ?**
-- Plusieurs jobs peuvent tourner en parallèle
-- Sans sémaphore : 50-70 requêtes simultanées → Erreurs 500
-- Avec sémaphore : 10 requêtes max → Stable
-
-### Rate Limiting par API
-
-| API | Délai | Retries | Raison |
-|-----|-------|---------|--------|
-| ONDE | 0.7s | 5 | API sensible |
-| Hydrobiologie | 0.6s | 5 | API sensible |
-| Autres | 0.5s | 3 | Standard |
-
-### Pagination et Troncatures
-
-**Configuration** :
-```python
-# TOUS les endpoints de données
-max_pages = None  # Pagination illimitée
-depth_limit = None  # Pas de limite globale
-
-# Seuls les endpoints de référentiels (métadonnées) ont des limites
-stations: max_pages = 10  # Suffisant pour 20k-50k stations
-```
-
-**Garantie** : **AUCUNE donnée perdue** par troncature
-
----
-
-## 📈 Performance et Limitations
-
-### Volumes Typiques
-
-| API | Stations | Observations/An | Temps Ingestion |
-|-----|----------|----------------|-----------------|
-| Hydrométrie | 6000+ | ~50M (30j) | ~45 min |
-| Piézométrie | 3000+ | ~1M/jour | ~10 min |
-| Température | 900+ | ~300k/jour | ~5 min |
-| ONDE | 3500+ | ~30k/an | ~2 min |
-| Qualité Surface | 5000+ | ~500k/an | ~30 min |
-| Qualité Nappes | 8000+ | ~200k/an | ~20 min |
-| Hydrobiologie | 20000+ | ~100k/an | ~10 min |
-| Prélèvements | 80000+ | ~2M/an | ~60 min |
-
-### Limitations API Hub'Eau
-
-| API | Limitation | Workaround |
-|-----|------------|------------|
-| Hydrométrie v2 | 30 jours max | Asset non partitionné, récup auto |
-| Toutes | Profondeur pagination 20k | max_pages=None + chunking |
-| Toutes | URL max 2083 chars | Chunking codes (3-50 selon API) |
-| Toutes | Rate limiting | Sémaphore global + délais |
-
----
-
-## 🐛 Troubleshooting
-
-### Erreurs 500 Internal Server Error
-
-**Causes** :
-- API surchargée (trop de requêtes simultanées)
-- URL trop longue (trop de codes)
-- Paramètres invalides
-
-**Solutions automatiques** :
-- ✅ Sémaphore global (10 requêtes max)
-- ✅ Chunking adaptatif (3-50 codes)
-- ✅ Retries exponentiels (5 tentatives)
-- ✅ Split binaire (chunk divisé en 2 si échec)
-
-### Partition Future Détectée
-
-```
-⏭️ Partition future détectée (2026) – ingestion ignorée
-```
-
-**Cause** : Vous avez sélectionné une partition future  
-**Solution** : Sélectionner une partition passée (ex: 2024, 2023)
-
-### Aucune Donnée Récupérée (0 observations)
-
-**Causes possibles** :
-1. **Partition future** : Données pas encore disponibles
-2. **Année sans campagne** : Normal pour certaines APIs (ex: Hydrobio)
-3. **Délais de saisie** : Campagnes faites mais pas encore saisies
-
-**Vérification** :
-- Hydrobiologie 2025 → Normal (campagnes pas faites)
-- Hydrobiologie 2024 → Devrait avoir des données
-- Hydrobiologie 2020 → ✅ 75k observations confirmées
-
-### Troncatures
-
-```
-⚠️ TRONCATURE: max_pages=20 atteint
-```
-
-**Cause** : Configuration obsolète  
-**Solution** : ✅ Déjà corrigé - max_pages=None partout
-
-Si vous voyez encore ce message :
-1. Vérifier `hubeau_configs.py` : Tous les endpoints données doivent avoir `max_pages=None`
-2. Redémarrer Dagster
-
----
-
-## 📚 Références
-
-### Documentation Hub'Eau
-- [Portail Hub'Eau](https://hubeau.eaufrance.fr)
-- [API ONDE](https://hubeau.eaufrance.fr/page/api-ecoulement)
-- [Swagger/OpenAPI](https://hubeau.eaufrance.fr/page/apis)
-
-### Client Python de Référence
-- [cl-hubeau](https://github.com/tgrandje/cl-hubeau) - Client officieux Python
-- [Documentation cl-hubeau](https://tgrandje.github.io/cl-hubeau/)
-
-### Architecture Interne
-- `docs/ARCHITECTURE_MODERNE.md` - Stack technique globale
-- `docs/DATA_SOURCES_COMPLETE.md` - Sources de données
-- `docs/DATA_STORAGE_STRATEGY.md` - Stratégie de stockage
-
----
-
-## ✅ Validation
-
-**Tests Effectués** :
-- ✅ Hydrobiologie 2020 : 75k observations (vs 0 avant correctifs)
-- ✅ ONDE : 0 erreur 500 après optimisations
-- ✅ Hydrométrie : 30 jours récupérés automatiquement
-- ✅ Partitions annuelles : Fenêtres complètes [01/01 → 31/12]
-
-**Statut** : ✅ **PRODUCTION READY**
-
----
-
-**Architecture finale validée le 1er octobre 2025**
-
+Ce document doit être relu à chaque ajout de fonctionnalité pour garantir l'adéquation entre la documentation et le code.

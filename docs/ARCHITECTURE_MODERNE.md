@@ -1,486 +1,97 @@
-# Architecture Hub'Eau Pipeline
+# Architecture Hub'Eau – Vue d'ensemble
 
-Documentation technique de l'architecture et de la stack utilisée
+Dernière vérification : 2024-09-30
 
----
-
-## Stack Technologique
-
-### Orchestration et Ingestion
-
-```mermaid
-graph LR
-    A[Dagster<br/>Assets•Jobs•Schedules] --> B[httpx + tenacity<br/>Async + Retry]
-    B --> C[Hub'Eau APIs<br/>8 APIs v1/v2]
-    C --> D[MinIO Bronze<br/>JSON partitionné]
-```
-
-### Librairies Python
-
-| Librairie | Version | Rôle |
-|-----------|---------|------|
-| dagster | 1.5+ | Orchestration pipeline |
-| httpx | 0.24+ | Client HTTP async |
-| tenacity | 8.2+ | Retry automatique |
-| pydantic | 2.0+ | Validation données |
-| boto3 | Latest | Client MinIO/S3 |
+Ce document décrit l'architecture logicielle et infrastructurelle du pipeline Hub'Eau. Il doit permettre à un·e postdoc ou ingénieur·e de comprendre instantanément comment les briques interagissent et comment déployer l'ensemble dans différents contextes (local, laboratoire BRGM, cloud).
 
 ---
 
-## Infrastructure Docker
+## 1. Composants principaux
 
-### Services Déployés
-
-```yaml
-Services:
-  dagster_webserver:    # Interface Dagster (port 8080)
-  dagster_daemon:       # Orchestration background
-  timescaledb:          # Séries temporelles (port 5432)
-  postgis:              # Géospatial (port 5433)
-  neo4j:                # Graphe sémantique (ports 7474, 7687)
-  minio:                # Object storage S3 (ports 9000, 9001)
-  pgadmin:              # Admin PostgreSQL (port 5050)
-```
-
-### Choix Architecturaux
-
-| Choix | Alternative | Raison |
-|-------|-------------|--------|
-| **Dagster** vs Airflow | Asset-centric vs Task-centric | Type-safety, partitions natives, backfilling simplifié |
-| **httpx** vs requests | Async natif vs Sync | Performance I/O, HTTP/2, timeouts granulaires |
-| **3 bases** vs 1 PostgreSQL | Spécialisées vs Générique | TimescaleDB (1000x agrégations), PostGIS (100x spatial), Neo4j (traversal linéaire) |
-| **MinIO** vs Filesystem | S3-compatible vs Local | Migration cloud, distribution, versioning |
+| Couche | Description | Technologies |
+| --- | --- | --- |
+| **Orchestration** | Dagster orchestre les assets partitionnés, jobs et schedules. `src/hubeau_pipeline/definitions.py` agrège assets, jobs, schedules et resources. | Dagster 1.x |
+| **Ingestion** | `HubeauClient` (httpx + tenacity) & `HubeauIngestionService` réalisent les appels Hub'Eau, gèrent la pagination, calculent les métriques et stockent les payloads. | Python 3.11, httpx, tenacity, Pydantic |
+| **Stockage Bronze** | MinIO bucket `bronze`, structuré par API/partition. Fallback automatique vers `./data/hubeau_bronze` si MinIO indisponible. | MinIO/S3, JSON |
+| **Stockage Silver** | Tables relationnelles (TimescaleDB/Postgres) alimentées par des assets Silver (non couverts dans ce dépôt, mais prévus). | TimescaleDB, Postgres |
+| **Stockage Gold** | Knowledge graph (Neo4j) aligné sur l'ontologie SOSA/SSN. | Neo4j |
+| **Observabilité** | Logs Dagster, métriques `IngestionMetrics` retournées par le service et stockées dans `ingestion_metadata.json`. | Dagster, JSON |
 
 ---
 
-## Architecture de Données
+## 2. Flux de données
 
-```mermaid
-graph TB
-    subgraph Sources["Sources Externes"]
-        H1[Hub'Eau 8 APIs]
-        H2[BDLISA WFS]
-        H3[Sandre APIs]
-    end
-    
-    subgraph Bronze["Bronze Layer - MinIO"]
-        B1[bronze/hydrometry/]
-        B2[bronze/piezometry/]
-        B3[bronze/bdlisa/]
-        B4[bronze/sandre/]
-    end
-    
-    subgraph Silver["Silver Layer - Bases Spécialisées"]
-        TS[(TimescaleDB<br/>Séries temporelles)]
-        PG[(PostGIS<br/>Géospatial)]
-        N4[(Neo4j<br/>Graphe sémantique)]
-    end
-    
-    subgraph Gold["Gold Layer"]
-        KG[Knowledge Graph SOSA]
-    end
-    
-    H1 --> B1
-    H1 --> B2
-    H2 --> B3
-    H3 --> B4
-    
-    B1 --> TS
-    B2 --> TS
-    B1 --> PG
-    B2 --> PG
-    B3 --> N4
-    B4 --> N4
-    
-    TS --> KG
-    PG --> KG
-    N4 --> KG
-```
+1. **Déclenchement** : un job Dagster (ex : `hubeau_bronze_daily_job`) exécute une liste d'assets Bronze.
+2. **Partitionnement** : Dagster fournit la partition (jour/mois/année) et assure que les partitions futures sont ignorées.
+3. **Ingestion** : `HubeauClient` enchaîne les requêtes avec sémaphore global (`GLOBAL_HUBEAU_SEMAPHORE=10`) et retries exponentiels. Les curseurs `next` sont extraits et rejoués jusqu'à épuisement des pages.
+4. **Consolidation** : `HubeauIngestionService` fusionne stations et observations, calcule le total d'enregistrements, sérialise les métriques et remonte les erreurs éventuelles (`partial_success` si une portion échoue).
+5. **Stockage** : écriture dans MinIO (`ingestion_metadata.json`, `*_data.json`, `*_metadata.json`). Si MinIO est indisponible, le service bascule sur le disque local.
+6. **Consommation** : assets Silver/Gold et analyses scientifiques consomment les JSON Bronze pour produire des tables analytiques ou des graphes.
 
 ---
 
-## Structure du Code
+## 3. Ressources Dagster
 
-```
-src/hubeau_pipeline/
-├── assets/
-│   ├── bronze/
-│   │   ├── hubeau_client.py          # Client HTTP avec retry
-│   │   ├── hubeau_configs.py         # Configuration 8 APIs
-│   │   ├── hubeau_assets.py          # Assets Dagster
-│   │   ├── __init__.py
-│   │   └── legacy/
-│   │       ├── bdlisa_real_ingestion.py
-│   │       ├── sandre_real_ingestion.py
-│   │       └── README.md
-│   ├── silver/
-│   │   ├── timescale_complete.py
-│   │   ├── postgis_neo4j.py
-│   │   └── silver.py
-│   └── gold/
-│       ├── gold.py
-│       └── production_analytics.py
-├── jobs/
-│   ├── bronze_ingestion.py           # Jobs par thématique
-│   ├── analytics.py
-│   └── __init__.py
-├── schedules/
-│   └── schedules.py                  # Planification temporelle
-├── sensors/
-│   ├── data_freshness.py
-│   └── error_detection.py
-├── resources.py                      # Connexions bases
-├── utils.py
-└── definitions.py                    # Point d'entrée Dagster
-```
+`src/hubeau_pipeline/resources.py` expose les ressources partagées :
+
+- `s3` : client MinIO initialisé via les variables d'environnement et injecté dans les assets Bronze.
+- `http_client` (si besoin d'assets complémentaires) : pattern standard pour partager un client HTTP configuré.
+- Ressources futures : connexions TimescaleDB, Neo4j, services d'alerting.
+
+Les assets Bronze déclarent `required_resource_keys={"s3"}` pour bénéficier des connexions configurées dans `dagster_home`.
 
 ---
 
-## Configuration des APIs
+## 4. Déploiements
 
-### Structure de Configuration
+### 4.1 Environnement local (développement)
 
-Toutes les configurations sont centralisées dans `hubeau_configs.py` :
+- **Docker Compose** (`docker-compose.yml`) lance : `dagster_webserver`, `dagster_daemon`, `postgres`, `timescaledb`, `minio`, `neo4j`.
+- Le réseau `brgm` connecte toutes les briques. Les volumes locaux persistent les données (`./dagster_home`, `./data`).
+- Utiliser cet environnement pour valider les jobs, écrire des tests et préparer les PR.
 
-```python
-# hubeau_configs.py
-class HubeauEndpointConfig:
-    path: str                         # Chemin endpoint
-    temporal_params: Dict[str, str]   # Paramètres temporels
-    spatial_params: Dict[str, str]    # Paramètres spatiaux
-    page_size: int                    # Taille page
-    max_pages: int                    # Limite pages
-    depth_limit: int                  # Limite records total
-    requires_spatial_filter: bool     # Filtre spatial obligatoire
-    supports_cursor: bool             # Pagination cursor
-    cache_duration: int               # Durée cache (minutes)
+### 4.2 Serveurs internes BRGM
 
-class HubeauApiConfig:
-    name: str
-    base_url: str
-    version: str
-    endpoints: Dict[str, HubeauEndpointConfig]
-```
+- Déploiement recommandé via Docker Compose ou Kubernetes (Helm Dagster + StatefulSets MinIO/Postgres/Neo4j).
+- Configurer les accès réseau sortants (firewall) vers `https://hubeau.eaufrance.fr`.
+- Mettre en place des sauvegardes MinIO (versioning) et Postgres (dump quotidien).
 
-### Exemple de Configuration
+### 4.3 Cloud / HPC
 
-```python
-# Configuration Piézométrie
-piezometry_config = HubeauApiConfig(
-    name="piezometry",
-    base_url="https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
-    version="v1",
-    endpoints={
-        "chroniques": HubeauEndpointConfig(
-            path="chroniques",
-            temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
-            page_size=1000,
-            max_pages=50,
-            depth_limit=50000,
-            requires_spatial_filter=True,
-            spatial_params={"dept": "code_departement"}
-        )
-    }
-)
-```
+- Possibilité de remplacer MinIO par un bucket S3 natif (AWS, OVH, Scaleway). Le service d'ingestion supporte n'importe quel endpoint compatible S3.
+- Les assets Dagster peuvent être exécutés via `dagster-cloud` ou `dagster-k8s`. Prévoir un sémaphore global identique pour éviter de saturer Hub'Eau.
 
 ---
 
-## Client HTTP
+## 5. Décisions d'architecture clés
 
-### Mécanisme de Retry
-
-Le client utilise `tenacity` pour retry automatique :
-
-```python
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=60),
-    reraise=True
-)
-async def fetch_data(url: str, params: dict):
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
-```
-
-**Paramètres** :
-- 5 tentatives maximum
-- Backoff exponentiel : 2s, 4s, 8s, 16s, 32s
-- Timeout : 30 secondes par requête
-
-### Gestion des Erreurs
-
-| Code HTTP | Comportement |
-|-----------|--------------|
-| 400 | Retry (souvent lié aux dates) |
-| 500 | Retry (surcharge temporaire) |
-| Timeout | Retry |
-| 200 | Succès |
+| Décision | Raison | Impact |
+| --- | --- | --- |
+| **Sémaphore global (10 requêtes)** | Hub'Eau limite implicitement la charge simultanée. Mutualiser la limite évite de saturer l'API lorsque plusieurs assets tournent. | Concurrency maîtrisée, moins de 429/500. |
+| **Fallback local automatique** | Les environnements de recherche n'ont pas toujours MinIO/S3. Assurer une persistance locale évite toute perte de données. | Données toujours présentes, même offline. |
+| **Partition annuelle pour campagnes** | Les APIs `qualite`, `hydrobiologie`, `prelevements` sont structurées autour de campagnes/plans annuels. | Simplifie l'orchestration, aligné sur la gouvernance Hub'Eau. |
+| **Statut explicite (`no_data`, `partial_success`)** | Distinguer une partition vide d'une ingestion échouée. | Observabilité claire, métriques robustes. |
+| **Tests hors-ligne** | Les tests Pytest utilisent des fixtures locales pour éviter les appels réseau, garantissant la reproductibilité. | CI fiable sans dépendance externe. |
 
 ---
 
-## Partitionnement
+## 6. Sécurité & conformité
 
-### Types de Partitions
-
-```python
-# Partitions quotidiennes (depuis 2022)
-DAILY_PARTITIONS = DailyPartitionsDefinition(
-    start_date="2022-01-01"
-)
-
-# Hydrométrie : 30 derniers jours
-HYDROMETRY_RECENT_PARTITIONS = DailyPartitionsDefinition(
-    start_date=(datetime.now() - timedelta(days=29)).strftime("%Y-%m-%d"),
-    end_offset=0
-)
-
-# Prélèvements : Annuelles
-YEARLY_PARTITIONS = StaticPartitionsDefinition(
-    ["2020", "2021", "2022", "2023", "2024", "2025"]
-)
-```
-
-### Application par API
-
-| API | Type Partition | Raison |
-|-----|----------------|--------|
-| Hydrométrie | 30 derniers jours | Restriction API v2 |
-| Prélèvements | Annuelle | Déclarations annuelles |
-| Autres APIs | Quotidienne depuis 2022 | Données temporelles |
+- Les identifiants MinIO/Postgres/Neo4j sont stockés dans `.env` (non committé) et injectés via variables d'environnement.
+- Les exports JSON Bronze ne contiennent pas de données personnelles. Vérifier néanmoins les obligations de diffusion (licence Hub'Eau CC-BY).
+- Prévoir un chiffrement au repos (MinIO SSE) sur les environnements de production.
 
 ---
 
-## Jobs Dagster
+## 7. Checklist de mise en production
 
-### Structure des Jobs
-
-```python
-# jobs/bronze_ingestion.py
-
-# Job principal (6 APIs quotidiennes)
-hubeau_bronze_job = define_asset_job(
-    name="hubeau_bronze_job",
-    selection=[
-        "hubeau_piezometry_bronze",
-        "hubeau_temperature_bronze",
-        "hubeau_hydrobiology_bronze",
-        "hubeau_onde_bronze",
-        "hubeau_water_quality_groundwater_bronze",
-        "hubeau_water_quality_surface_bronze"
-    ]
-)
-
-# Job Hydrométrie (partition spécifique)
-hubeau_hydrometry_job = define_asset_job(
-    name="hubeau_hydrometry_job",
-    selection=["hubeau_hydrometry_bronze"]
-)
-
-# Job Prélèvements (partition annuelle)
-hubeau_prelevements_job = define_asset_job(
-    name="hubeau_prelevements_job",
-    selection=["hubeau_prelevements_bronze"]
-)
-```
-
-### Séparation des Jobs
-
-**Raison** : Dagster impose partitions identiques au sein d'un job.
-
-**Conséquence** : APIs avec partitions différentes = jobs séparés.
+1. Vérifier la connectivité Hub'Eau (curl + tests limités) depuis l'environnement cible.
+2. Configurer `GLOBAL_HUBEAU_SEMAPHORE` selon la politique d'usage (10 recommandé).
+3. Créer le bucket MinIO/S3 (`bronze`) ou adapter `MINIO_BRONZE_BUCKET`.
+4. Définir les schedules Dagster (daily, yearly) et activer la surveillance (Dagster sensors/alerting).
+5. Mettre en place les sauvegardes MinIO/Postgres/Neo4j.
+6. Documenter dans `DATA_SOURCES_COMPLETE.md` toute restriction spécifique (maintenance Hub'Eau, quotas additionnels).
 
 ---
 
-## Limitation de Concurrence
-
-### Configuration Dagster
-
-**dagster_home/dagster.yaml** :
-```yaml
-run_coordinator:
-  module: dagster.core.run_coordinator
-  class: QueuedRunCoordinator
-  config:
-    max_concurrent_runs: 2
-    tag_concurrency_limits:
-      - key: "api"
-        value: "hubeau"
-        limit: 1
-```
-
-### Comportement
-
-- **Tag `api: hubeau`** : Tous les assets Hub'Eau
-- **Limite 1** : Une partition à la fois
-- **Résultat** : Backfill de 30 partitions = 30 runs séquentiels
-
-**Objectif** : Protection API Hub'Eau contre surcharge
-
----
-
-## Stockage MinIO
-
-### Structure des Buckets
-
-```
-bronze/
-  ├── hydrometry/
-  │   └── 2024-09-15/
-  │       ├── stations.json
-  │       ├── observations_tr.json
-  │       └── ingestion_metadata.json
-  ├── piezometry/
-  │   └── 2024-09-15/
-  ├── temperature/
-  ├── hydrobiology/
-  ├── onde/
-  ├── water_quality_groundwater/
-  ├── water_quality_surface/
-  ├── prelevements/
-  ├── bdlisa/
-  └── sandre/
-
-silver/
-  └── (données transformées)
-
-gold/
-  └── (agrégations)
-```
-
-### Métadonnées d'Ingestion
-
-Chaque partition génère `ingestion_metadata.json` :
-
-```json
-{
-  "execution_date": "2025-09-30T14:00:00",
-  "partition_date": "2024-09-15",
-  "api_name": "piezometry",
-  "total_records_ingested": 25243,
-  "status": "success",
-  "endpoints": {
-    "stations": 24871,
-    "chroniques": 372
-  }
-}
-```
-
----
-
-## Bases de Données
-
-### TimescaleDB
-
-**Port** : 5432  
-**Base** : `water_timeseries`
-
-**Structure** :
-```sql
-CREATE TABLE observations (
-    timestamp TIMESTAMPTZ NOT NULL,
-    station_code TEXT,
-    parametre_code TEXT,
-    valeur DOUBLE PRECISION,
-    qualite_code INT
-);
-
-SELECT create_hypertable('observations', 'timestamp');
-```
-
-### PostGIS
-
-**Port** : 5433  
-**Base** : `water_geo`
-
-**Structure** :
-```sql
-CREATE TABLE stations_geo (
-    station_code TEXT PRIMARY KEY,
-    nom TEXT,
-    geom GEOMETRY(Point, 4326)
-);
-
-CREATE INDEX idx_stations_geom ON stations_geo USING GIST(geom);
-```
-
-### Neo4j
-
-**Ports** : 7474 (HTTP), 7687 (Bolt)  
-**Base** : `neo4j`
-
-**Structure** :
-```cypher
-(:Station)-[:OBSERVES]->(:Property)
-(:Station)-[:LOCATED_IN]->(:Aquifer)
-(:Property)-[:HAS_UNIT]->(:Unit)
-```
-
----
-
-## Sécurité et Déploiement
-
-### Contrôle d'Accès
-
-**PostgreSQL/TimescaleDB/PostGIS** :
-```sql
-CREATE USER dagster_service WITH PASSWORD 'xxx';
-GRANT INSERT, SELECT, UPDATE ON ALL TABLES TO dagster_service;
-
-CREATE USER analyst_readonly WITH PASSWORD 'xxx';
-GRANT SELECT ON ALL TABLES TO analyst_readonly;
-```
-
-**Neo4j** :
-```cypher
-CREATE USER analyst_readonly SET PASSWORD 'xxx';
-GRANT ROLE reader TO analyst_readonly;
-```
-
-### Installation Rapide
-
-```bash
-git clone <repo>
-cd brgm
-cp env.example .env
-docker-compose up -d
-```
-
-### Scripts d'Initialisation
-
-```
-docker/init-scripts/
-├── timescaledb/01-init-water-timeseries.sql
-├── timescaledb/02-create-hypertables.sql
-├── postgis/01-init-water-geo.sql
-├── postgis/02-create-functions.sql
-├── neo4j/01-init-sandre-sosa.cypher
-├── neo4j/02-create-sandre-data.cypher
-└── neo4j/03-create-relations-sosa.cypher
-```
-
----
-
-## Références
-
-### Bibliothèques
-
-- [httpx](https://www.python-httpx.org/) - Client HTTP async
-- [tenacity](https://tenacity.readthedocs.io/) - Retry automatique
-- [pydantic](https://docs.pydantic.dev/) - Validation données
-- [Dagster](https://docs.dagster.io/) - Orchestration
-
-### Hub'Eau
-
-- [cl-hubeau](https://tgrandje.github.io/cl-hubeau/) - Client Python référence
-- [Hub'Eau API](https://hubeau.eaufrance.fr/page/apis) - Documentation officielle
-
----
-
-**Version** : 2.1  
-**Dernière mise à jour** : Octobre 2025  
-**Note** : Architecture consolidée avec infrastructure Docker et déploiement intégrés
+Cette architecture est conçue pour être extensible et reproductible. Toute évolution (nouvelle API, nouveau stockage) doit être décrite ici pour maintenir une vision partagée du pipeline.
