@@ -475,6 +475,8 @@ class HubeauClient:
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
             elif self.config.name == "superficial_waterbodies_quality":
                 chunk_size = 1  # ✅ Qualité cours d'eau: 1 département (API très sensible aux erreurs 400)
+            elif self.config.name == "ground_water_quality":
+                chunk_size = 1  # ✅ Qualité nappes: 1 département (API très sensible aux erreurs 400)
             elif self.config.name == "onde":
                 chunk_size = 5  # ✅ ONDE: 5 départements (approche départementale comme cl-hubeau)
             elif depth_limit is not None and depth_limit <= 10000:
@@ -494,6 +496,8 @@ class HubeauClient:
                 MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
             elif self.config.name == "superficial_waterbodies_quality":
                 MAX_CONCURRENT_SPATIAL = 3   # ✅ Qualité cours d'eau: parallélisme très conservateur (API très sensible)
+            elif self.config.name == "ground_water_quality":
+                MAX_CONCURRENT_SPATIAL = 3   # ✅ Qualité nappes: parallélisme très conservateur (API très sensible)
             elif self.config.name == "onde":
                 MAX_CONCURRENT_SPATIAL = 6   # ✅ ONDE: parallélisme modéré (5 depts/requête)
             else:
