@@ -209,7 +209,16 @@ $$;
 GRANT CONNECT ON DATABASE water_geo TO geo_dashboard_user;
 GRANT USAGE ON SCHEMA public TO geo_dashboard_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO geo_dashboard_user;
-GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA public TO geo_dashboard_user;
+-- Grant sur les vues matérialisées (syntaxe compatible PostgreSQL 16)
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (SELECT schemaname, matviewname FROM pg_matviews WHERE schemaname = 'public') LOOP
+        EXECUTE 'GRANT SELECT ON ' || quote_ident(r.schemaname) || '.' || quote_ident(r.matviewname) || ' TO geo_dashboard_user';
+    END LOOP;
+END
+$$;
 
 -- Utilisateur analytics géospatial
 DO $$
