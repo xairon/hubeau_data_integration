@@ -4,7 +4,7 @@ Assets clairs et logiques pour chaque API Hub'Eau avec vraies APIs
 """
 
 from dagster import AssetExecutionContext, AssetIn, AssetKey, DailyPartitionsDefinition, asset
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any
 import asyncio
 
@@ -19,7 +19,6 @@ DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
 
 # ⚠️ HYDROMÉTRIE : API v2 limitée aux 30 derniers jours SEULEMENT
 # Restriction Hub'Eau : "date can't be < 1 month from now"
-from datetime import datetime, timedelta
 from dagster import StaticPartitionsDefinition
 
 HYDROMETRY_RECENT_PARTITIONS = DailyPartitionsDefinition(
@@ -47,7 +46,33 @@ async def ingest_hubeau_api(context: AssetExecutionContext, api_name: str) -> Di
         day = f"{partition_key}-01-01"  # Utiliser 1er janvier comme date de référence
     else:
         day = partition_key
-    
+
+    # Éviter les requêtes Hub'Eau sur des partitions futures (observé sur ONDE → erreurs 500)
+    try:
+        if len(partition_key) == 4:
+            partition_dt = datetime(int(partition_key), 1, 1)
+            is_future_partition = partition_dt.year > datetime.now().year
+        else:
+            partition_dt = datetime.fromisoformat(day)
+            is_future_partition = partition_dt.date() > datetime.now().date()
+    except ValueError:
+        partition_dt = None
+        is_future_partition = False
+
+    if is_future_partition:
+        context.log.warning(
+            "⏭️ Partition future détectée (%s) – ingestion Hub'Eau %s ignorée pour éviter les erreurs 500",
+            partition_key,
+            api_name,
+        )
+        return {
+            "execution_date": datetime.now().isoformat(),
+            "partition_date": partition_key,
+            "api_name": api_name,
+            "status": "skipped_future_partition",
+            "total_records_ingested": 0,
+        }
+
     context.log.info(f"🚀 Début ingestion {api_name} Hub'Eau pour {partition_key}")
 
     try:
