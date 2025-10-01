@@ -72,6 +72,7 @@ def get_hydrometry_config() -> HubeauApiConfig:
                        temporal_params={"start": "date_debut_obs_elab", "end": "date_fin_obs_elab"},
                        page_size=1000,
                        max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
+                       supports_cursor=True,
                        cache_duration=30,
                        requires_spatial_filter=False,
                        depth_limit=None

@@ -1,91 +1,28 @@
-# Documentation du Projet BRGM Hub'Eau
+# Documentation Hub'Eau – BRGM
 
-**Structure documentaire organisée et à jour**
+Cette arborescence regroupe la documentation scientifique et technique du pipeline. Chaque guide est versionné avec le code et doit être mis à jour lors de toute modification fonctionnelle ou d'architecture.
 
----
+## 🧭 Plan de lecture
 
-## 📚 Documentation par Thématique
+| Document | Contenu |
+| --- | --- |
+| [`ARCHITECTURE_MODERNE.md`](ARCHITECTURE_MODERNE.md) | Diagrammes logiques, topologies de déploiement, ressources Dagster et intégrations (MinIO, TimescaleDB, Neo4j). |
+| [`HUBEAU_PIPELINE.md`](HUBEAU_PIPELINE.md) | Détails du client HTTP, du service d'ingestion, des assets Dagster et de la stratégie de partitionnement. |
+| [`DATA_SOURCES_COMPLETE.md`](DATA_SOURCES_COMPLETE.md) | Fiches techniques par API Hub'Eau (endpoints, paramètres, fréquence, liens officiels). |
+| [`DATA_STORAGE_STRATEGY.md`](DATA_STORAGE_STRATEGY.md) | Conventions Bronze (MinIO & fallback local), politiques de rétention, contrôles qualité. |
+| [`CODE_REVIEW.md`](CODE_REVIEW.md) | Checklist scientifique/logicielle pour les PR et bonnes pratiques de validation. |
+| [`SOSA_FUTURE_VISION.md`](SOSA_FUTURE_VISION.md) | Roadmap Silver/Gold, modélisation SOSA et articulation avec les projets de recherche BRGM. |
 
-### 🌊 Pipeline Hub'Eau (Ingestion Bronze)
+## 🔄 Gouvernance documentaire
 
-**[HUBEAU_PIPELINE.md](HUBEAU_PIPELINE.md)** - Documentation complète Hub'Eau
-- Architecture des partitions (quotidiennes/annuelles/non-partitionnées)
-- Configuration des 8 APIs
-- Optimisations critiques (sémaphore global, fenêtres temporelles)
-- Jobs et schedules
-- Mode d'emploi et troubleshooting
+- Chaque PR modifiant le comportement d'un asset ou d'une configuration API doit référencer la section documentation mise à jour.
+- Les tableaux listant les endpoints incluent la date de dernière vérification. Mettre à jour cette date lors de la revue.
+- Les décisions d'architecture sont récapitulées dans `ARCHITECTURE_MODERNE.md` et `HUBEAU_PIPELINE.md` avec le rationnel scientifique/technique.
 
-### 🏗️ Architecture Globale
+## 🧰 Ressources externes
 
-**[ARCHITECTURE_MODERNE.md](ARCHITECTURE_MODERNE.md)** - Stack technique
-- Infrastructure Docker (Dagster, MinIO, TimescaleDB, PostGIS, Neo4j)
-- Choix technologiques justifiés
-- Architecture Medallion (Bronze/Silver/Gold)
+- [Portail Hub'Eau – documentation officielle](https://hubeau.eaufrance.fr/page/apis)
+- [Dagster Documentation](https://docs.dagster.io/)
+- [SOSA/SSN Ontology](https://www.w3.org/TR/vocab-ssn/)
 
-### 📊 Données
-
-**[DATA_SOURCES_COMPLETE.md](DATA_SOURCES_COMPLETE.md)** - Sources de données
-- Liste complète des APIs intégrées
-- Fréquences de mise à jour
-- Volumes de données
-
-**[DATA_STORAGE_STRATEGY.md](DATA_STORAGE_STRATEGY.md)** - Stratégie de stockage
-- Bronze : MinIO (JSON)
-- Silver : TimescaleDB, PostGIS, Neo4j
-- Gold : Knowledge Graph SOSA
-
-### 🔮 Vision et Futur
-
-**[SOSA_FUTURE_VISION.md](SOSA_FUTURE_VISION.md)** - Ontologie SOSA
-- Modélisation sémantique
-- Graphe de connaissances
-- Standards W3C
-
-### 🔍 Qualité
-
-**[CODE_REVIEW.md](CODE_REVIEW.md)** - Code review
-- Bonnes pratiques
-- Points d'attention
-- Recommandations
-
----
-
-## 🗂️ Structure Recommandée
-
-```
-docs/
-├── README.md                     ← Vous êtes ici (Index)
-├── HUBEAU_PIPELINE.md           ← ⭐ DOC PRINCIPALE Hub'Eau
-├── ARCHITECTURE_MODERNE.md       ← Stack technique
-├── DATA_SOURCES_COMPLETE.md      ← Sources données
-├── DATA_STORAGE_STRATEGY.md      ← Stratégie stockage
-├── SOSA_FUTURE_VISION.md         ← Vision ontologie
-└── CODE_REVIEW.md                ← Qualité code
-```
-
----
-
-## 🚀 Quick Start
-
-**Nouveau sur le projet ?** Lire dans cet ordre :
-
-1. **[README.md](../README.md)** (racine) - Vue d'ensemble et démarrage rapide
-2. **[HUBEAU_PIPELINE.md](HUBEAU_PIPELINE.md)** - Pipeline Hub'Eau détaillé
-3. **[ARCHITECTURE_MODERNE.md](ARCHITECTURE_MODERNE.md)** - Stack technique
-
-**Utilisation quotidienne ?** 
-
-→ **[HUBEAU_PIPELINE.md](HUBEAU_PIPELINE.md)** - Votre référence principale
-
----
-
-## 🔄 Maintenance Documentation
-
-**Règles** :
-- ✅ **1 document par thématique** (pas de duplication)
-- ✅ **Mise à jour immédiate** après changements architecture
-- ✅ **Exemples concrets** et testés
-- ✅ **Dates de dernière mise à jour** visibles
-
-**Dernière refonte complète** : 1er octobre 2025
-
+La documentation doit rester synchrone avec les implémentations pour garantir la reproductibilité des travaux scientifiques.

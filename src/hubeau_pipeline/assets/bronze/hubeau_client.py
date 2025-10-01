@@ -10,6 +10,7 @@ import random
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from tenacity import (
@@ -42,8 +43,14 @@ GLOBAL_HUBEAU_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 requêtes simultanées
 class HubeauPageFetchError(RuntimeError):
     """Erreur levée lorsqu'une page Hub'Eau ne peut pas être récupérée."""
 
-    def __init__(self, endpoint: str, page: int, params: Dict[str, Any], original: Exception):
-        redacted_params = {k: v for k, v in params.items() if k != "page"}
+    def __init__(
+        self,
+        endpoint: str,
+        page: int,
+        params: Dict[str, Any],
+        original: Exception,
+    ):
+        redacted_params = {k: v for k, v in params.items() if k not in {"page", "cursor"}}
         message = (
             f"Echec de récupération de la page {page} pour '{endpoint}' "
             f"avec paramètres {redacted_params}: {original}"
@@ -243,54 +250,90 @@ class HubeauClient:
         bubble_exceptions: bool = False  # ✅ CORRECTIF B: paramètre pour propager exceptions
     ) -> List[Dict[str, Any]]:
         """Helper pour récupérer toutes les pages d'un endpoint"""
-        all_data = []
-        page = 1
-        max_pages = endpoint_config.max_pages if endpoint_config.max_pages is not None else float('inf')
-        
-        while page <= max_pages:
+        all_data: List[Dict[str, Any]] = []
+        pages_fetched = 0
+        cursor: Optional[str] = None
+        max_pages = endpoint_config.max_pages
+        page_size = params.get("size", endpoint_config.page_size)
+
+        while True:
+            if max_pages is not None and pages_fetched >= max_pages:
+                break
+
             page_params = params.copy()
-            page_params["page"] = page
-            
+            if endpoint_config.supports_cursor:
+                if cursor:
+                    page_params["cursor"] = cursor
+            else:
+                page_params["page"] = pages_fetched + 1
+
             try:
                 response_data = await self._make_request(endpoint_config.path, page_params)
-                
+
                 if not response_data.data:
                     break
-                
+
                 all_data.extend(response_data.data)
-                
-                # Vérifier si c'est la dernière page
-                if len(response_data.data) < params["size"]:
-                    break
-                
-                page += 1
-                
+
+                pages_fetched += 1
+
+                if endpoint_config.supports_cursor:
+                    next_cursor = self._extract_cursor(response_data.next)
+                    if not next_cursor or next_cursor == cursor:
+                        break
+                    cursor = next_cursor
+                else:
+                    if len(response_data.data) < page_params.get("size", page_size):
+                        break
+
             except Exception as exc:
                 self.logger.exception(
                     "Erreur lors de la récupération de la page %s pour %s",
-                    page,
+                    pages_fetched + 1,
                     endpoint_config.path,
                 )
 
-                error = HubeauPageFetchError(endpoint_config.path, page, page_params, exc)
+                error = HubeauPageFetchError(
+                    endpoint_config.path,
+                    pages_fetched + 1,
+                    page_params,
+                    exc,
+                )
 
                 if bubble_exceptions:
                     raise error from exc
 
-                raise error from exc
-
         # Warning de troncature seulement si max_pages défini
         if endpoint_config.max_pages is not None:
-            expected_records_cap = endpoint_config.max_pages * params.get("size", endpoint_config.page_size)
-            if page > endpoint_config.max_pages and len(all_data) >= expected_records_cap:
+            expected_records_cap = endpoint_config.max_pages * page_size
+            if pages_fetched >= endpoint_config.max_pages and len(all_data) >= expected_records_cap:
                 self.logger.warning(
                     "⚠️ TRONCATURE: max_pages=%s atteint pour %s. Récupéré %s records, mais il pourrait y en avoir plus !",
                     endpoint_config.max_pages,
                     endpoint_config.path,
-                len(all_data),
+                    len(all_data),
             )
 
         return all_data
+
+    @staticmethod
+    def _extract_cursor(next_url: Optional[str]) -> Optional[str]:
+        """Extrait le curseur Hub'Eau depuis l'URL `next` fournie par l'API."""
+
+        if not next_url:
+            return None
+
+        try:
+            parsed = urlparse(next_url)
+        except ValueError:
+            return None
+
+        query = parse_qs(parsed.query)
+        cursor_values = query.get("cursor")
+        if not cursor_values:
+            return None
+
+        return cursor_values[0]
     
     async def get_observations(
         self, 
