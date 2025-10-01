@@ -182,7 +182,7 @@ def get_ground_water_quality_config() -> HubeauApiConfig:
                        requires_spatial_filter=True,
                        spatial_params={"dept": "num_departement"},
                        cache_duration=30,
-                       depth_limit=50000  # Limite élevée pour éviter troncature
+                       depth_limit=None  # Pas de limite : l'API fournit >50k stations au niveau national
                    ),
                    "analyses": HubeauEndpointConfig(
                        path="analyses",
