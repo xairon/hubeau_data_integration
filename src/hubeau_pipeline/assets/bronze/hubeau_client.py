@@ -35,6 +35,26 @@ logger = get_dagster_logger()
 GLOBAL_HUBEAU_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 requêtes simultanées TOUS CLIENTS CONFONDUS
 
 # ====================================
+# EXCEPTIONS SPÉCIFIQUES
+# ====================================
+
+
+class HubeauPageFetchError(RuntimeError):
+    """Erreur levée lorsqu'une page Hub'Eau ne peut pas être récupérée."""
+
+    def __init__(self, endpoint: str, page: int, params: Dict[str, Any], original: Exception):
+        redacted_params = {k: v for k, v in params.items() if k != "page"}
+        message = (
+            f"Echec de récupération de la page {page} pour '{endpoint}' "
+            f"avec paramètres {redacted_params}: {original}"
+        )
+        super().__init__(message)
+        self.endpoint = endpoint
+        self.page = page
+        self.params = redacted_params
+        self.original = original
+
+# ====================================
 # MODÈLES PYDANTIC POUR VALIDATION
 # ====================================
 
@@ -217,9 +237,9 @@ class HubeauClient:
         return all_data
     
     async def _fetch_all_pages(
-        self, 
-        endpoint_config, 
-        params: Dict[str, Any], 
+        self,
+        endpoint_config,
+        params: Dict[str, Any],
         bubble_exceptions: bool = False  # ✅ CORRECTIF B: paramètre pour propager exceptions
     ) -> List[Dict[str, Any]]:
         """Helper pour récupérer toutes les pages d'un endpoint"""
@@ -245,12 +265,19 @@ class HubeauClient:
                 
                 page += 1
                 
-            except Exception as e:
-                # ✅ CORRECTIF B: Propager exception si demandé (pour split binaire)
+            except Exception as exc:
+                self.logger.exception(
+                    "Erreur lors de la récupération de la page %s pour %s",
+                    page,
+                    endpoint_config.path,
+                )
+
+                error = HubeauPageFetchError(endpoint_config.path, page, page_params, exc)
+
                 if bubble_exceptions:
-                    raise
-                self.logger.error(f"Erreur page {page}: {e}")
-                break
+                    raise error from exc
+
+                raise error from exc
 
         # Warning de troncature seulement si max_pages défini
         if endpoint_config.max_pages is not None:
@@ -905,12 +932,14 @@ class HubeauIngestionService:
         """Ingestion complète d'une API Hub'Eau"""
         self.logger.info(f"Ingestion {config.name} pour {partition_key or date_partition}")
         
-        results = {}
+        results: Dict[str, Any] = {}
         total_records = 0
-        
+        errors: List[str] = []
+        metrics_snapshot: Optional[IngestionMetrics] = None
+
         async with HubeauClient(config) as client:
             stations = []  # Initialiser stations
-            
+
             # Récupérer les stations
             stations_endpoint = self._get_stations_endpoint(config)
             if stations_endpoint:
@@ -923,7 +952,9 @@ class HubeauIngestionService:
                     }
                     total_records += len(stations)
                 except Exception as e:
-                    self.logger.error(f"Erreur stations {stations_endpoint}: {e}")
+                    message = f"Erreur stations {stations_endpoint}: {e}"
+                    self.logger.error(message)
+                    errors.append(message)
             
             # Récupérer les observations
             observations_endpoints = self._get_observations_endpoints(config)
@@ -980,27 +1011,44 @@ class HubeauIngestionService:
                     total_records += len(observations)
                     
                 except Exception as e:
-                    self.logger.error(f"Erreur observations {endpoint_name}: {e}")
-        
-        # Sauvegarder les données dans MinIO si disponibles
-        if total_records > 0:
-            try:
-                self._save_to_minio(config.name, date_partition, results, client.metrics)
-            except Exception as e:
-                self.logger.warning(f"Erreur sauvegarde MinIO: {e}")
-        
+                    message = f"Erreur observations {endpoint_name}: {e}"
+                    self.logger.error(message)
+                    errors.append(message)
+
+            metrics_snapshot = client.metrics
+
+        # Sauvegarder les données dans MinIO/local même lorsqu'il n'y a pas de données
+        try:
+            self._save_to_minio(config.name, date_partition, results, metrics_snapshot)
+        except Exception as e:
+            warning_message = f"Erreur sauvegarde MinIO: {e}"
+            self.logger.warning(warning_message)
+            errors.append(warning_message)
+
         # ✅ CORRECTIF D: Afficher synthèse métriques
-        if config.name == "hydrobiology":
-            self.logger.info(client.metrics.to_summary())
-        
+        if config.name == "hydrobiology" and metrics_snapshot is not None:
+            self.logger.info(metrics_snapshot.to_summary())
+
+        if errors and total_records == 0:
+            status = 'error'
+        elif errors:
+            status = 'partial_success'
+        elif total_records > 0:
+            status = 'success'
+        else:
+            status = 'no_data'
+
+        metrics_dict = metrics_snapshot.model_dump() if metrics_snapshot is not None else {}
+
         return {
             'execution_date': datetime.now().isoformat(),
             'partition_date': date_partition,
             'api_name': config.name,
             'total_records_ingested': total_records,
             'results_by_endpoint': results,
-            'status': 'success' if total_records > 0 else 'no_data',
-            'metrics': client.metrics.dict() if hasattr(client, 'metrics') else {}  # ✅ CORRECTIF D
+            'status': status,
+            'metrics': metrics_dict,  # ✅ CORRECTIF D
+            'errors': errors,
         }
     
     def _get_stations_endpoint(self, config: HubeauApiConfig) -> Optional[str]:
@@ -1072,7 +1120,7 @@ class HubeauIngestionService:
                 "execution_date": datetime.now().isoformat(),
                 "results_by_endpoint": results,
                 "total_records": sum(r.get('records_count', 0) for r in results.values()),
-                "metrics": metrics.dict() if metrics else {}  # ✅ CORRECTIF D
+                "metrics": metrics.model_dump() if metrics else {}  # ✅ CORRECTIF D
             }
 
             self.minio_client.put_object(
@@ -1139,7 +1187,7 @@ class HubeauIngestionService:
             "execution_date": datetime.now().isoformat(),
             "results_by_endpoint": results,
             "total_records": sum(r.get('records_count', 0) for r in results.values()),
-            "metrics": metrics.dict() if metrics else {},
+            "metrics": metrics.model_dump() if metrics else {},
         }
 
         metadata_path = base_dir / "ingestion_metadata.json"
