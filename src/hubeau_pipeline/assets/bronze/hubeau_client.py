@@ -306,7 +306,7 @@ class HubeauClient:
             else:
                 # Format standard pour les autres APIs avec gestion de borne fin exclusive
                 end_offset = getattr(endpoint_config, 'end_offset_days', 0)
-                
+
                 # Hydrobiologie : données saisonnières → fenêtre large de 30 jours
                 if self.config.name == "hydrobiology":
                     start_dt = date_obj - timedelta(days=30)
@@ -314,10 +314,26 @@ class HubeauClient:
                     self.logger.info(f"📅 Hydrobiologie (campagnes saisonnières): fenêtre de 30 jours [{start_dt} → {end_dt}[")
                 else:
                     start_dt = date_obj
-                    end_dt = date_obj + timedelta(days=end_offset)
-                    if end_offset > 0:
-                        self.logger.info(f"📅 Fenêtre temporelle: [{start_dt} → {end_dt}[ (borne fin exclusive)")
-                
+
+                    # Plusieurs endpoints Hub'Eau attendent une borne fin strictement supérieure
+                    # à la borne début. Lorsque aucun décalage n'est configuré (offset=0),
+                    # on traite la partition journalière comme [J, J+1[ afin d'éviter
+                    # des fenêtres vides provoquant des erreurs HTTP 500 côté Hub'Eau.
+                    effective_offset = end_offset if end_offset and end_offset > 0 else 1
+                    end_dt = start_dt + timedelta(days=effective_offset)
+
+                    if effective_offset != end_offset:
+                        self.logger.debug(
+                            "🔁 Offset temporel ajusté pour %s: fin=%s (offset=%s)",
+                            endpoint_name,
+                            end_dt.strftime("%Y-%m-%d"),
+                            effective_offset,
+                        )
+                    elif end_offset > 0:
+                        self.logger.info(
+                            f"📅 Fenêtre temporelle: [{start_dt} → {end_dt}[ (borne fin exclusive)"
+                        )
+
                 params[start_key] = start_dt.strftime("%Y-%m-%d")
                 params[end_key] = end_dt.strftime("%Y-%m-%d")
         
