@@ -24,7 +24,10 @@ Ce document centralise **toutes les sources de données** du pipeline Hub'Eau, b
 - **URL API** : `https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/`
 - **Source ADES** : Accès aux Données sur les Eaux Souterraines
 - **Stations** : **~1,500 piézomètres temps réel** (doc officielle)
-- **Fréquence** : Télétransmission horaire + historique quotidien
+- **Fréquence Mise à Jour** : 
+  - `chroniques_tr` : **Horaire** (télétransmission temps réel)
+  - `chroniques` : **Quotidienne** (historique depuis ~2020)
+- **Partitions Recommandées** : Quotidiennes depuis 2020
 
 #### **Endpoints & Données**
 ```yaml
@@ -72,7 +75,13 @@ Paramètres_Techniques:
 - **URL API** : `https://hubeau.eaufrance.fr/api/v2/hydrometrie/` ⚠️ **VERSION v2**
 - **Source** : Service Central Vigicrues (SCHAPI)
 - **Stations** : **~3,000 stations** (estimation réseau national)
-- **⚠️ RESTRICTION TEMPORELLE** : **Pas d'accès aux données antérieures à 1 mois** (erreur 400 si date_debut_obs < 1 mois)
+- **⚠️ RESTRICTION TEMPORELLE CRITIQUE** : **Accès limité aux 30 derniers jours UNIQUEMENT**
+  - Erreur 400 si `date_debut_obs < 1 mois`
+  - Pas d'accès à l'historique ancien
+- **Fréquence Mise à Jour** : 
+  - `observations_tr` : **2 minutes** (temps réel)
+  - `obs_elab` : **Quotidienne** (données élaborées validées)
+- **Partitions Recommandées** : **30 derniers jours glissants UNIQUEMENT**
 
 #### **Endpoints & Données**
 ```yaml
@@ -127,6 +136,8 @@ Conversions_Requises:
 - **URL API** : `https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/` ⚠️ **VERSION v2**
 - **Source** : NAIADES (système d'information sur l'eau)
 - **Stations** : **~15,000 stations** qualité surface
+- **Fréquence Mise à Jour** : **Continue** (synchronisation base Naïades en temps réel)
+- **Partitions Recommandées** : Quotidiennes
 
 #### **Endpoints & Données**
 ```yaml
@@ -197,6 +208,8 @@ Paramètres_Sandre_Prioritaires:
 - **URL API** : `https://hubeau.eaufrance.fr/api/v1/qualite_nappes/`
 - **Source** : ADES + NAIADES  
 - **Stations** : **~50,000 points d'eau** surveillance nappes
+- **Fréquence Mise à Jour** : **Trimestrielle à Semestrielle** (campagnes réglementaires DCE)
+- **Partitions Recommandées** : Quotidiennes (accepter 95%+ jours vides - campagnes ponctuelles)
 
 #### **Endpoints & Données**
 ```yaml
@@ -253,6 +266,8 @@ Substances_Prioritaires:
 - **Stations** : **~500 stations thermiques** (réseau thermique national)
 - **Mesure** : Température continue des cours d'eau
 - **⚠️ LIMITATIONS** : **Peu de stations encore en service** et **pas de données après 2024** via l'API
+- **Fréquence Mise à Jour** : **Sporadique** (horaire quand station active, historique 2000-2024)
+- **Partitions Recommandées** : Quotidiennes (accepter 50-80% jours vides - couverture réduite)
 
 #### **Endpoints & Données**
 ```yaml
@@ -304,6 +319,8 @@ Paramètres_Techniques:
 - **Réseau** : **~3,000 stations ONDE** (Observatoire National Des Étiages)
 - **Type** : Observations visuelles par agents OFB
 - **Standard** : OpenAPI 3.0
+- **Fréquence Mise à Jour** : **Mensuelle** (mai à septembre - période étiage) + exceptionnelle (sécheresse)
+- **Partitions Recommandées** : Quotidiennes ou Hebdomadaires
 
 #### **Endpoints & Données**
 ```yaml
@@ -357,6 +374,8 @@ Couverture: "France hexagonale + Corse"
 - **URL API** : `https://hubeau.eaufrance.fr/api/v1/hydrobio/`
 - **Source** : NAIADES (peuplement cours d'eau)
 - **Stations** : **~1,500 stations** analyses biologiques
+- **Fréquence Mise à Jour** : **Saisonnière** (3-4 campagnes/an : printemps, été, automne)
+- **Partitions Recommandées** : Quotidiennes (accepter 70-90% jours vides - campagnes saisonnières)
 
 #### **Endpoints & Données**
 ```yaml
@@ -416,6 +435,8 @@ Poissons:
 - **URL API** : `https://hubeau.eaufrance.fr/api/v1/prelevements/`
 - **Données** : Volumes prélevés par usage
 - **Couverture** : France entière (déclarations)
+- **Fréquence Mise à Jour** : **ANNUELLE** (BNPE - Banque Nationale Prélèvements)
+- **Partitions Recommandées** : **ANNUELLES** (2020, 2021, 2022, 2023...)
 
 #### **Endpoints & Données**
 ```yaml
@@ -455,44 +476,20 @@ Usages_Catégories:
 
 ---
 
-## ⚠️ **Restrictions Temporelles des APIs Hub'Eau**
+### **📊 Tableau Récapitulatif des Fréquences**
 
-### **🔒 Limitations Temporelles Critiques**
+| API | Fréquence Réelle | Restriction Temporelle | Partitions | Volume Typique/Jour |
+|-----|------------------|------------------------|------------|---------------------|
+| **🏔️ Piézométrie** | Horaire (TR) / Quotidienne | Depuis ~2020 | Quotidiennes | 300-500 mesures |
+| **🌊 Hydrométrie** | 2 minutes (TR) / Quotidienne | ⚠️ **30 derniers jours UNIQUEMENT** | **30 jours glissants** | 10k-20k observations |
+| **🧪 Qualité Cours d'Eau** | Continue (Naïades) | Depuis ~2000 | Quotidiennes | Variable |
+| **💧 Qualité Nappes** | Trimestrielle/Semestrielle | Depuis ~2000 | Quotidiennes | 0 (campagnes ponctuelles) |
+| **🌡️ Température** | Sporadique (horaire) | 2000-2024 (⚠️ limitation) | Quotidiennes | 0-4k mesures (variable) |
+| **🌊 ONDE** | Mensuelle (mai-sept) | Depuis ~2012 | Quotidiennes/Hebdo | Variable (campagnes) |
+| **🐟 Hydrobiologie** | Saisonnière (3-4/an) | Depuis 1971 | Quotidiennes | 0-5k indices (saisonnier) |
+| **🚰 Prélèvements** | **ANNUELLE** | Depuis ~2012 | **ANNUELLES** | N/A (déclarations annuelles) |
 
-```yaml
-APIs_Avec_Restrictions:
-
-  Hydrométrie_v2:
-    restriction: "Pas d'accès aux données antérieures à 1 mois"
-    erreur: "400 Client Error: date can't be < 1 month from now"
-    impact: "Impossible de récupérer des données historiques récentes"
-    solution: "Utiliser lookback_days >= 30 pour éviter les erreurs"
-    
-  Température:
-    limitation: "Peu de stations encore en service"
-    limitation_data: "Pas de données après 2024 via l'API"
-    impact: "Couverture réduite et données obsolètes"
-    recommandation: "Vérifier la disponibilité avant intégration"
-
-APIs_Sans_Restrictions:
-  - Piézométrie: "Accès historique complet"
-  - Qualité_Cours_Eau: "Accès historique complet"
-  - Qualité_Nappes: "Accès historique complet"
-  - Écoulement_ONDE: "Données saisonnières disponibles"
-  - Hydrobiologie: "Données selon campagnes"
-  - Prélèvements: "Données annuelles disponibles"
-
-Recommandations_Techniques:
-  configuration_temporelle:
-    hydrometrie: "lookback_days: 30 minimum"
-    temperature: "lookback_days: 365 (données historiques limitées)"
-    autres_apis: "lookback_days: selon besoins (1-365)"
-    
-  gestion_erreurs:
-    pattern: "Vérifier erreur 400 avec message temporel"
-    fallback: "Réduire la période de recherche"
-    monitoring: "Logger les restrictions temporelles"
-```
+**Note importante** : Les APIs à fréquence sporadique/saisonnière ont de nombreux jours vides (0 résultats), ce qui est **normal**. Les agrégations mensuelles/annuelles en Silver/Gold permettent d'obtenir des insights pertinents.
 
 ---
 
@@ -870,5 +867,5 @@ Stockage_Estimé:
 
 ---
 
-**📅 Dernière mise à jour** : Septembre 2025  
-**🎯 Version** : 1.1 - Documentation unifiée avec restrictions temporelles Hub'Eau
+**📅 Dernière mise à jour** : Octobre 2025  
+**🎯 Version** : 1.2 - Documentation consolidée avec fréquences de mise à jour intégrées par API

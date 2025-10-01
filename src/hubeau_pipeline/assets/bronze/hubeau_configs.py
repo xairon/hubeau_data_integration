@@ -318,11 +318,11 @@ def get_prelevements_config() -> HubeauApiConfig:
                        path="chroniques",
                        temporal_params={"start": "annee_min", "end": "annee_max"},  # CORRIGÉ: paramètres temporels annuels
                        page_size=1000,
-                       max_pages=100,  # ✅ Augmenté pour éviter troncature (100k records/groupe max)
+                       max_pages=200,  # ✅ Augmenté à 200 pour éviter troncature (200k records/groupe max)
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=500000  # ✅ Augmenté pour permettre récupération complète
+                       depth_limit=1000000  # ✅ Augmenté à 1M pour permettre récupération complète
                    )
         }
     )
