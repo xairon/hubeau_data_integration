@@ -1,38 +1,25 @@
 """
-Jobs Bronze Hub'Eau - Architecture moderne et claire
-Jobs correspondant à la nouvelle structure des assets
+Jobs Bronze Hub'Eau - Architecture simple : 1 job par API
 """
 
-# Import des jobs Hub'Eau modernes
+# Import de tous les jobs
 from .bronze_ingestion import (
     all_jobs,
     bdlisa_bronze_job,
-    hubeau_bronze_job,
-    hubeau_environment_job,
-    hubeau_hydrology_job,
+    external_jobs,
+    hubeau_hydrobiology_job,
+    hubeau_hydrometry_job,
+    hubeau_jobs,
+    hubeau_onde_job,
+    hubeau_piezometry_job,
     hubeau_prelevements_job,
-    hubeau_summary_job,
-    hubeau_water_quality_job,
+    hubeau_temperature_job,
+    hubeau_water_quality_groundwater_job,
+    hubeau_water_quality_surface_job,
     sandre_bronze_job,
 )
 
-# Jobs Hub'Eau modernes
-hubeau_jobs = [
-    hubeau_bronze_job,
-    hubeau_hydrology_job,
-    hubeau_water_quality_job,
-    hubeau_environment_job,
-    hubeau_prelevements_job,
-    hubeau_summary_job
-]
-
-# Jobs externes (legacy)
-external_jobs = [
-    bdlisa_bronze_job,
-    sandre_bronze_job
-]
-
-# Tous les jobs
+# Alias pour compatibilité
 bronze_jobs = all_jobs
 
 __all__ = [
@@ -40,12 +27,16 @@ __all__ = [
     "bronze_jobs",
     "hubeau_jobs",
     "external_jobs",
-    "hubeau_bronze_job",
-    "hubeau_hydrology_job",
-    "hubeau_water_quality_job",
-    "hubeau_environment_job",
+    # Jobs Hub'Eau (1 par API)
+    "hubeau_hydrometry_job",
+    "hubeau_piezometry_job",
+    "hubeau_temperature_job",
+    "hubeau_water_quality_surface_job",
+    "hubeau_water_quality_groundwater_job",
+    "hubeau_onde_job",
+    "hubeau_hydrobiology_job",
     "hubeau_prelevements_job",
-    "hubeau_summary_job",
+    # Jobs externes
     "bdlisa_bronze_job",
     "sandre_bronze_job",
 ]

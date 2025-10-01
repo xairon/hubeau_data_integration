@@ -271,7 +271,8 @@ class HubeauClient:
         entity_codes: List[str],
         date_partition: str,
         api_name: str = None,
-        realtime: bool = False
+        realtime: bool = False,
+        partition_key: str = None  # ✅ CORRECTIF: Partition originale pour détecter annuelles/mensuelles
     ) -> List[Dict[str, Any]]:
         """Récupère les observations pour une date donnée"""
         # ✅ CORRECTIF: Vérifier que l'endpoint existe
@@ -281,6 +282,29 @@ class HubeauClient:
         
         endpoint_config = self.config.endpoints[endpoint_name]
         all_data = []
+        
+        # ✅ OPTIMISATION GÉNÉRIQUE: Filtrage intelligent par endpoint léger
+        # Permet de ne requêter que les stations/opérations ayant des données à la date
+        # Note: Désactivé pour partitions annuelles (on récupère toute l'année d'un coup)
+        original_key = partition_key if partition_key else date_partition
+        is_yearly_partition = len(original_key) == 4
+        
+        if not is_yearly_partition:
+            entity_codes = await self._smart_filter_entities(
+                endpoint_name, 
+                entity_codes, 
+                date_partition,
+                api_name or self.config.name,
+                partition_key=partition_key
+            )
+            if not entity_codes:
+                self.logger.info("ℹ️ Aucune entité active pour cette date après filtrage intelligent")
+                return []
+        else:
+            self.logger.info(
+                f"ℹ️ Partition annuelle détectée ({original_key}): "
+                f"filtrage intelligent désactivé (récupération annuelle complète)"
+            )
         
         # Paramètres de base
         params = {"format": "json", "size": endpoint_config.page_size}
@@ -307,8 +331,22 @@ class HubeauClient:
                 # Format standard pour les autres APIs avec gestion de borne fin exclusive
                 end_offset = getattr(endpoint_config, 'end_offset_days', 0)
 
-                # Hydrobiologie : données saisonnières → fenêtre large de 30 jours
-                if self.config.name == "hydrobiology":
+                # ✅ CORRECTIF: Détecter les partitions annuelles via partition_key originale
+                # Pour qualité eau et hydrobiologie avec partitions annuelles
+                original_key = partition_key if partition_key else date_partition
+                is_yearly_partition = len(original_key) == 4  # Ex: "2024"
+                
+                if is_yearly_partition and self.config.name in ["hydrobiology", "superficial_waterbodies_quality", "ground_water_quality"]:
+                    # Partition annuelle → récupérer toute l'année
+                    year = date_obj.year
+                    start_dt = datetime(year, 1, 1)
+                    end_dt = datetime(year + 1, 1, 1)  # Fin exclusive = début année suivante
+                    self.logger.info(
+                        f"📅 {self.config.name.upper()} (partition annuelle {original_key}): "
+                        f"fenêtre annuelle [{start_dt.date()} → {end_dt.date()}["
+                    )
+                elif self.config.name == "hydrobiology":
+                    # Partition quotidienne/mensuelle (legacy) → fenêtre de 30 jours
                     start_dt = date_obj - timedelta(days=30)
                     end_dt = date_obj + timedelta(days=1)
                     self.logger.info(f"📅 Hydrobiologie (campagnes saisonnières): fenêtre de 30 jours [{start_dt} → {end_dt}[")
@@ -354,6 +392,8 @@ class HubeauClient:
                 chunk_size = 1  # ✅ Prélèvements: 1 département à la fois (volumes importants, sans limite)
             elif self.config.name == "hydrobiology":
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
+            elif self.config.name == "onde":
+                chunk_size = 5  # ✅ ONDE: 5 départements (approche départementale comme cl-hubeau)
             elif depth_limit is not None and depth_limit <= 10000:
                 chunk_size = 1  # 1 département pour les APIs avec limite 10k
             else:
@@ -369,6 +409,8 @@ class HubeauClient:
                 MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
             elif self.config.name == "hydrobiology":
                 MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
+            elif self.config.name == "onde":
+                MAX_CONCURRENT_SPATIAL = 6   # ✅ ONDE: parallélisme modéré (5 depts/requête)
             else:
                 MAX_CONCURRENT_SPATIAL = 10  # Défaut
             
@@ -451,7 +493,7 @@ class HubeauClient:
                 # Hydrobiologie : limite URL ≈2083 caractères → chunks plus petits
                 # Hydrométrie observations_tr : beaucoup de données par station → chunks réduits
                 # Température : API sensible aux URL longues → chunks réduits
-                # ONDE : API très sensible aux erreurs 500 → chunks très réduits
+                # ONDE : API EXTRÊMEMENT sensible aux erreurs 500 → chunks minimalistes
                 if api_name_actual == "hydrobiology":
                     MAX_CODES_PER_REQUEST = 25
                 elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
@@ -459,7 +501,7 @@ class HubeauClient:
                 elif api_name_actual == "temperature":
                     MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter erreurs 500
                 elif api_name_actual == "onde":
-                    MAX_CODES_PER_REQUEST = 10  # ✅ CORRECTIF: Réduire drastiquement pour éviter erreurs 500
+                    MAX_CODES_PER_REQUEST = 3  # ✅ CORRECTIF: Réduction drastique - API très instable
                 else:
                     MAX_CODES_PER_REQUEST = 50
                 
@@ -471,13 +513,13 @@ class HubeauClient:
                     # Parallélisation avec asyncio.gather() pour accélérer l'ingestion
                     # Hydrobiologie : API sensible → parallélisme réduit
                     # Hydrométrie observations_tr : beaucoup de chunks → parallélisme modéré
-                    # ONDE : API très sensible → parallélisme très réduit
+                    # ONDE : API EXTRÊMEMENT sensible → parallélisme minimal
                     if api_name_actual == "hydrobiology":
                         MAX_CONCURRENT = 4
                     elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
                         MAX_CONCURRENT = 8  # ✅ CORRECTIF: Parallélisme modéré pour ~245 chunks
                     elif api_name_actual == "onde":
-                        MAX_CONCURRENT = 5  # ✅ CORRECTIF: Parallélisme très réduit pour éviter surcharge API
+                        MAX_CONCURRENT = 2  # ✅ CORRECTIF: Parallélisme minimal - API très instable
                     else:
                         MAX_CONCURRENT = 15
                     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -628,6 +670,130 @@ class HubeauClient:
         raise ValueError(
             f"Endpoint {endpoint_config.path} requiert un filtre spatial mais aucun paramètre n'est défini"
         )
+    
+    async def _smart_filter_entities(
+        self,
+        target_endpoint: str,
+        entity_codes: List[str],
+        date_partition: str,
+        api_name: str,
+        partition_key: str = None
+    ) -> List[str]:
+        """
+        ✅ OPTIMISATION GÉNÉRIQUE: Filtre intelligent des entités (stations/opérations)
+        en interrogeant d'abord un endpoint léger pour identifier celles avec données
+        
+        Configuration par API:
+        - ONDE: campagnes → observations (filtrage par stations actives)
+        - Qualité Cours d'Eau: operation_pc → analyse_pc (filtrage par opérations actives)
+        - Autres APIs: pas de filtrage (retourne toutes les entités)
+        """
+        
+        # Configuration des règles de filtrage par API
+        # Note: Filtrage intelligent désactivé pour TOUTES les APIs maintenant
+        # car toutes les APIs de campagnes utilisent des partitions annuelles
+        filter_rules = {
+            # ONDE : Partitions annuelles maintenant, pas besoin de filtrage
+            # "superficial_waterbodies_quality": Partitions annuelles, pas besoin de filtrage
+        }
+        
+        # Vérifier si cette API/endpoint a une règle de filtrage
+        rule = filter_rules.get(api_name)
+        if not rule or rule["target_endpoint"] != target_endpoint:
+            # Pas de filtrage configuré → retourner toutes les entités
+            return entity_codes
+        
+        try:
+            # Parser la date
+            date_obj = datetime.strptime(date_partition, "%Y-%m-%d")
+            
+            # ✅ CORRECTIF: Pour partitions mensuelles, utiliser tout le mois (pas ±jours)
+            original_key = partition_key if partition_key else date_partition
+            is_monthly_partition = len(original_key) == 7  # Ex: "2024-09"
+            
+            if is_monthly_partition:
+                # Partition mensuelle → fenêtre = mois complet
+                year = date_obj.year
+                month = date_obj.month
+                start_date = datetime(year, month, 1).strftime("%Y-%m-%d")
+                # Dernier jour du mois
+                if month == 12:
+                    end_date = datetime(year + 1, 1, 1).strftime("%Y-%m-%d")
+                else:
+                    end_date = datetime(year, month + 1, 1).strftime("%Y-%m-%d")
+                self.logger.info(
+                    f"🔍 Partition mensuelle {original_key}: fenêtre mois complet [{start_date} → {end_date}["
+                )
+            else:
+                # Partition quotidienne → fenêtre ±jours
+                time_window = rule["time_window_days"]
+                start_date = (date_obj - timedelta(days=time_window)).strftime("%Y-%m-%d")
+                end_date = (date_obj + timedelta(days=time_window)).strftime("%Y-%m-%d")
+            
+            # Récupérer l'endpoint de filtrage
+            filter_endpoint_name = rule["filter_endpoint"]
+            filter_endpoint = self.config.endpoints.get(filter_endpoint_name)
+            
+            if not filter_endpoint:
+                self.logger.warning(
+                    f"⚠️ Endpoint '{filter_endpoint_name}' non trouvé pour filtrage, "
+                    f"requête de toutes les entités"
+                )
+                return entity_codes
+            
+            # Construire les paramètres temporels SANS filtrer par entités
+            # (on veut TOUTES les campagnes/opérations de la période, pas juste celles de nos stations)
+            temporal_params = rule["temporal_params"]
+            params = {
+                "format": "json",
+                "size": filter_endpoint.page_size,
+                temporal_params["start"]: start_date,
+                temporal_params["end"]: end_date
+            }
+            
+            self.logger.info(
+                f"🔍 {api_name.upper()}: Filtrage intelligent via {rule['description']} "
+                f"entre {start_date} et {end_date} (récupération TOUTES les {rule['description']})"
+            )
+            
+            # Récupérer TOUTES les données de filtrage de la période
+            # Note: On ne filtre PAS par code_station ici, on veut tout !
+            filter_data = await self._fetch_all_pages(filter_endpoint, params)
+            
+            if not filter_data:
+                self.logger.warning(
+                    f"⚠️ Aucune {rule['description']} trouvée pour {start_date} → {end_date}"
+                )
+                return []
+            
+            # Extraire les codes d'entités uniques
+            entity_field = rule["entity_field"]
+            active_entities = set()
+            for item in filter_data:
+                entity_code = item.get(entity_field)
+                if entity_code:
+                    active_entities.add(entity_code)
+            
+            # Filtrer les entités disponibles
+            filtered_codes = [code for code in entity_codes if code in active_entities]
+            
+            reduction_pct = (1 - len(filtered_codes) / len(entity_codes)) * 100 if entity_codes else 0
+            
+            self.logger.info(
+                f"📊 Filtrage {rule['description']}: {len(filter_data)} {rule['description']} "
+                f"→ {len(active_entities)} entités actives "
+                f"→ {len(filtered_codes)}/{len(entity_codes)} à requêter "
+                f"(-{reduction_pct:.1f}% de requêtes)"
+            )
+            
+            return filtered_codes
+            
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ Erreur lors du filtrage intelligent ({api_name}): {e}, "
+                f"requête de toutes les entités"
+            )
+            return entity_codes
 
 # ====================================
 # MÉTRIQUES D'OBSERVABILITÉ (CORRECTIF D)
@@ -730,9 +896,14 @@ class HubeauIngestionService:
         base_path.mkdir(parents=True, exist_ok=True)
         return base_path
     
-    async def ingest_api_data(self, config: HubeauApiConfig, date_partition: str) -> Dict[str, Any]:
+    async def ingest_api_data(
+        self, 
+        config: HubeauApiConfig, 
+        date_partition: str,
+        partition_key: str = None  # ✅ CORRECTIF: Partition originale pour détecter type
+    ) -> Dict[str, Any]:
         """Ingestion complète d'une API Hub'Eau"""
-        self.logger.info(f"Ingestion {config.name} pour {date_partition}")
+        self.logger.info(f"Ingestion {config.name} pour {partition_key or date_partition}")
         
         results = {}
         total_records = 0
@@ -790,7 +961,9 @@ class HubeauIngestionService:
                         endpoint_name, 
                         station_codes,
                         date_partition,
-                        config.name
+                        config.name,
+                        realtime=False,
+                        partition_key=partition_key  # ✅ CORRECTIF: Passer partition originale
                     )
                     
                     # ✅ CORRECTIF: Vérifier que observations n'est pas None
@@ -849,10 +1022,10 @@ class HubeauIngestionService:
         observation_endpoints = {
             "hydrometry": ["observations_tr", "obs_elab"],
             "piezometry": ["chroniques_tr", "chroniques"],
-            "superficial_waterbodies_quality": ["operation_pc", "analyse_pc"],
+            "superficial_waterbodies_quality": ["analyse_pc"],  # ✅ operation_pc utilisé pour filtrage seulement
             "ground_water_quality": ["analyses"],
             "temperature": ["chronique"],
-            "onde": ["campagnes", "observations"],
+            "onde": ["observations"],  # ✅ campagnes utilisé pour filtrage seulement
             "hydrobiology": ["indices", "taxons"],
             "prelevements": ["chroniques"]
         }
