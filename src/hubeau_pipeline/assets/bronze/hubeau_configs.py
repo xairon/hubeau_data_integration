@@ -229,6 +229,8 @@ def get_onde_config() -> HubeauApiConfig:
         name="onde",
         base_url="https://hubeau.eaufrance.fr/api/v1/ecoulement",
         version="v1",
+        max_retries=5,  # ✅ CORRECTIF: Plus de retries pour API sensible
+        rate_limit_delay=0.7,  # ✅ CORRECTIF: Rate limit plus respectueux pour éviter erreurs 500
         endpoints={
                    "stations": HubeauEndpointConfig(
                        path="stations",
@@ -308,21 +310,21 @@ def get_prelevements_config() -> HubeauApiConfig:
                    "points_prelevement": HubeauEndpointConfig(
                        path="referentiel/points_prelevement",  # CORRIGÉ: sous referentiel/
                        page_size=2000,
-                       max_pages=10,
+                       max_pages=None,
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=50000  # Limite élevée pour éviter troncature
+                       depth_limit=None # Limite élevée pour éviter troncature
                    ),
                    "chroniques": HubeauEndpointConfig(
                        path="chroniques",
                        temporal_params={"start": "annee_min", "end": "annee_max"},  # CORRIGÉ: paramètres temporels annuels
                        page_size=1000,
-                       max_pages=200,  # ✅ Augmenté à 200 pour éviter troncature (200k records/groupe max)
+                       max_pages=None,  # ✅ SANS LIMITE: récupération complète
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=1000000  # ✅ Augmenté à 1M pour permettre récupération complète
+                       depth_limit=None  # ✅ SANS LIMITE: récupération complète
                    )
         }
     )
