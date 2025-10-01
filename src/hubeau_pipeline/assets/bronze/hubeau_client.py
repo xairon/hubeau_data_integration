@@ -180,6 +180,17 @@ class HubeauClient:
                     await asyncio.sleep(random.random() * 0.5)
                     
                     response = await self.client.get(url, params=params)
+                    
+                    # ✅ CORRECTIF: Ne pas retry sur erreurs 400 (Bad Request)
+                    # Les erreurs 400 indiquent un problème avec la requête elle-même
+                    if response.status_code == 400:
+                        self.logger.warning(f"⚠️ Erreur 400 Bad Request pour {url} avec params {params}")
+                        raise httpx.HTTPStatusError(
+                            f"Bad Request: {response.status_code}", 
+                            request=response.request, 
+                            response=response
+                        )
+                    
                     response.raise_for_status()
                     
                     data = response.json()
@@ -462,6 +473,8 @@ class HubeauClient:
                 chunk_size = 1  # ✅ Prélèvements: 1 département à la fois (volumes importants, sans limite)
             elif self.config.name == "hydrobiology":
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
+            elif self.config.name == "superficial_waterbodies_quality":
+                chunk_size = 1  # ✅ Qualité cours d'eau: 1 département (API très sensible aux erreurs 400)
             elif self.config.name == "onde":
                 chunk_size = 5  # ✅ ONDE: 5 départements (approche départementale comme cl-hubeau)
             elif depth_limit is not None and depth_limit <= 10000:
@@ -479,6 +492,8 @@ class HubeauClient:
                 MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
             elif self.config.name == "hydrobiology":
                 MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
+            elif self.config.name == "superficial_waterbodies_quality":
+                MAX_CONCURRENT_SPATIAL = 3   # ✅ Qualité cours d'eau: parallélisme très conservateur (API très sensible)
             elif self.config.name == "onde":
                 MAX_CONCURRENT_SPATIAL = 6   # ✅ ONDE: parallélisme modéré (5 depts/requête)
             else:
