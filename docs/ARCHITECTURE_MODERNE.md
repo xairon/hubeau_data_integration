@@ -9,33 +9,10 @@ Documentation technique de l'architecture et de la stack utilisée
 ### Orchestration et Ingestion
 
 ```mermaid
-graph TB
-    subgraph Dagster["Dagster Orchestration"]
-        A[Assets<br/>Partitions]
-        J[Jobs]
-        S[Schedules]
-        SE[Sensors]
-    end
-    
-    subgraph Client["Client HTTP"]
-        HC[httpx<br/>Client async]
-        T[tenacity<br/>Retry automatique]
-        P[pydantic<br/>Validation]
-    end
-    
-    subgraph APIs["Hub'Eau APIs"]
-        API1[Hydrométrie v2]
-        API2[Piézométrie v1]
-        API3[Température v1]
-        API4[Qualité Nappes v1]
-        API5[Qualité Surface v2]
-        API6[ONDE v1]
-        API7[Hydrobiologie v1]
-        API8[Prélèvements v1]
-    end
-    
-    Dagster --> Client
-    Client --> APIs
+graph LR
+    A[Dagster<br/>Assets•Jobs•Schedules] --> B[httpx + tenacity<br/>Async + Retry]
+    B --> C[Hub'Eau APIs<br/>8 APIs v1/v2]
+    C --> D[MinIO Bronze<br/>JSON partitionné]
 ```
 
 ### Librairies Python
@@ -47,6 +24,32 @@ graph TB
 | tenacity | 8.2+ | Retry automatique |
 | pydantic | 2.0+ | Validation données |
 | boto3 | Latest | Client MinIO/S3 |
+
+---
+
+## Infrastructure Docker
+
+### Services Déployés
+
+```yaml
+Services:
+  dagster_webserver:    # Interface Dagster (port 8080)
+  dagster_daemon:       # Orchestration background
+  timescaledb:          # Séries temporelles (port 5432)
+  postgis:              # Géospatial (port 5433)
+  neo4j:                # Graphe sémantique (ports 7474, 7687)
+  minio:                # Object storage S3 (ports 9000, 9001)
+  pgadmin:              # Admin PostgreSQL (port 5050)
+```
+
+### Choix Architecturaux
+
+| Choix | Alternative | Raison |
+|-------|-------------|--------|
+| **Dagster** vs Airflow | Asset-centric vs Task-centric | Type-safety, partitions natives, backfilling simplifié |
+| **httpx** vs requests | Async natif vs Sync | Performance I/O, HTTP/2, timeouts granulaires |
+| **3 bases** vs 1 PostgreSQL | Spécialisées vs Générique | TimescaleDB (1000x agrégations), PostGIS (100x spatial), Neo4j (traversal linéaire) |
+| **MinIO** vs Filesystem | S3-compatible vs Local | Migration cloud, distribution, versioning |
 
 ---
 
@@ -419,35 +422,45 @@ CREATE INDEX idx_stations_geom ON stations_geo USING GIST(geom);
 
 ---
 
-## Docker Compose
+## Sécurité et Déploiement
 
-### Services
+### Contrôle d'Accès
 
-```yaml
-services:
-  dagster_webserver:    # Interface Dagster (port 8080)
-  dagster_daemon:       # Background orchestration
-  timescaledb:          # Séries temporelles (port 5432)
-  postgis:              # Géospatial (port 5433)
-  neo4j:                # Graphe (ports 7474, 7687)
-  minio:                # Object storage (ports 9000, 9001)
-  pgadmin:              # Admin PostgreSQL (port 5050)
+**PostgreSQL/TimescaleDB/PostGIS** :
+```sql
+CREATE USER dagster_service WITH PASSWORD 'xxx';
+GRANT INSERT, SELECT, UPDATE ON ALL TABLES TO dagster_service;
+
+CREATE USER analyst_readonly WITH PASSWORD 'xxx';
+GRANT SELECT ON ALL TABLES TO analyst_readonly;
+```
+
+**Neo4j** :
+```cypher
+CREATE USER analyst_readonly SET PASSWORD 'xxx';
+GRANT ROLE reader TO analyst_readonly;
+```
+
+### Installation Rapide
+
+```bash
+git clone <repo>
+cd brgm
+cp env.example .env
+docker-compose up -d
 ```
 
 ### Scripts d'Initialisation
 
 ```
 docker/init-scripts/
-├── timescaledb/
-│   ├── 01-init-water-timeseries.sql
-│   └── 02-create-hypertables.sql
-├── postgis/
-│   ├── 01-init-water-geo.sql
-│   └── 02-create-functions.sql
-└── neo4j/
-    ├── 01-init-sandre-sosa.cypher
-    ├── 02-create-sandre-data.cypher
-    └── 03-create-relations-sosa.cypher
+├── timescaledb/01-init-water-timeseries.sql
+├── timescaledb/02-create-hypertables.sql
+├── postgis/01-init-water-geo.sql
+├── postgis/02-create-functions.sql
+├── neo4j/01-init-sandre-sosa.cypher
+├── neo4j/02-create-sandre-data.cypher
+└── neo4j/03-create-relations-sosa.cypher
 ```
 
 ---
@@ -468,5 +481,6 @@ docker/init-scripts/
 
 ---
 
-**Version** : 2.0  
-**Dernière mise à jour** : Septembre 2025
+**Version** : 2.1  
+**Dernière mise à jour** : Octobre 2025  
+**Note** : Architecture consolidée avec infrastructure Docker et déploiement intégrés

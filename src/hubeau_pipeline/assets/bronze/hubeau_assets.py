@@ -169,7 +169,7 @@ async def hubeau_prelevements_bronze(context: AssetExecutionContext) -> Dict[str
 @asset(
     partitions_def=DAILY_PARTITIONS,
     group_name="bronze_hubeau",
-    description="📊 Synthèse de l'ingestion Hub'Eau",
+    description="📊 Synthèse de l'ingestion Hub'Eau (7 APIs quotidiennes)",
     ins={
         "hydrometry": AssetIn(key=AssetKey("hubeau_hydrometry_bronze")),
         "piezometry": AssetIn(key=AssetKey("hubeau_piezometry_bronze")),
@@ -178,7 +178,7 @@ async def hubeau_prelevements_bronze(context: AssetExecutionContext) -> Dict[str
         "temperature": AssetIn(key=AssetKey("hubeau_temperature_bronze")),
         "onde": AssetIn(key=AssetKey("hubeau_onde_bronze")),
         "hydrobiology": AssetIn(key=AssetKey("hubeau_hydrobiology_bronze")),
-        "prelevements": AssetIn(key=AssetKey("hubeau_prelevements_bronze")),
+        # Note: hubeau_prelevements_bronze exclu (partitions annuelles incompatibles)
     },
 )
 def hubeau_ingestion_summary(
@@ -190,9 +190,8 @@ def hubeau_ingestion_summary(
     temperature: Dict[str, Any],
     onde: Dict[str, Any],
     hydrobiology: Dict[str, Any],
-    prelevements: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Synthétise les résultats d'ingestion de toutes les APIs Hub'Eau."""
+    """Synthétise les résultats d'ingestion des 7 APIs Hub'Eau à partitions quotidiennes."""
 
     day = context.partition_key
     context.log.info(f"📊 Génération du résumé d'ingestion Hub'Eau pour {day}")
@@ -205,7 +204,7 @@ def hubeau_ingestion_summary(
         "temperature": temperature,
         "onde": onde,
         "hydrobiology": hydrobiology,
-        "prelevements": prelevements,
+        # Note: prelevements exclu (partitions annuelles - a son propre job)
     }
 
     total_records = 0
