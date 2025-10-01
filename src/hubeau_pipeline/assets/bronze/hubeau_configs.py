@@ -60,23 +60,21 @@ def get_hydrometry_config() -> HubeauApiConfig:
                        path="observations_tr",
                        temporal_params={"start": "date_debut_obs", "end": "date_fin_obs"},
                        page_size=1000,
-                       max_pages=50,  # Limite raisonnable par station (50k records max)
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète des 30 jours
                        supports_cursor=True,
                        realtime_cache_duration=15,
                        cache_duration=30,
-                       # ✅ CORRECTIF: Désactiver filtre spatial, utiliser approche par code_entite
                        requires_spatial_filter=False,
-                       depth_limit=100000  # Limite très élevée pour observations
+                       depth_limit=None
                    ),
                    "obs_elab": HubeauEndpointConfig(
                        path="obs_elab",
                        temporal_params={"start": "date_debut_obs_elab", "end": "date_fin_obs_elab"},
                        page_size=1000,
-                       max_pages=50,  # Limite raisonnable par station (50k records max)
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        cache_duration=30,
-                       # ✅ CORRECTIF: Désactiver filtre spatial, utiliser approche par code_entite
                        requires_spatial_filter=False,
-                       depth_limit=50000  # Limite élevée pour observations élaborées
+                       depth_limit=None
                    )
         }
     )
@@ -101,20 +99,20 @@ def get_piezometry_config() -> HubeauApiConfig:
                        path="chroniques_tr",
                        temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
                        page_size=1000,
-                       max_pages=20,
-                       requires_spatial_filter=False,  # ✅ CORRIGÉ: utiliser code_bss au lieu de départements
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
+                       requires_spatial_filter=False,
                        realtime_cache_duration=15,
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour chroniques
+                       depth_limit=None
                    ),
                    "chroniques": HubeauEndpointConfig(
                        path="chroniques",
                        temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
                        page_size=1000,
-                       max_pages=20,
-                       requires_spatial_filter=False,  # ✅ CORRIGÉ: utiliser code_bss au lieu de départements
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
+                       requires_spatial_filter=False,
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour chroniques
+                       depth_limit=None
                    )
         }
     )
@@ -139,31 +137,31 @@ def get_superficial_waterbodies_quality_config() -> HubeauApiConfig:
                        path="operation_pc",
                        temporal_params={"start": "date_debut_prelevement", "end": "date_fin_prelevement"},
                        page_size=2000,
-                       max_pages=10,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour opérations
+                       depth_limit=None
                    ),
                    "condition_environnementale_pc": HubeauEndpointConfig(
                        path="condition_environnementale_pc",
                        temporal_params={"start": "date_debut_prelevement", "end": "date_fin_prelevement"},
                        page_size=2000,
-                       max_pages=10,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour conditions
+                       depth_limit=None
                    ),
                    "analyse_pc": HubeauEndpointConfig(
                        path="analyse_pc",
                        temporal_params={"start": "date_debut_prelevement", "end": "date_fin_prelevement"},
                        page_size=2000,
-                       max_pages=10,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète année entière
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour analyses
+                       depth_limit=None
                    )
         }
     )
@@ -188,11 +186,11 @@ def get_ground_water_quality_config() -> HubeauApiConfig:
                        path="analyses",
                        temporal_params={"start": "date_debut_prelevement", "end": "date_fin_prelevement"},
                        page_size=1000,
-                       max_pages=20,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète année entière
                        requires_spatial_filter=True,
                        spatial_params={"dept": "num_departement"},
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour analyses
+                       depth_limit=None
                    )
         }
     )
@@ -215,10 +213,10 @@ def get_temperature_config() -> HubeauApiConfig:
                        path="chronique",
                        temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
                        page_size=1000,
-                       max_pages=100,  # Augmenté pour récupération nationale
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        cache_duration=30,
-                       requires_spatial_filter=False,  # ❌ L'API ne supporte PAS le filtre code_departement
-                       depth_limit=200000  # Limite très élevée pour chroniques nationales
+                       requires_spatial_filter=False,
+                       depth_limit=None
                    )
         }
     )
@@ -243,17 +241,18 @@ def get_onde_config() -> HubeauApiConfig:
                        path="campagnes",
                        temporal_params={"start": "date_debut_campagne", "end": "date_fin_campagne"},
                        page_size=1000,
-                       max_pages=20,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour campagnes
+                       depth_limit=None
                    ),
                    "observations": HubeauEndpointConfig(
                        path="observations",
                        temporal_params={"start": "date_debut_observation", "end": "date_fin_observation"},
                        page_size=1000,
-                       max_pages=20,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        cache_duration=30,
-                       depth_limit=100000  # Limite très élevée pour observations
+                       requires_spatial_filter=False,
+                       depth_limit=None
                    )
         }
     )
@@ -280,22 +279,22 @@ def get_hydrobiology_config() -> HubeauApiConfig:
                        path="indices",
                        temporal_params={"start": "date_debut_prelevement", "end": "date_fin_prelevement"},
                        page_size=500,
-                       max_pages=20,
-                       requires_spatial_filter=False,  # ✅ Filtrage par code_station_hydrobio (plus robuste)
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète année entière
+                       requires_spatial_filter=False,
                        cache_duration=30,
-                       depth_limit=50000,  # Limite élevée pour indices
-                       end_offset_days=1  # ✅ Borne fin exclusive : [J, J+1)
+                       depth_limit=None,
+                       end_offset_days=1
                    ),
                    "taxons": HubeauEndpointConfig(
                        path="taxons",
                        temporal_params={"start": "date_debut_prelevement", "end": "date_fin_prelevement"},
                        page_size=500,
-                       max_pages=20,
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète année entière
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=50000,  # Limite élevée pour taxons
-                       end_offset_days=1  # ✅ Borne fin exclusive : [J, J+1)
+                       depth_limit=None,
+                       end_offset_days=1
                    )
         }
     )
@@ -318,13 +317,13 @@ def get_prelevements_config() -> HubeauApiConfig:
                    ),
                    "chroniques": HubeauEndpointConfig(
                        path="chroniques",
-                       temporal_params={"start": "annee_min", "end": "annee_max"},  # CORRIGÉ: paramètres temporels annuels
+                       temporal_params={"start": "annee_min", "end": "annee_max"},
                        page_size=1000,
-                       max_pages=None,  # ✅ SANS LIMITE: récupération complète
+                       max_pages=None,  # ✅ AUCUNE LIMITE: Récupération complète
                        requires_spatial_filter=True,
                        spatial_params={"dept": "code_departement"},
                        cache_duration=30,
-                       depth_limit=None  # ✅ SANS LIMITE: récupération complète
+                       depth_limit=None
                    )
         }
     )

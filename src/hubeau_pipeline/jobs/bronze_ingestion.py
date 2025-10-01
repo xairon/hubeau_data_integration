@@ -1,101 +1,63 @@
 """
-Jobs Bronze Hub'Eau - Architecture moderne et claire
-Jobs correspondant à la nouvelle structure des assets
+Jobs Bronze Hub'Eau - Architecture simple : 1 job par API
 """
 
 from dagster import AssetSelection, define_asset_job
 
 # ================================
-# JOB 1 : HUB'EAU BRONZE COMPLET (sans Hydrométrie)
-# ================================
-# Note: Hydrométrie exclu car partitions différentes (30 jours vs 3 ans)
-
-hubeau_bronze_job = define_asset_job(
-    name="hubeau_bronze_job",
-    description="🌊 Hub'Eau Bronze - APIs avec partitions quotidiennes",
-    selection=AssetSelection.assets(
-        # "hubeau_hydrometry_bronze",   # ❌ Exclu - partitions 30 jours (restriction API)
-        # "hubeau_prelevements_bronze",  # ❌ Exclu - partitions annuelles (données annuelles)
-        "hubeau_piezometry_bronze",
-        "hubeau_water_quality_surface_bronze",
-        "hubeau_water_quality_groundwater_bronze",
-        "hubeau_temperature_bronze",
-        "hubeau_onde_bronze",
-        "hubeau_hydrobiology_bronze",
-        "hubeau_ingestion_summary",
-    ),
-)
-
-# ================================
-# JOB 1B : HYDROMÉTRIE (30 jours seulement)
+# JOBS HUB'EAU - 1 JOB PAR API
 # ================================
 
 hubeau_hydrometry_job = define_asset_job(
     name="hubeau_hydrometry_job",
-    description="🌊 Hydrométrie Hub'Eau - ⚠️ 30 derniers jours uniquement (restriction API v2)",
+    description="🌊 Hydrométrie - ⚠️ 30 derniers jours uniquement (restriction API v2)",
     selection=AssetSelection.assets("hubeau_hydrometry_bronze"),
 )
 
-# ================================
-# JOB 2 : HUB'EAU HYDROLOGIE (Piézométrie uniquement)
-# ================================
-# Note: Hydrométrie a son propre job (partitions incompatibles)
-
-hubeau_hydrology_job = define_asset_job(
-    name="hubeau_hydrology_job",
-    description="🏔️ Hub'Eau Hydrologie - Piézométrie uniquement",
+hubeau_piezometry_job = define_asset_job(
+    name="hubeau_piezometry_job",
+    description="🏔️ Piézométrie - Niveaux des nappes phréatiques",
     selection=AssetSelection.assets("hubeau_piezometry_bronze"),
 )
 
-# ================================
-# JOB 3 : HUB'EAU QUALITÉ EAU
-# ================================
-
-hubeau_water_quality_job = define_asset_job(
-    name="hubeau_water_quality_job",
-    description="🧪 Hub'Eau Qualité Eau - Cours d'eau et Nappes",
-    selection=AssetSelection.assets(
-        "hubeau_water_quality_surface_bronze",
-        "hubeau_water_quality_groundwater_bronze",
-    ),
+hubeau_temperature_job = define_asset_job(
+    name="hubeau_temperature_job",
+    description="🌡️ Température - Température des cours d'eau",
+    selection=AssetSelection.assets("hubeau_temperature_bronze"),
 )
 
-# ================================
-# JOB 4 : HUB'EAU ENVIRONNEMENT
-# ================================
-
-hubeau_environment_job = define_asset_job(
-    name="hubeau_environment_job",
-    description="🌡️ Hub'Eau Environnement - Température, ONDE, Hydrobiologie",
-    selection=AssetSelection.assets(
-        "hubeau_temperature_bronze",
-        "hubeau_onde_bronze",
-        "hubeau_hydrobiology_bronze",
-    ),
+hubeau_water_quality_surface_job = define_asset_job(
+    name="hubeau_water_quality_surface_job",
+    description="🧪 Qualité Cours d'Eau - Analyses physico-chimiques",
+    selection=AssetSelection.assets("hubeau_water_quality_surface_bronze"),
 )
 
-# ================================
-# JOB 5 : HUB'EAU PRÉLÈVEMENTS
-# ================================
+hubeau_water_quality_groundwater_job = define_asset_job(
+    name="hubeau_water_quality_groundwater_job",
+    description="🧪 Qualité Nappes - Analyses physico-chimiques",
+    selection=AssetSelection.assets("hubeau_water_quality_groundwater_bronze"),
+)
+
+hubeau_onde_job = define_asset_job(
+    name="hubeau_onde_job",
+    description="🌊 ONDE - Observatoire National Des Étiages",
+    selection=AssetSelection.assets("hubeau_onde_bronze"),
+)
+
+hubeau_hydrobiology_job = define_asset_job(
+    name="hubeau_hydrobiology_job",
+    description="🐟 Hydrobiologie - Indices biologiques",
+    selection=AssetSelection.assets("hubeau_hydrobiology_bronze"),
+)
 
 hubeau_prelevements_job = define_asset_job(
     name="hubeau_prelevements_job",
-    description="💧 Hub'Eau Prélèvements - Chroniques de prélèvements",
+    description="💧 Prélèvements - Volumes annuels de prélèvements",
     selection=AssetSelection.assets("hubeau_prelevements_bronze"),
 )
 
 # ================================
-# JOB 6 : HUB'EAU SYNTHÈSE
-# ================================
-
-hubeau_summary_job = define_asset_job(
-    name="hubeau_summary_job",
-    description="📊 Hub'Eau Synthèse - Métriques globales",
-    selection=AssetSelection.assets("hubeau_ingestion_summary"),
-)
-
-# ================================
-# JOBS EXTERNES (LEGACY)
+# JOBS EXTERNES
 # ================================
 
 bdlisa_bronze_job = define_asset_job(
@@ -114,21 +76,22 @@ sandre_bronze_job = define_asset_job(
 # EXPORTS
 # ================================
 
-# Jobs Hub'Eau
+# Jobs Hub'Eau (1 par API)
 hubeau_jobs = [
-    hubeau_bronze_job,           # Toutes APIs sauf Hydrométrie
-    hubeau_hydrometry_job,       # Hydrométrie seule (30 jours max)
-    hubeau_hydrology_job,        # Piézométrie uniquement
-    hubeau_water_quality_job,    # Qualité Eau
-    hubeau_environment_job,      # Température, ONDE, Hydrobiologie
-    hubeau_prelevements_job,     # Prélèvements
-    hubeau_summary_job           # Synthèse
+    hubeau_hydrometry_job,
+    hubeau_piezometry_job,
+    hubeau_temperature_job,
+    hubeau_water_quality_surface_job,
+    hubeau_water_quality_groundwater_job,
+    hubeau_onde_job,
+    hubeau_hydrobiology_job,
+    hubeau_prelevements_job,
 ]
 
-# Jobs externes (legacy)
+# Jobs externes
 external_jobs = [
     bdlisa_bronze_job,
-    sandre_bronze_job
+    sandre_bronze_job,
 ]
 
 # Tous les jobs

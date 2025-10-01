@@ -13,8 +13,11 @@ Pipeline intégrant **8 APIs Hub'Eau** avec gestion des erreurs, retry automatiq
 - **8 APIs Hub'Eau** intégrées avec configurations optimisées
 - **Architecture Medallion** : Bronze (MinIO) → Silver (DBs spécialisées) → Gold
 - **Retry automatique** avec Tenacity (gestion erreurs HTTP)
-- **Limitation de concurrence** (protection Hub'Eau)
-- **Partitions adaptées** par API (quotidiennes, 30 jours, annuelles)
+- **Limitation de concurrence** (sémaphore global 10 requêtes max)
+- **Partitions adaptées** par API : 2 quotidiennes, 5 annuelles, 1 non-partitionnée
+- **0 troncature garantie** : Récupération complète de toutes les données
+
+📖 **[Documentation Hub'Eau Complète](docs/HUBEAU_PIPELINE.md)**
 
 ---
 
