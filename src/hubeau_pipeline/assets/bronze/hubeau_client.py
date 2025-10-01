@@ -28,6 +28,13 @@ from botocore.exceptions import ClientError
 logger = get_dagster_logger()
 
 # ====================================
+# SÉMAPHORE GLOBAL POUR TOUTES LES APIS HUB'EAU
+# ====================================
+# ✅ CORRECTIF: Limite globale de requêtes simultanées vers Hub'Eau
+# pour éviter la surcharge quand plusieurs APIs tournent en parallèle
+GLOBAL_HUBEAU_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 requêtes simultanées TOUS CLIENTS CONFONDUS
+
+# ====================================
 # MODÈLES PYDANTIC POUR VALIDATION
 # ====================================
 
@@ -69,12 +76,12 @@ class HubeauEndpointConfig(BaseModel):
     temporal_params: Optional[Dict[str, str]] = None
     spatial_params: Optional[Dict[str, str]] = None
     page_size: int = 1000
-    max_pages: int = 100
+    max_pages: Optional[int] = 100  # ✅ Optional[int] pour permettre None (sans limite)
     supports_cursor: bool = False
     requires_spatial_filter: bool = False
     cache_duration: int = 30  # Jours de cache
     realtime_cache_duration: int = 15  # Minutes pour données temps réel
-    depth_limit: Optional[int] = None  # Limite de profondeur pour éviter troncature
+    depth_limit: Optional[int] = None  # Limite de profondeur pour éviter troncature (None = sans limite)
     end_offset_days: int = 0  # Offset pour borne fin exclusive (ex. Hydrobiologie: +1 jour)
 
 class HubeauApiConfig(BaseModel):
@@ -108,6 +115,12 @@ class HubeauClient:
                 'Accept': 'application/json'
             }
         )
+        
+        # ✅ CORRECTIF: Log de la limite globale pour observabilité
+        self.logger.info(
+            f"🌐 Client Hub'Eau {config.name} initialisé "
+            f"(limite globale: {GLOBAL_HUBEAU_SEMAPHORE._value} requêtes simultanées pour TOUS les clients)"
+        )
     
     async def __aenter__(self):
         return self
@@ -119,28 +132,31 @@ class HubeauClient:
         """Fait une requête HTTP avec retry automatique et jitter (CORRECTIF C)"""
         url = f"{self.config.base_url}/{endpoint}"
         
-        # Rate limiting respectueux
-        await asyncio.sleep(self.config.rate_limit_delay)
-        
-        self.logger.debug(f"Requête Hub'Eau: {url} avec params {params}")
-        
-        # ✅ CORRECTIF C: Retries dynamiques avec jitter
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.config.max_retries),
-            wait=wait_exponential(multiplier=1, min=2, max=10),
-            retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
-            before_sleep=before_sleep_log(logger, 30),
-            reraise=True
-        ):
-            with attempt:
-                # Jitter pour éviter rafales synchrones
-                await asyncio.sleep(random.random() * 0.5)
-                
-                response = await self.client.get(url, params=params)
-                response.raise_for_status()
-                
-                data = response.json()
-                return HubeauApiResponse(**data)
+        # ✅ CORRECTIF: Sémaphore global pour limiter le nombre total de requêtes simultanées
+        # Cela évite la surcharge quand 6 APIs tournent en parallèle
+        async with GLOBAL_HUBEAU_SEMAPHORE:
+            # Rate limiting respectueux
+            await asyncio.sleep(self.config.rate_limit_delay)
+            
+            self.logger.debug(f"Requête Hub'Eau: {url} avec params {params}")
+            
+            # ✅ CORRECTIF C: Retries dynamiques avec jitter
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(self.config.max_retries),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
+                before_sleep=before_sleep_log(logger, 30),
+                reraise=True
+            ):
+                with attempt:
+                    # Jitter pour éviter rafales synchrones
+                    await asyncio.sleep(random.random() * 0.5)
+                    
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    return HubeauApiResponse(**data)
     
     async def get_stations(self, endpoint_name: str = "stations") -> List[Dict[str, Any]]:
         """Récupère toutes les stations de TOUT LE TERRITOIRE FRANÇAIS"""
@@ -155,11 +171,15 @@ class HubeauClient:
         all_departments = self._get_french_departments()
         
         # Chunking adaptatif selon la profondeur limite (legacy strategy)
-        depth_limit = getattr(endpoint_config, 'depth_limit', None) or self.config.max_results_limit
-        if depth_limit <= 10000:
+        depth_limit = getattr(endpoint_config, 'depth_limit', None)
+        
+        # ✅ CORRECTIF: Gestion spéciale pour prélèvements (sans limite)
+        if endpoint_config.path == "referentiel/points_prelevement":
+            chunk_size = 1  # 1 département (API sensible)
+        elif depth_limit is not None and depth_limit <= 10000:
             chunk_size = 1  # 1 département pour les APIs avec limite 10k (Hydrobiologie)
         else:
-            chunk_size = 5  # 5 départements pour les autres APIs
+            chunk_size = 5  # 5 départements pour les autres APIs (ou sans limite)
         
         dept_chunks = [all_departments[i:i + chunk_size] for i in range(0, len(all_departments), chunk_size)]
         
@@ -205,8 +225,9 @@ class HubeauClient:
         """Helper pour récupérer toutes les pages d'un endpoint"""
         all_data = []
         page = 1
+        max_pages = endpoint_config.max_pages if endpoint_config.max_pages is not None else float('inf')
         
-        while page <= endpoint_config.max_pages:
+        while page <= max_pages:
             page_params = params.copy()
             page_params["page"] = page
             
@@ -231,12 +252,14 @@ class HubeauClient:
                 self.logger.error(f"Erreur page {page}: {e}")
                 break
 
-        expected_records_cap = endpoint_config.max_pages * params.get("size", endpoint_config.page_size)
-        if page > endpoint_config.max_pages and len(all_data) >= expected_records_cap:
-            self.logger.warning(
-                "⚠️ TRONCATURE: max_pages=%s atteint pour %s. Récupéré %s records, mais il pourrait y en avoir plus !",
-                endpoint_config.max_pages,
-                endpoint_config.path,
+        # Warning de troncature seulement si max_pages défini
+        if endpoint_config.max_pages is not None:
+            expected_records_cap = endpoint_config.max_pages * params.get("size", endpoint_config.page_size)
+            if page > endpoint_config.max_pages and len(all_data) >= expected_records_cap:
+                self.logger.warning(
+                    "⚠️ TRONCATURE: max_pages=%s atteint pour %s. Récupéré %s records, mais il pourrait y en avoir plus !",
+                    endpoint_config.max_pages,
+                    endpoint_config.path,
                 len(all_data),
             )
 
@@ -307,14 +330,15 @@ class HubeauClient:
             # APPROCHE SPATIALE (départements)
             all_departments = self._get_french_departments()
 
-            # Chunking adaptatif selon la profondeur limite et l'API
+            # ✅ Stratégie de chunking adaptative selon l'API
             depth_limit = getattr(endpoint_config, 'depth_limit', None)
             
-            # ✅ Stratégie de chunking pour approche spatiale
-            # Hydrobiologie : chunk_size = 1 pour éviter les 500
-            if self.config.name == "hydrobiology":
-                chunk_size = 1
-            elif depth_limit and depth_limit <= 10000:
+            # Déterminer chunk_size selon l'API et la configuration
+            if endpoint_config.path == "chroniques" and self.config.name == "prelevements":
+                chunk_size = 1  # ✅ Prélèvements: 1 département à la fois (volumes importants, sans limite)
+            elif self.config.name == "hydrobiology":
+                chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
+            elif depth_limit is not None and depth_limit <= 10000:
                 chunk_size = 1  # 1 département pour les APIs avec limite 10k
             else:
                 chunk_size = 5  # 5 départements pour les autres APIs
@@ -324,10 +348,16 @@ class HubeauClient:
             self.logger.info(f"🌍 Récupération observations {endpoint_name} par départements (parallélisée)")
             self.logger.info(f"📊 Découpage spatial: {len(all_departments)} départements en {len(dept_chunks)} groupes (chunk_size={chunk_size})")
             
-            # Parallélisation des requêtes par département (réduite pour hydrobiologie)
-            MAX_CONCURRENT_SPATIAL = 4 if self.config.name == "hydrobiology" else 10
+            # Parallélisation adaptative selon l'API
+            if self.config.name == "prelevements" and chunk_size == 1:
+                MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
+            elif self.config.name == "hydrobiology":
+                MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
+            else:
+                MAX_CONCURRENT_SPATIAL = 10  # Défaut
+            
             semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPATIAL)
-            self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT_SPATIAL} requêtes simultanées")
+            self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT_SPATIAL} requêtes simultanées (optimisé pour chunk_size={chunk_size})")
 
             spatial_param_key = self._resolve_spatial_param(endpoint_config)
 
@@ -338,10 +368,16 @@ class HubeauClient:
                         chunk_params[spatial_param_key] = ",".join(dept_chunk)
 
                         chunk_data = await self._fetch_all_pages(endpoint_config, chunk_params)
-                        self.logger.info(f"✅ Groupe {i+1}/{len(dept_chunks)}: {len(chunk_data)} observations")
+                        
+                        # Log adaptatif selon chunk_size
+                        if len(dept_chunk) == 1:
+                            self.logger.info(f"✅ Département {dept_chunk[0]} ({i+1}/{len(dept_chunks)}): {len(chunk_data)} observations")
+                        else:
+                            self.logger.info(f"✅ Groupe {i+1}/{len(dept_chunks)}: {len(chunk_data)} observations")
                         return chunk_data
                     except Exception as e:
                         # Fallback : si le chunk multi-départements échoue, réessayer département par département
+                        # Note: Si chunk_size=1 déjà, pas de fallback possible
                         if len(dept_chunk) > 1:
                             self.logger.warning(f"⚠️ Groupe {i+1} erreur ({e}), retry par département individuel...")
                             merged = []
@@ -355,7 +391,8 @@ class HubeauClient:
                                     self.logger.warning(f"⚠️ Département {dept} ignoré: {str(ee)}")
                             return merged
                         else:
-                            self.logger.warning(f"⚠️ Groupe {i+1} ignoré: {str(e)}")
+                            # chunk_size=1 : pas de fallback, juste logger et continuer
+                            self.logger.warning(f"⚠️ Département {dept_chunk[0]} ignoré: {str(e)}")
                             return []
             
             # Lancer toutes les requêtes en parallèle
@@ -398,12 +435,15 @@ class HubeauClient:
                 # Hydrobiologie : limite URL ≈2083 caractères → chunks plus petits
                 # Hydrométrie observations_tr : beaucoup de données par station → chunks réduits
                 # Température : API sensible aux URL longues → chunks réduits
+                # ONDE : API très sensible aux erreurs 500 → chunks très réduits
                 if api_name_actual == "hydrobiology":
                     MAX_CODES_PER_REQUEST = 25
                 elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
                     MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter surcharge
                 elif api_name_actual == "temperature":
                     MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter erreurs 500
+                elif api_name_actual == "onde":
+                    MAX_CODES_PER_REQUEST = 10  # ✅ CORRECTIF: Réduire drastiquement pour éviter erreurs 500
                 else:
                     MAX_CODES_PER_REQUEST = 50
                 
@@ -415,10 +455,13 @@ class HubeauClient:
                     # Parallélisation avec asyncio.gather() pour accélérer l'ingestion
                     # Hydrobiologie : API sensible → parallélisme réduit
                     # Hydrométrie observations_tr : beaucoup de chunks → parallélisme modéré
+                    # ONDE : API très sensible → parallélisme très réduit
                     if api_name_actual == "hydrobiology":
                         MAX_CONCURRENT = 4
                     elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
                         MAX_CONCURRENT = 8  # ✅ CORRECTIF: Parallélisme modéré pour ~245 chunks
+                    elif api_name_actual == "onde":
+                        MAX_CONCURRENT = 5  # ✅ CORRECTIF: Parallélisme très réduit pour éviter surcharge API
                     else:
                         MAX_CONCURRENT = 15
                     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
