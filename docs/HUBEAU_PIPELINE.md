@@ -1,151 +1,229 @@
-# Pipeline Hub'Eau – Détails d'implémentation
+# Pipeline Hub'Eau - Fonctionnement Technique
 
-Dernière vérification : 2024-09-30
+## Architecture Dagster
 
-Ce document décrit le fonctionnement interne du pipeline Hub'Eau : client HTTP, service d'ingestion, assets Dagster, jobs et tests. Il fournit également les paramètres clés à ajuster selon les études scientifiques.
+### Assets
+**Définition :** Entités de données avec lineage automatique
+**Exécution :** Matérialisation déclarative
+**Monitoring :** UI intégrée avec métriques
 
----
-
-## 1. Client Hub'Eau (`HubeauClient`)
-
-Emplacement : `src/hubeau_pipeline/assets/bronze/hubeau_client.py`
-
-### 1.1 Caractéristiques principales
-
-- **Client httpx asynchrone** avec timeout configurable (`config.timeout`, défaut 60s).
-- **Retry exponentiel avec jitter** (tenacity) sur les erreurs réseau ou HTTP (`HTTPError`, `TimeoutException`).
-- **Sémaphore global** (`GLOBAL_HUBEAU_SEMAPHORE = 10`) pour plafonner les requêtes concurrentes sur l'ensemble des assets.
-- **Pagination hybride** : support natif de la pagination page/offset et de la pagination par curseur (`supports_cursor=True`).
-- **Validation Pydantic** des réponses (`HubeauApiResponse`, `HubeauStation`, `HubeauObservation`). Les listes vides sont autorisées pour représenter des fenêtres sans données.
-- **Métriques d'ingestion** : chaque requête alimente `IngestionMetrics` (nombre de requêtes, volume retourné, durée cumulative) utilisé pour l'audit.
-
-### 1.2 Configuration (`HubeauApiConfig`, `HubeauEndpointConfig`)
-
-- Définies dans `hubeau_configs.py`.
-- Paramètres clés : `page_size`, `max_pages`, `supports_cursor`, `temporal_params`, `spatial_params`, `requires_spatial_filter`, `rate_limit_delay` (délai fixe entre deux requêtes).
-- Les endpoints exposent `end_offset_days` pour gérer des fenêtres fermées/exclusives (ex : hydrobiologie +1 jour).
-
-### 1.3 Gestion des erreurs
-
-- Toute erreur de page est encapsulée dans `HubeauPageFetchError` et fait échouer l'ingestion si `bubble_exceptions=True`.
-- Les logs redigent les paramètres sensibles (`page`, `cursor`) mais conservent les filtres pour faciliter le debugging.
-
----
-
-## 2. Service d'ingestion (`HubeauIngestionService`)
-
-### 2.1 Responsabilités
-
-- Préparer la configuration MinIO/S3 ou le fallback local (`./data/hubeau_bronze`).
-- Récupérer séquentiellement **stations** puis **observations** pour chaque endpoint pertinent.
-- Enregistrer systématiquement les métadonnées d'exécution, y compris pour les partitions sans données (`status = "no_data"`).
-- Propager un statut `partial_success` en cas d'erreurs partielles (stations KO mais observations OK, etc.).
-
-### 2.2 Structure de sortie
-
-```json
-{
-  "execution_date": "2024-09-30T10:15:00",
-  "partition_date": "2024-09-29",
-  "api_name": "piezometry",
-  "total_records_ingested": 12345,
-  "results_by_endpoint": {
-    "stations": {"records_count": 200, "data": [...]},
-    "chroniques": {"records_count": 12145, "data": [...]}},
-  "status": "success",
-  "metrics": {"request_count": 12, "bytes_downloaded": 5_200_000},
-  "errors": []
-}
+#### Assets Bronze
+```python
+@asset(
+    partitions_def=DailyPartitionsDefinition(start_date="2024-01-01"),
+    group_name="bronze"
+)
+def hubeau_hydrometry_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingestion hydrométrie Hub'Eau vers MinIO"""
+    partition_date = context.partition_key
+    service = HubeauIngestionService(minio_resource=context.resources.minio)
+    config = get_hydrometry_config()
+    return service.ingest_api_data(config, partition_date)
 ```
 
-Ces structures sont écrites telles quelles dans `ingestion_metadata.json` pour assurer un audit complet.
+### Jobs
+**Rôle :** Orchestration des assets
+**Exécution :** Multi-process avec parallélisation
+**Monitoring :** Logs structurés et métriques
 
-### 2.3 Stockage
+#### Jobs d'Ingestion
+```python
+@job(
+    name="hubeau_bronze_ingestion_job",
+    resource_defs={"minio": minio_resource},
+    executor_def=multiprocess_executor.configured({"max_concurrent": 3})
+)
+def bronze_ingestion_job():
+    """Job d'ingestion complète Hub'Eau"""
+    return [
+        hubeau_hydrometry_bronze(),
+        hubeau_piezometry_bronze(),
+        hubeau_quality_bronze(),
+        hubeau_temperature_bronze(),
+        hubeau_onde_bronze(),
+        hubeau_hydrobiology_bronze(),
+        hubeau_prelevements_bronze()
+    ]
+```
 
-- **MinIO** : bucket `bronze`, clés `api/partition/`.
-  - `ingestion_metadata.json`
-  - `<endpoint>_data.json`
-  - `<endpoint>_metadata.json`
-- **Fallback local** : miroir de la structure MinIO sous `HUBEAU_LOCAL_CACHE` (défaut `./data/hubeau_bronze`).
+### Schedules
+**Rôle :** Planification automatique
+**Fréquence :** Quotidienne pour APIs temps réel
+**Gestion :** Retry automatique sur échecs
 
----
+```python
+@schedule(
+    job=bronze_ingestion_job,
+    cron_schedule="0 2 * * *",  # 2h00 quotidien
+    name="daily_hubeau_ingestion"
+)
+def daily_ingestion_schedule(context: ScheduleExecutionContext):
+    """Planification quotidienne ingestion Hub'Eau"""
+    return RunRequest(
+        partition_key=context.scheduled_execution_time.strftime("%Y-%m-%d")
+    )
+```
 
-## 3. Assets Dagster
+## Client Hub'Eau
 
-Emplacement : `src/hubeau_pipeline/assets/bronze/hubeau_assets.py`
+### Configuration
+**Rate Limiting :** 0.5s entre requêtes
+**Concurrence :** Sémaphore global (10 requêtes max)
+**Retry :** 3 tentatives avec backoff exponentiel
+**Timeout :** 60s par requête
 
-### 3.1 Partitionnement
+### Gestion d'Erreurs
+```python
+async def _make_request(self, endpoint: str, params: Dict[str, Any]) -> HubeauApiResponse:
+    """Requête HTTP avec retry automatique"""
+    async with GLOBAL_HUBEAU_SEMAPHORE:
+        await asyncio.sleep(self.config.rate_limit_delay)
+        
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(self.config.max_retries),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException))
+        ):
+            with attempt:
+                await asyncio.sleep(random.random() * 0.5)  # Jitter
+                response = await self.client.get(url, params=params)
+                response.raise_for_status()
+                return HubeauApiResponse(**response.json())
+```
 
-| Asset | Partition | Fenêtre Hub'Eau | Remarques |
-| --- | --- | --- | --- |
-| `hubeau_hydrometry_bronze` | Pas de partition (fenêtre glissante 30 jours) | API hydrométrie v2 – limitation officielle Hub'Eau | Calcul automatique des 30 derniers jours à chaque run. |
-| `hubeau_piezometry_bronze` | Quotidienne (`DailyPartitionsDefinition`) | Données temps réel + historique | Ignore les dates futures, partition clé format `YYYY-MM-DD`. |
-| `hubeau_temperature_bronze` | Quotidienne | Temps réel stations thermométriques | Idem piézométrie. |
-| `hubeau_onde_bronze` | Mensuelle (utilise `StaticPartitionsDefinition` avec `YYYY-MM`) | Campagnes estivales ONDE | Les partitions futures sont ignorées par sécurité. |
-| `hubeau_water_quality_surface_bronze` | Annuelle (`StaticPartitionsDefinition`) | Campagnes physico-chimiques surface | Combinaison station + analyses. |
-| `hubeau_water_quality_groundwater_bronze` | Annuelle | Analyses chimie nappes | Filtre département obligatoire. |
-| `hubeau_hydrobiology_bronze` | Annuelle | Indices biologiques et taxons | Gestion des codes stations spécifiques. |
-| `hubeau_prelevements_bronze` | Annuelle | Déclarations volumes prélevés | Agrégation par ouvrage. |
+### Stratégies d'Ingestion
 
-> Les partitions disponibles sont déclarées dans `YEARLY_PARTITIONS` et doivent être mises à jour chaque nouvelle campagne.
+#### Par Codes d'Entités
+```python
+async def get_observations(self, endpoint_name: str, entity_codes: List[str], date_partition: str):
+    """Récupération par codes d'entités avec chunking"""
+    # Chunking adaptatif selon API
+    if api_name == "hydrobiology":
+        MAX_CODES_PER_REQUEST = 25
+    elif api_name == "onde":
+        MAX_CODES_PER_REQUEST = 3  # API très sensible
+    else:
+        MAX_CODES_PER_REQUEST = 50
+    
+    # Parallélisation avec asyncio.gather
+    entity_chunks = [entity_codes[i:i + MAX_CODES_PER_REQUEST] 
+                     for i in range(0, len(entity_codes), MAX_CODES_PER_REQUEST)]
+    
+    tasks = [self._execute_chunk(chunk) for chunk in entity_chunks]
+    results = await asyncio.gather(*tasks)
+    return [item for sublist in results for item in sublist]
+```
 
-### 3.2 Jobs & Schedules
+#### Par Départements
+```python
+async def get_stations(self, endpoint_name: str = "stations"):
+    """Récupération par départements avec chunking adaptatif"""
+    all_departments = self._get_french_departments()
+    
+    # Chunking selon API
+    if endpoint_config.path == "referentiel/points_prelevement":
+        chunk_size = 1  # API sensible
+    elif depth_limit is not None and depth_limit <= 10000:
+        chunk_size = 1  # APIs avec limite 10k
+    else:
+        chunk_size = 5  # APIs standard
+    
+    dept_chunks = [all_departments[i:i + chunk_size] 
+                   for i in range(0, len(all_departments), chunk_size)]
+    
+    for dept_chunk in dept_chunks:
+        params = {
+            "format": "json",
+            "size": endpoint_config.page_size,
+            spatial_param_key: ",".join(dept_chunk)
+        }
+        chunk_data = await self._fetch_all_pages(endpoint_config, params)
+        all_data.extend(chunk_data)
+```
 
-- `jobs/bronze_ingestion.py` : compose les assets Bronze en jobs (`hubeau_bronze_daily_job`, `hubeau_bronze_yearly_job`).
-- `schedules/` :
-  - `bronze_daily_schedule` (execution quotidienne à 04:00 UTC).
-  - `bronze_yearly_schedule` (exécution annuelle début janvier pour l'année précédente).
-- Les schedules utilisent les filtres Dagster pour matérialiser automatiquement les partitions manquantes.
+## Service d'Ingestion
 
-### 3.3 Tags & Concurrence
+### HubeauIngestionService
+**Rôle :** Orchestration complète d'une API
+**Flux :** Stations → Observations → Sauvegarde MinIO
+**Métriques :** Observabilité complète
 
-Tous les assets Bronze portent `tags={"api": "hubeau"}`. Cela permet d'appliquer des règles de taux (`run_queue_config`) et d'éviter d'exécuter simultanément plus d'un asset Hub'Eau par instance Dagster si besoin.
+```python
+async def ingest_api_data(self, config: HubeauApiConfig, date_partition: str):
+    """Ingestion complète d'une API Hub'Eau"""
+    results = {}
+    total_records = 0
+    
+    async with HubeauClient(config) as client:
+        # 1. Récupérer stations
+        stations_endpoint = self._get_stations_endpoint(config)
+        if stations_endpoint:
+            stations = await client.get_stations(stations_endpoint)
+            results[stations_endpoint] = {
+                'records_count': len(stations),
+                'type': 'stations',
+                'data': stations
+            }
+        
+        # 2. Récupérer observations
+        observations_endpoints = self._get_observations_endpoints(config)
+        for endpoint_name in observations_endpoints:
+            station_codes = self._extract_station_codes(stations, config.name)
+            observations = await client.get_observations(
+                endpoint_name, station_codes, date_partition, config.name
+            )
+            results[endpoint_name] = {
+                'records_count': len(observations),
+                'type': 'observations',
+                'data': observations
+            }
+    
+    # 3. Sauvegarder dans MinIO
+    self._save_to_minio(config.name, date_partition, results)
+    return results
+```
 
----
+## Monitoring et Observabilité
 
-## 4. Tests & assurance qualité
+### Métriques d'Ingestion
+```python
+class IngestionMetrics(BaseModel):
+    """Métriques d'observabilité"""
+    departements_traites: int = 0
+    stations_total: int = 0
+    chunks_total: int = 0
+    chunks_ok: int = 0
+    chunks_vides: int = 0
+    chunks_echoues: int = 0
+    erreurs_http_500: int = 0
+    erreurs_timeout: int = 0
+```
 
-- `tests/test_hubeau_client.py` : couvre la pagination, l'extraction des curseurs, la gestion des erreurs HTTP.
-- `tests/test_hubeau_ingestion_service.py` : vérifie la persistance MinIO/local, la production des métadonnées et les statuts (`no_data`, `partial_success`).
-- Les fixtures sous `tests/fixtures/` répliquent des extraits JSON Hub'Eau officiels pour garantir la conformité.
-- `pytest` est exécuté dans CI et doit passer sans accès réseau.
+### Logging Structuré
+```python
+# Logs avec contexte
+self.logger.info(f"🌍 Récupération stations {endpoint_name} pour TOUT LE TERRITOIRE FRANÇAIS")
+self.logger.info(f"📊 Découpage spatial: {len(all_departments)} départements en {len(dept_chunks)} groupes")
+self.logger.info(f"✅ Groupe {i+1}: {len(chunk_data)} stations (total: {len(all_data)})")
+```
 
----
+## Exécution et Debugging
 
-## 5. Paramétrages scientifiques
+### Commandes Dagster
+```bash
+# Exécution manuelle
+dagster job execute -j hubeau_hydrometry_bronze_job
 
-### 5.1 Filtres spatiaux
+# Backfill
+dagster asset materialize -a hubeau_hydrometry_bronze --partition 2024-09-01
 
-- Certains endpoints (`requires_spatial_filter=True`) imposent de passer par une boucle départementale (`dept`, `code_departement`). Le service applique automatiquement la liste complète des départements métropolitains + DROM.
-- Ajuster la liste dans `HubeauIngestionService._get_french_departments()` si des études nécessitent des territoires additionnels.
+# Monitoring
+dagster asset list -m hubeau_pipeline
+dagster run list --limit 10
+```
 
-### 5.2 Fenêtres temporelles
-
-- Les paramètres `temporal_params` définissent les champs début/fin à envoyer.
-- Pour les assets annuels, l'ingestion envoie `[YYYY-01-01, YYYY-12-31]` (ou `end_offset_days` si l'API attend une borne exclusive).
-- Les assets quotidiens utilisent la partition comme fenêtre `[day, day+1)`.
-
-### 5.3 Respect des limites Hub'Eau
-
-- `rate_limit_delay` (par défaut 0.5s) est paramétrable par API.
-- `max_retries` (3 tentatives) doit rester bas pour éviter les boucles longues en cas de maintenance Hub'Eau.
-- Pour des études intensives, planifier les runs hors heures de bureau et prévenir l'équipe Hub'Eau si la charge augmente.
-
----
-
-## 6. Extension du pipeline
-
-1. **Ajouter un endpoint** : étendre `HubeauEndpointConfig` (ex : nouveaux paramètres) et mettre à jour `DATA_SOURCES_COMPLETE.md`.
-2. **Nouveau type d'asset** : créer un asset Bronze/Silver/Gold dans `src/hubeau_pipeline/assets/` et déclarer son partitionnement.
-3. **Transformation Silver** : utiliser `psycopg` via la ressource `pg` pour insérer les données Bronze dans TimescaleDB (procédure décrite dans `DATA_STORAGE_STRATEGY.md`).
-4. **Analyses Gold** : voir `SOSA_FUTURE_VISION.md` pour aligner les entités sur l'ontologie SOSA et alimenter Neo4j.
-
----
-
-## 7. Points de vigilance
-
-- Surveiller régulièrement les changements de schéma des APIs Hub'Eau (nouvelles colonnes, champs dépréciés).
-- Documenter toute modification dans la configuration (nouveau filtre, changement de `page_size`).
-- Vérifier les volumes MinIO : un accroissement soudain peut indiquer une évolution du format Hub'Eau.
-
-Ce document doit être relu à chaque ajout de fonctionnalité pour garantir l'adéquation entre la documentation et le code.
+### Debugging
+- **Logs :** `docker-compose logs -f dagster_webserver`
+- **UI :** http://localhost:8080 pour monitoring visuel
+- **Métriques :** Dashboard intégré avec KPIs
+- **Erreurs :** Stack traces détaillées avec contexte
