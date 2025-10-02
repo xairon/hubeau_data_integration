@@ -1,4 +1,4 @@
-"""Dagster assets orchestrating dlt based pipelines."""
+"""Dagster assets orchestrating Hub'Eau dlt pipelines."""
 from __future__ import annotations
 
 import os
@@ -6,32 +6,64 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
-from dagster import AssetExecutionContext, MetadataValue, asset
+from dagster import AssetExecutionContext, DailyPartitionsDefinition, StaticPartitionsDefinition, asset
+from dlt.common.typing import TSecretValue
 
 from pipelines.dlt.hubeau_generic import run_pipeline
 
+# Partitions pour les données historiques (annuelles depuis 2020)
+YEARLY_PARTITIONS = StaticPartitionsDefinition([str(year) for year in range(2020, 2026)])
 
-def _build_credentials() -> Dict[str, str]:
-    endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
-    region = os.getenv("MINIO_REGION", "us-east-1")
-    access_key = os.getenv("MINIO_USER")
-    secret_key = os.getenv("MINIO_PASS")
-    creds = {
-        "aws_access_key_id": access_key,
-        "aws_secret_access_key": secret_key,
-        "endpoint_url": endpoint,
-        "region_name": region,
+# Partitions pour les données temps réel (30 derniers jours)
+DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
+
+
+def _resolve_config_path(config_path: str) -> Path:
+    """Return an absolute path for the provided configuration file."""
+
+    candidate = Path(config_path)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+
+    # Dagster images mount the repository in /app, fall back to the repo root otherwise
+    repo_root = Path("/app")
+    resolved = repo_root / config_path.lstrip("/")
+    if resolved.exists():
+        return resolved
+
+    # Default to the project root relative path
+    return Path.cwd() / config_path
+
+
+def _build_credentials() -> Dict[str, TSecretValue]:
+    """Build MinIO/S3 credentials expected by dlt destinations."""
+
+    minio_user = os.getenv("MINIO_USER", "admin")
+    minio_pass = os.getenv("MINIO_PASS", "BrgmMinio2024!")
+    minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+    minio_region = os.getenv("MINIO_REGION", "us-east-1")
+    return {
+        "aws_access_key_id": TSecretValue(minio_user),
+        "aws_secret_access_key": TSecretValue(minio_pass),
+        "endpoint_url": minio_endpoint,
+        "region_name": minio_region,
     }
-    return {k: v for k, v in creds.items() if v}
 
 
-def _build_state_fs_options(credentials: Dict[str, str]) -> Dict[str, Any]:
+def _build_state_fs_options(credentials: Dict[str, TSecretValue]) -> Dict[str, Any]:
+    """Return fsspec-compatible options to persist dlt state remotely."""
+
+    key = credentials.get("aws_access_key_id")
+    secret = credentials.get("aws_secret_access_key")
     endpoint = credentials.get("endpoint_url")
     region = credentials.get("region_name")
-    fs_options: Dict[str, Any] = {
-        "key": credentials.get("aws_access_key_id"),
-        "secret": credentials.get("aws_secret_access_key"),
-    }
+
+    fs_options: Dict[str, Any] = {}
+    if key:
+        fs_options["key"] = str(key)
+    if secret:
+        fs_options["secret"] = str(secret)
+
     client_kwargs: Dict[str, Any] = {}
     if endpoint:
         client_kwargs["endpoint_url"] = endpoint
@@ -39,150 +71,156 @@ def _build_state_fs_options(credentials: Dict[str, str]) -> Dict[str, Any]:
         client_kwargs["region_name"] = region
     if client_kwargs:
         fs_options["client_kwargs"] = client_kwargs
-    return {k: v for k, v in fs_options.items() if v}
+
+    return fs_options
 
 
-@asset(io_manager_key="minio_io_manager", compute_kind="python", required_resource_keys={"s3"})
+# ====================================
+# Generic dlt Ingestion Asset
+# ====================================
+
+
 def ingest_dlt(context: AssetExecutionContext, config_path: str) -> Dict[str, Any]:
-    cfg = yaml.safe_load(Path(config_path).read_text())
-    context.log.info("Launching dlt pipeline for %s", cfg["name"])
+    """Execute a dlt pipeline described by a YAML configuration file."""
 
-    minio_bucket = getattr(context.resources, "s3", {}).get("bucket")
-    bucket_url = f"s3://{minio_bucket}" if minio_bucket else None
+    config_file = _resolve_config_path(config_path)
+    context.log.info("🚀 Starting dlt ingestion for config: %s", config_file)
+
+    with config_file.open("r", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+
+    partition_key = context.partition_key if context.has_partition_key else None
+    if partition_key and cfg.get("slicer", {}).get("mode") == "datetime":
+        from datetime import datetime
+
+        context.log.info("📅 Partition: %s", partition_key)
+        try:
+            if len(partition_key) == 4 and partition_key.isdigit():
+                year = int(partition_key)
+                cfg["slicer"]["start_date"] = f"{year}-01-01"
+                cfg["slicer"]["end_date"] = f"{year}-12-31"
+                context.log.info("🗓️ Ingestion pour l'année %s", year)
+            else:
+                datetime.strptime(partition_key, "%Y-%m-%d")
+                cfg["slicer"]["start_date"] = partition_key
+                cfg["slicer"]["end_date"] = partition_key
+                context.log.info("🗓️ Ingestion pour le jour %s", partition_key)
+        except ValueError:
+            context.log.warning("⚠️ Could not parse partition key: %s", partition_key)
+
+    context.log.info("Loaded dlt config: %s", cfg["name"])
+
     credentials = _build_credentials()
-    fs_options = _build_state_fs_options(credentials)
-
-    if not credentials.get("aws_access_key_id") or not credentials.get("aws_secret_access_key"):
-        context.log.warning(
-            "Missing explicit MinIO credentials in environment; relying on default client configuration"
-        )
-
-    cfg.setdefault("state_store", f"{bucket_url.rstrip('/')}/_state" if bucket_url else None)
+    state_fs_options = _build_state_fs_options(credentials)
+    bucket_url = "s3://bronze"
 
     load_info = run_pipeline(
         cfg,
         bucket_url=bucket_url,
         credentials=credentials,
-        dataset_name=cfg.get("dataset_name"),
-        file_format=cfg.get("file_format", "parquet"),
-        layout=cfg.get("layout"),
-        state_fs_options=fs_options,
+        dataset_name=cfg.get("dataset_name", "bronze"),
+        file_format=cfg.get("file_format", "json"),
+        layout=cfg.get("layout", "{table_name}/{curr_date}/data.json"),
+        state_fs_options=state_fs_options,
     )
+
+    context.log.info("✅ dlt pipeline for %s finished.", cfg["name"])
+
     row_count = 0
-    if hasattr(load_info, "metrics"):
-        row_count = load_info.metrics.row_counts.get(cfg["name"], 0)
-    context.add_output_metadata(
-        {
-            "stream": MetadataValue.text(cfg["name"]),
-            "rows": MetadataValue.int(row_count),
-            "destination": MetadataValue.text("bronze"),
-        }
-    )
+    if hasattr(load_info, "load_packages") and load_info.load_packages:
+        for package in load_info.load_packages:
+            for job in getattr(package, "jobs", []):
+                if getattr(job, "job_file_type", None) == "data":
+                    row_count += getattr(job, "records_count", 0)
+
     return {"stream": cfg["name"], "rows": row_count}
 
 
 # ====================================
-# ASSETS HYDROBIOLOGIE
+# Hub'Eau Specific dlt Assets
 # ====================================
 
-@asset(required_resource_keys={"s3"})
+
+@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS)
 def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🐟 Hydrobiologie - Taxons biologiques"""
+    """Ingests hydrobiology taxons data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/hydrobio_taxons.yml")
 
 
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS)
 def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🐟 Hydrobiologie - Indices biologiques (IBGN, I2M2, etc.)"""
+    """Ingests hydrobiology indices data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml")
 
 
-# ====================================
-# ASSETS HYDROMÉTRIE
-# ====================================
-
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_hydrometry")
 def hydrometry_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🌊 Hydrométrie - Observations temps réel (30 derniers jours)"""
+    """Ingests hydrometry observations data using dlt (30 derniers jours)."""
+
     return ingest_dlt(context, "configs/hubeau/hydrometry_observations.yml")
 
 
-# ====================================
-# ASSETS PIÉZOMÉTRIE
-# ====================================
-
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_piezometry", partitions_def=DAILY_PARTITIONS)
 def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🕳️ Piézométrie - Chroniques de niveaux des nappes"""
+    """Ingests piezometry chroniques data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/piezometry_chroniques.yml")
 
 
-# ====================================
-# ASSETS QUALITÉ DES EAUX
-# ====================================
-
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS)
 def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🏞️ Qualité Cours d'Eau - Analyses physico-chimiques"""
+    """Ingests superficial waterbodies quality analyses data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/quality_rivers_analyses.yml")
 
 
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_quality_groundwater", partitions_def=YEARLY_PARTITIONS)
 def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
-    """💧 Qualité Nappes - Analyses eaux souterraines"""
+    """Ingests groundwater quality analyses data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml")
 
 
-# ====================================
-# ASSETS ÉCOULEMENT
-# ====================================
-
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_ecoulement", partitions_def=YEARLY_PARTITIONS)
 def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🌊 Écoulement - Observations ONDE (Observatoire National Des Étiages)"""
+    """Ingests ecoulement observations data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml")
 
 
-# ====================================
-# ASSETS PRÉLÈVEMENTS
-# ====================================
-
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS)
 def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
-    """💧 Prélèvements - Chroniques de prélèvement (limite 20k stricte)"""
+    """Ingests prelevements chroniques data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml")
 
 
-# ====================================
-# ASSETS TEMPÉRATURE
-# ====================================
-
-@asset(required_resource_keys={"s3"})
+@asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS)
 def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
-    """🌡️ Température - Chroniques de température (station×mois systématique)"""
+    """Ingests temperature chroniques data using dlt."""
+
     return ingest_dlt(context, "configs/hubeau/temperature_chroniques.yml")
 
 
-# ====================================
-# EXPORT DES ASSETS
-# ====================================
+@asset(group_name="hubeau_temperature")
+def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests temperature stations reference data using dlt (pas de partition)."""
+
+    return ingest_dlt(context, "configs/reference/temperature_stations.yml")
+
 
 __all__ = [
     "ingest_dlt",
-    # Hydrobiologie
     "hydrobio_taxons",
     "hydrobio_indices",
-    # Hydrométrie
     "hydrometry_observations",
-    # Piézométrie
     "piezometry_chroniques",
-    # Qualité
     "quality_rivers_analyses",
     "quality_groundwater_analyses",
-    # Écoulement
     "ecoulement_observations",
-    # Prélèvements
     "prelevements_chroniques",
-    # Température
     "temperature_chroniques",
+    "temperature_stations_reference",
 ]
