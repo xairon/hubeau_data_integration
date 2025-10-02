@@ -1,0 +1,40 @@
+name: hydrobio_taxons
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1
+path: /hydrobio/taxons
+method: GET
+params_default:
+  format: json
+  size: 500
+records_path: $.data
+primary_keys: [id_taxon, code_station, date_prelevement]
+replication_key: date_prelevement
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 500
+  until_expr: "len($.data) < 500"
+slicer:
+  mode: datetime
+  start_param: date_debut_prelevement
+  end_param: date_fin_prelevement
+  window_days: 1
+  start_date: 2023-01-01
+  end_offset_days: 1
+fallbacks:
+  truncation_threshold: 20000
+  split_chain: [day, station_month]
+pre_scan:
+  stations:
+    enabled: true
+    ref_stream: hydrobio_stations
+    key: code_station
+rate_limit:
+  target_rps: 0.6
+  max_concurrency: 1
+  backoff: exponential_jitter
+  rps_decrease_on_429: true
+  rps_increase_cooldown_s: 60
+state_store: s3://bronze/_state

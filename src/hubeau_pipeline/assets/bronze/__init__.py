@@ -15,6 +15,7 @@ from .hubeau_assets import (
     hubeau_prelevements_bronze,
     hubeau_ingestion_summary
 )
+from dagster.assets.dlt_assets import hydrobio_taxons
 
 # Sources externes (référentiels géographiques et thesaurus)
 from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
@@ -30,6 +31,7 @@ hubeau_bronze_assets = [
     hubeau_ecoulement_bronze,
     hubeau_hydrobiology_bronze,
     hubeau_prelevements_bronze,
+    hydrobio_taxons,
     hubeau_ingestion_summary
 ]
 
@@ -53,6 +55,7 @@ __all__ = [
     "hubeau_ecoulement_bronze",
     "hubeau_hydrobiology_bronze",
     "hubeau_prelevements_bronze",
+    "hydrobio_taxons",
     "hubeau_ingestion_summary",
     
     # Assets externes (référentiels)
