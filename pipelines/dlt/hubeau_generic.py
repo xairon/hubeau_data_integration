@@ -147,11 +147,8 @@ def hubeau_source(cfg: Dict[str, Any], *, client: HttpClient | None = None):
 
                 for batch in buffered_batches:
                     for record in batch:
-                        # Clean up NULL values in critical fields
-                        if record.get("code_bss") is None and record.get("bss_id"):
-                            record["code_bss"] = record["bss_id"]
-                        elif record.get("code_bss") is None:
-                            record["code_bss"] = f"unknown_{record.get('timestamp_mesure', 'unknown')}"
+                        # Clean up NULL values in critical fields for all APIs
+                        _clean_critical_fields(record, resolved_cfg)
                         
                         record["_slice_id"] = slice_obj.slice_id
                         record["_scope"] = slice_obj.scope
@@ -222,6 +219,81 @@ def run_pipeline(
         )
 
     return load_info
+
+
+def _clean_critical_fields(record: Dict[str, Any], cfg: Dict[str, Any]) -> None:
+    """Clean up NULL values in critical fields for all Hub'Eau APIs."""
+    
+    # Get primary keys from configuration
+    primary_keys = cfg.get("primary_keys", [])
+    
+    # Define field mapping strategies for each API
+    api_name = cfg.get("name", "")
+    
+    # Strategy 1: Direct field substitution (field1 -> field2)
+    field_substitutions = {
+        # Piézométrie
+        "code_bss": ["bss_id", "code_station"],
+        
+        # Écoulement
+        "code_station": ["code_station_hydrobio", "code_site"],
+        
+        # Hydrobiologie
+        "code_station_hydrobio": ["code_station"],
+        "code_indice": ["id_indice"],
+        "id_taxon": ["code_taxon"],
+        
+        # Hydrométrie
+        "code_station": ["code_site", "code_station_hydrobio"],
+        
+        # Qualité
+        "code_bss": ["bss_id", "code_ouvrage"],
+        "libelle_parametre": ["nom_parametre"],
+        "code_unite": ["unite"],
+        
+        # Température
+        "code_station": ["code_site", "code_station_hydrobio"],
+        
+        # Prélèvements
+        "code_ouvrage": ["code_bss", "code_site"],
+    }
+    
+    # Strategy 2: Generate unique identifiers when all fields are NULL
+    timestamp_fields = ["timestamp_mesure", "date_mesure", "date_observation", "date_prelevement", "date_obs"]
+    
+    for primary_key in primary_keys:
+        if record.get(primary_key) is None:
+            # Try substitutions first
+            substituted = False
+            for substitute_field in field_substitutions.get(primary_key, []):
+                if record.get(substitute_field) is not None:
+                    record[primary_key] = record[substitute_field]
+                    substituted = True
+                    break
+            
+            # If no substitution worked, generate a unique identifier
+            if not substituted:
+                # Try to find a timestamp for uniqueness
+                timestamp_value = None
+                for ts_field in timestamp_fields:
+                    if record.get(ts_field) is not None:
+                        timestamp_value = record[ts_field]
+                        break
+                
+                # Generate unique identifier
+                if timestamp_value:
+                    record[primary_key] = f"unknown_{primary_key}_{timestamp_value}_{api_name}"
+                else:
+                    # Fallback with current time
+                    import time
+                    record[primary_key] = f"unknown_{primary_key}_{int(time.time())}_{api_name}"
+    
+    # Strategy 3: Clean up specific problematic fields
+    # Remove None values from critical fields that could cause issues
+    critical_fields = ["code_unite", "libelle_parametre", "grandeur_hydro", "code_ecoulement"]
+    for field in critical_fields:
+        if record.get(field) is None:
+            record[field] = "unknown"
 
 
 def _normalise_state_options(options: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
