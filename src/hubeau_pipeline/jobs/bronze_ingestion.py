@@ -50,6 +50,12 @@ hubeau_hydrobiology_job = define_asset_job(
     selection=AssetSelection.assets("hubeau_hydrobiology_bronze"),
 )
 
+hubeau_hydrobio_taxons_job = define_asset_job(
+    name="hubeau_hydrobio_taxons_job",
+    description="🐟 Hydrobiologie Taxons - Ingestion générique dlt",
+    selection=AssetSelection.assets("hydrobio_taxons"),
+)
+
 hubeau_prelevements_job = define_asset_job(
     name="hubeau_prelevements_job",
     description="💧 Prélèvements - Volumes annuels de prélèvements",
@@ -85,6 +91,7 @@ hubeau_jobs = [
     hubeau_water_quality_groundwater_job,
     hubeau_ecoulement_job,
     hubeau_hydrobiology_job,
+    hubeau_hydrobio_taxons_job,
     hubeau_prelevements_job,
 ]
 

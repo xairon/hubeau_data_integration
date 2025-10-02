@@ -13,6 +13,7 @@ from .bronze_ingestion import (
     hubeau_ecoulement_job,
     hubeau_piezometry_job,
     hubeau_prelevements_job,
+    hubeau_hydrobio_taxons_job,
     hubeau_temperature_job,
     hubeau_water_quality_groundwater_job,
     hubeau_water_quality_surface_job,
@@ -35,6 +36,7 @@ __all__ = [
     "hubeau_water_quality_groundwater_job",
     "hubeau_ecoulement_job",
     "hubeau_hydrobiology_job",
+    "hubeau_hydrobio_taxons_job",
     "hubeau_prelevements_job",
     # Jobs externes
     "bdlisa_bronze_job",
