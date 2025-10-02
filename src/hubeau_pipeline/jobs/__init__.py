@@ -15,11 +15,7 @@ from .bronze_ingestion import (
 )
 
 # Jobs nouvelle architecture dlt (recommended)
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
-
-from dagster.jobs import (
+from .dlt_jobs import (
     hydrobio_job,
     hydrometry_job,
     piezometry_job,
@@ -27,9 +23,9 @@ from dagster.jobs import (
     ecoulement_job,
     prelevements_job,
     temperature_job,
+    sync_hubeau_yearly,
     sync_hubeau_daily,
     sync_hubeau_realtime,
-    sync_hubeau_quality,
 )
 
 # Jobs ancienne architecture
@@ -53,9 +49,9 @@ dlt_jobs = [
     ecoulement_job,
     prelevements_job,
     temperature_job,
+    sync_hubeau_yearly,
     sync_hubeau_daily,
     sync_hubeau_realtime,
-    sync_hubeau_quality,
 ]
 
 # ✅ NOUVELLE ARCHITECTURE: Utiliser les jobs dlt par défaut
@@ -71,9 +67,9 @@ __all__ = [
     "ecoulement_job",
     "prelevements_job",
     "temperature_job",
+    "sync_hubeau_yearly",
     "sync_hubeau_daily",
     "sync_hubeau_realtime",
-    "sync_hubeau_quality",
     
     # Jobs ancienne architecture (deprecated)
     "old_jobs",
