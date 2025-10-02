@@ -1,0 +1,35 @@
+name: hydrometry_observations
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
+path: /observations_tr
+method: GET
+params_default:
+  format: json
+  size: 1000
+records_path: $.data
+primary_keys: [code_station, date_obs, grandeur_hydro]
+replication_key: date_obs
+pagination:
+  type: page
+  page_param: cursor
+  page_size_param: size
+  page_size: 1000
+  until_expr: "len($.data) < 1000"
+slicer:
+  mode: datetime
+  start_param: date_debut_obs
+  end_param: date_fin_obs
+  window_days: 7
+  start_date: "2023-01-01"
+  end_offset_days: 30  # ⚠️ RESTRICTION API v2: Max 30 jours
+rate_limit:
+  target_rps: 2.0  # 2 requêtes par seconde max
+  max_concurrency: 1
+timeout: 60
+comment: |
+  ⚠️ RESTRICTION CRITIQUE API v2 : Accès limité aux 30 derniers jours UNIQUEMENT
+  - Erreur 400 si date_debut_obs < 30 jours
+  - Pas d'accès à l'historique ancien
+  - Utiliser obs_elab pour données élaborées (même restriction)
+

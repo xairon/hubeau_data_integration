@@ -81,6 +81,108 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str) -> Dict[str, An
     return {"stream": cfg["name"], "rows": row_count}
 
 
+# ====================================
+# ASSETS HYDROBIOLOGIE
+# ====================================
+
 @asset(required_resource_keys={"s3"})
 def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🐟 Hydrobiologie - Taxons biologiques"""
     return ingest_dlt(context, "configs/hubeau/hydrobio_taxons.yml")
+
+
+@asset(required_resource_keys={"s3"})
+def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🐟 Hydrobiologie - Indices biologiques (IBGN, I2M2, etc.)"""
+    return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml")
+
+
+# ====================================
+# ASSETS HYDROMÉTRIE
+# ====================================
+
+@asset(required_resource_keys={"s3"})
+def hydrometry_observations(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🌊 Hydrométrie - Observations temps réel (30 derniers jours)"""
+    return ingest_dlt(context, "configs/hubeau/hydrometry_observations.yml")
+
+
+# ====================================
+# ASSETS PIÉZOMÉTRIE
+# ====================================
+
+@asset(required_resource_keys={"s3"})
+def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🕳️ Piézométrie - Chroniques de niveaux des nappes"""
+    return ingest_dlt(context, "configs/hubeau/piezometry_chroniques.yml")
+
+
+# ====================================
+# ASSETS QUALITÉ DES EAUX
+# ====================================
+
+@asset(required_resource_keys={"s3"})
+def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🏞️ Qualité Cours d'Eau - Analyses physico-chimiques"""
+    return ingest_dlt(context, "configs/hubeau/quality_rivers_analyses.yml")
+
+
+@asset(required_resource_keys={"s3"})
+def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
+    """💧 Qualité Nappes - Analyses eaux souterraines"""
+    return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml")
+
+
+# ====================================
+# ASSETS ÉCOULEMENT
+# ====================================
+
+@asset(required_resource_keys={"s3"})
+def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🌊 Écoulement - Observations ONDE (Observatoire National Des Étiages)"""
+    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml")
+
+
+# ====================================
+# ASSETS PRÉLÈVEMENTS
+# ====================================
+
+@asset(required_resource_keys={"s3"})
+def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """💧 Prélèvements - Chroniques de prélèvement (limite 20k stricte)"""
+    return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml")
+
+
+# ====================================
+# ASSETS TEMPÉRATURE
+# ====================================
+
+@asset(required_resource_keys={"s3"})
+def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """🌡️ Température - Chroniques de température (station×mois systématique)"""
+    return ingest_dlt(context, "configs/hubeau/temperature_chroniques.yml")
+
+
+# ====================================
+# EXPORT DES ASSETS
+# ====================================
+
+__all__ = [
+    "ingest_dlt",
+    # Hydrobiologie
+    "hydrobio_taxons",
+    "hydrobio_indices",
+    # Hydrométrie
+    "hydrometry_observations",
+    # Piézométrie
+    "piezometry_chroniques",
+    # Qualité
+    "quality_rivers_analyses",
+    "quality_groundwater_analyses",
+    # Écoulement
+    "ecoulement_observations",
+    # Prélèvements
+    "prelevements_chroniques",
+    # Température
+    "temperature_chroniques",
+]

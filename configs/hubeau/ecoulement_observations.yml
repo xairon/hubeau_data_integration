@@ -1,0 +1,41 @@
+name: ecoulement_observations
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
+path: /observations
+method: GET
+params_default:
+  format: json
+  size: 1000
+records_path: $.data
+primary_keys: [code_station, date_observation]
+replication_key: date_observation
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 1000
+  until_expr: "len($.data) < 1000"
+slicer:
+  mode: datetime
+  start_param: date_observation_min
+  end_param: date_observation_max
+  window_days: 30  # Fenêtre mensuelle (campagnes généralement mai-octobre)
+  start_date: "2023-01-01"
+  end_offset_days: 1
+rate_limit:
+  target_rps: 1.5
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Écoulement des Cours d'Eau (ONDE - Observatoire National Des Étiages)
+  - Observations d'écoulement saisonnières (généralement mai-octobre)
+  - ~3,500 stations
+  - ~15,000 observations par an
+  - Basé sur des campagnes de terrain
+  
+  ⚠️ LOGIQUE SPÉCIALE: Les campagnes définissent les dates d'observation valides
+  - Utiliser l'endpoint /campagnes pour récupérer les dates
+  - Filtrer les observations par dates de campagnes
+  - Éviter les requêtes hors période de campagne (peu de données)
+

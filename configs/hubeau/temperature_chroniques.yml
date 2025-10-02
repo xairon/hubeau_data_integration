@@ -1,0 +1,66 @@
+name: temperature_chroniques
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/temperature
+path: /chronique
+method: GET
+params_default:
+  format: json
+  size: 1000
+records_path: $.data
+primary_keys: [code_station, date_mesure]
+replication_key: date_mesure
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 1000
+  until_expr: "len($.data) < 1000"
+# ⚠️ LOGIQUE CRITIQUE TEMPÉRATURE: Station par station avec découpage mensuel
+slicer:
+  mode: station_month  # ✅ Station×Mois systématique
+  station_param: code_station
+  start_param: date_debut_mesure
+  end_param: date_fin_mesure
+  start_date: "2023-01-01"
+  end_offset_days: 1
+fallbacks:
+  truncation_threshold: 20000  # ⚠️ LIMITE STRICTE 20K !
+  split_chain: [station_month]  # Si troncature → déjà station×mois
+# Référence des stations (à récupérer via /station)
+pre_scan:
+  stations:
+    enabled: true
+    path: "configs/reference/temperature_stations.yml"
+    key: "stations"
+rate_limit:
+  target_rps: 0.7  # Rate limit très respectueux (API très sensible)
+  max_concurrency: 1
+timeout: 60
+backoff_initial: 2.0  # Backoff plus long
+backoff_max: 120.0
+comment: |
+  API Température des Cours d'Eau - Chroniques de température
+  
+  ⚠️ LOGIQUE CRITIQUE - STATION PAR STATION + MENSUEL:
+  - ~760 stations (dont ~50 encore en service)
+  - Limite: 20,000 records par requête
+  - Données très denses → dépassement fréquent par département
+  - Solution: Station par station (847 stations × 12 mois = 10,164 requêtes)
+  
+  Stratégie:
+  1. Pré-scan: Récupérer toutes les stations via /station
+  2. Slicer: mode=station_month pour chaque station
+  3. Fenêtre: Mensuelle (janvier, février, ..., décembre)
+  4. Fallback: Déjà au niveau le plus granulaire
+  
+  Erreurs fréquentes:
+  - 500 Internal Server Error si trop de stations dans une requête
+  - 400 Bad Request si URL trop longue
+  - Troncature à 20k si requête annuelle globale
+  
+  Données:
+  - Mise à jour trimestrielle depuis Naïades
+  - ~200,000 observations par an
+  - Période couverte: 20+ années
+

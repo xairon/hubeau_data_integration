@@ -1,0 +1,39 @@
+name: hydrobio_indices
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
+path: /indices
+method: GET
+params_default:
+  format: json
+  size: 500
+records_path: $.data
+primary_keys: [code_indice, code_station, date_prelevement]
+replication_key: date_prelevement
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 500
+  until_expr: "len($.data) < 500"
+slicer:
+  mode: datetime
+  start_param: date_debut_prelevement
+  end_param: date_fin_prelevement
+  window_days: 30  # Fenêtre mensuelle
+  start_date: "2023-01-01"
+  end_offset_days: 1
+fallbacks:
+  truncation_threshold: 10000  # Limite plus basse pour hydrobiologie
+  split_chain: [day]  # Si troncature → découper par jour
+rate_limit:
+  target_rps: 1.7
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Hydrobiologie - Indices biologiques (IBGN, I2M2, etc.)
+  - ~2,000 stations
+  - ~5,000 indices par an
+  - Limite de profondeur: 10,000 records (plus stricte que les autres APIs)
+  - Données annuelles, semestrielles selon les stations
+

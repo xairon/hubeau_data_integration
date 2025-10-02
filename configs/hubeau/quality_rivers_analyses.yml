@@ -1,0 +1,140 @@
+name: quality_rivers_analyses
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
+path: /analyse_pc
+method: GET
+params_default:
+  format: json
+  size: 2000
+records_path: $.data
+primary_keys: [code_station, date_prelevement, libelle_parametre, code_unite]
+replication_key: date_prelevement
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 2000
+  until_expr: "len($.data) < 2000"
+slicer:
+  mode: dept  # Filtrage départemental obligatoire
+  param: code_departement
+  values:
+    - "01"
+    - "02"
+    - "03"
+    - "04"
+    - "05"
+    - "06"
+    - "07"
+    - "08"
+    - "09"
+    - "10"
+    - "11"
+    - "12"
+    - "13"
+    - "14"
+    - "15"
+    - "16"
+    - "17"
+    - "18"
+    - "19"
+    - "2A"
+    - "2B"
+    - "21"
+    - "22"
+    - "23"
+    - "24"
+    - "25"
+    - "26"
+    - "27"
+    - "28"
+    - "29"
+    - "30"
+    - "31"
+    - "32"
+    - "33"
+    - "34"
+    - "35"
+    - "36"
+    - "37"
+    - "38"
+    - "39"
+    - "40"
+    - "41"
+    - "42"
+    - "43"
+    - "44"
+    - "45"
+    - "46"
+    - "47"
+    - "48"
+    - "49"
+    - "50"
+    - "51"
+    - "52"
+    - "53"
+    - "54"
+    - "55"
+    - "56"
+    - "57"
+    - "58"
+    - "59"
+    - "60"
+    - "61"
+    - "62"
+    - "63"
+    - "64"
+    - "65"
+    - "66"
+    - "67"
+    - "68"
+    - "69"
+    - "70"
+    - "71"
+    - "72"
+    - "73"
+    - "74"
+    - "75"
+    - "76"
+    - "77"
+    - "78"
+    - "79"
+    - "80"
+    - "81"
+    - "82"
+    - "83"
+    - "84"
+    - "85"
+    - "86"
+    - "87"
+    - "88"
+    - "89"
+    - "90"
+    - "91"
+    - "92"
+    - "93"
+    - "94"
+    - "95"
+    - "971"
+    - "972"
+    - "973"
+    - "974"
+    - "976"
+# Ajout du filtre temporel pour chaque département
+temporal_filter:
+  start_param: date_debut_prelevement
+  end_param: date_fin_prelevement
+  start_date: "2023-01-01"
+  end_offset_days: 1
+rate_limit:
+  target_rps: 1.5
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Qualité des Cours d'Eau - Analyses physico-chimiques
+  - Filtrage départemental obligatoire (1 département à la fois)
+  - ~3,000 stations
+  - ~500,000 analyses par an
+  - 200+ paramètres différents
+
