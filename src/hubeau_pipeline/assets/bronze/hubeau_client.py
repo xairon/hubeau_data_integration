@@ -487,8 +487,6 @@ class HubeauClient:
             # Déterminer chunk_size selon l'API et la configuration
             if self.config.name == "prelevements":
                 chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
-            elif self.config.name == "temperature":
-                chunk_size = 1  # ✅ Température: 1 département pour respecter limite 20k (selon doc officielle)
             elif self.config.name == "hydrobiology":
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
             elif self.config.name == "superficial_waterbodies_quality":
@@ -510,8 +508,6 @@ class HubeauClient:
             # Parallélisation adaptative selon l'API
             if self.config.name == "prelevements" and chunk_size == 1:
                 MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
-            elif self.config.name == "temperature":
-                MAX_CONCURRENT_SPATIAL = 8   # ✅ Température: parallélisme modéré (1 dept/requête, API sensible)
             elif self.config.name == "hydrobiology":
                 MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
             elif self.config.name == "superficial_waterbodies_quality":
@@ -607,12 +603,12 @@ class HubeauClient:
                     MAX_CODES_PER_REQUEST = 25
                 elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
                     MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter surcharge
-                elif api_name_actual == "temperature":
-                    MAX_CODES_PER_REQUEST = 1  # ✅ CORRECTIF: 1 station à la fois pour respecter limite 20k
                 elif api_name_actual == "onde":
                     MAX_CODES_PER_REQUEST = 3  # ✅ CORRECTIF: Réduction drastique - API très instable
                 else:
                     MAX_CODES_PER_REQUEST = 50
+                
+                # ✅ NOTE: Température utilise le filtrage départemental (pas par station)
                 
                 if len(entity_codes) > MAX_CODES_PER_REQUEST:
                     # Découpage systématique en chunks avec parallélisation
@@ -1217,37 +1213,6 @@ class HubeauIngestionService:
                             self.logger.warning(f"⚠️ Aucun code station valide trouvé pour {endpoint_name}")
                     else:
                         station_codes = []
-                    
-                    # ✅ LOGIQUE SPÉCIALE TEMPÉRATURE: Traitement par station pour respecter limite 20k
-                    if config.name == "temperature" and station_codes:
-                        self.logger.info(f"🌡️ Température: Traitement de {len(station_codes)} stations une par une")
-                        all_observations = []
-                        
-                        # Traiter les stations par chunks de 1 pour respecter la limite 20k
-                        for i, station_code in enumerate(station_codes):
-                            try:
-                                self.logger.debug(f"🌡️ Station {i+1}/{len(station_codes)}: {station_code}")
-                                station_observations = await client.get_observations(
-                                    endpoint_name, 
-                                    [station_code],  # Une seule station à la fois
-                                    date_partition,
-                                    config.name,
-                                    partition_key=partition_key
-                                )
-                                all_observations.extend(station_observations)
-                                self.logger.debug(f"🌡️ Station {station_code}: {len(station_observations)} observations")
-                            except Exception as e:
-                                self.logger.warning(f"⚠️ Erreur station {station_code}: {e}")
-                                continue
-                        
-                        results[endpoint_name] = {
-                            'records_count': len(all_observations),
-                            'type': 'observations',
-                            'data': all_observations
-                        }
-                        total_records += len(all_observations)
-                        self.logger.info(f"✅ Température: {len(all_observations)} observations récupérées")
-                        continue  # Passer au prochain endpoint
                     
                     observations = await client.get_observations(
                         endpoint_name, 
