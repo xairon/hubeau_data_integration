@@ -167,10 +167,10 @@ class HubeauClient:
             
             self.logger.debug(f"Requête Hub'Eau: {url} avec params {params}")
             
-            # ✅ CORRECTIF C: Retries dynamiques avec jitter
+            # ✅ CORRECTIF C: Retries dynamiques avec jitter et gestion spéciale erreurs 500
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(self.config.max_retries),
-                wait=wait_exponential(multiplier=1, min=2, max=10),
+                wait=wait_exponential(multiplier=2, min=3, max=30),  # ✅ CORRECTIF: Backoff plus long pour erreurs 500
                 retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
                 before_sleep=before_sleep_log(logger, 30),
                 reraise=True
@@ -179,7 +179,9 @@ class HubeauClient:
                     # Jitter pour éviter rafales synchrones
                     await asyncio.sleep(random.random() * 0.5)
                     
+                    self.logger.debug(f"🌐 Requête Hub'Eau: {url} avec params {params}")
                     response = await self.client.get(url, params=params)
+                    self.logger.debug(f"✅ Réponse reçue: {response.status_code}, taille: {len(response.content) if response.content else 0} bytes")
                     
                     # ✅ CORRECTIF: Ne pas retry sur erreurs 400 (Bad Request)
                     # Les erreurs 400 indiquent un problème avec la requête elle-même
@@ -189,6 +191,15 @@ class HubeauClient:
                             f"Bad Request: {response.status_code}", 
                             request=response.request, 
                             response=response
+                        )
+                    
+                    # ✅ CORRECTIF: Logging spécial pour erreurs 500 avec détails
+                    if response.status_code == 500:
+                        self.logger.warning(
+                            f"⚠️ Erreur 500 Internal Server Error pour {url} "
+                            f"(page: {params.get('page', 'N/A')}, "
+                            f"dept: {params.get('code_departement', 'N/A')}) - "
+                            f"Retry dans {2 ** attempt.retry_state.attempt_number} secondes"
                         )
                     
                     response.raise_for_status()
@@ -214,6 +225,8 @@ class HubeauClient:
         # ✅ CORRECTIF: Gestion spéciale pour prélèvements (sans limite)
         if endpoint_config.path == "referentiel/points_prelevement":
             chunk_size = 1  # 1 département (API sensible)
+        elif self.config.name == "prelevements":
+            chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
         elif depth_limit is not None and depth_limit <= 10000:
             chunk_size = 1  # 1 département pour les APIs avec limite 10k (Hydrobiologie)
         else:
@@ -279,12 +292,15 @@ class HubeauClient:
                 page_params["page"] = pages_fetched + 1
 
             try:
+                self.logger.debug(f"📄 Page {pages_fetched + 1}: requête en cours...")
                 response_data = await self._make_request(endpoint_config.path, page_params)
 
                 if not response_data.data:
+                    self.logger.debug(f"📄 Page {pages_fetched + 1}: aucune donnée, arrêt de la pagination")
                     break
 
                 all_data.extend(response_data.data)
+                self.logger.debug(f"📄 Page {pages_fetched + 1}: {len(response_data.data)} records ajoutés (total: {len(all_data)})")
 
                 pages_fetched += 1
 
@@ -417,7 +433,7 @@ class HubeauClient:
                 original_key = partition_key if partition_key else date_partition
                 is_yearly_partition = len(original_key) == 4  # Ex: "2024"
                 
-                if is_yearly_partition and self.config.name in ["hydrobiology", "superficial_waterbodies_quality", "ground_water_quality"]:
+                if is_yearly_partition and self.config.name in ["hydrobiology", "superficial_waterbodies_quality", "ground_water_quality", "ecoulement", "temperature"]:
                     # Partition annuelle → récupérer toute l'année
                     year = date_obj.year
                     start_dt = datetime(year, 1, 1)
@@ -469,8 +485,10 @@ class HubeauClient:
             depth_limit = getattr(endpoint_config, 'depth_limit', None)
             
             # Déterminer chunk_size selon l'API et la configuration
-            if endpoint_config.path == "chroniques" and self.config.name == "prelevements":
-                chunk_size = 1  # ✅ Prélèvements: 1 département à la fois (volumes importants, sans limite)
+            if self.config.name == "prelevements":
+                chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
+            elif self.config.name == "temperature":
+                chunk_size = 1  # ✅ Température: 1 département pour respecter limite 20k (selon doc officielle)
             elif self.config.name == "hydrobiology":
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
             elif self.config.name == "superficial_waterbodies_quality":
@@ -492,6 +510,8 @@ class HubeauClient:
             # Parallélisation adaptative selon l'API
             if self.config.name == "prelevements" and chunk_size == 1:
                 MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
+            elif self.config.name == "temperature":
+                MAX_CONCURRENT_SPATIAL = 8   # ✅ Température: parallélisme modéré (1 dept/requête, API sensible)
             elif self.config.name == "hydrobiology":
                 MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
             elif self.config.name == "superficial_waterbodies_quality":
@@ -588,7 +608,7 @@ class HubeauClient:
                 elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
                     MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter surcharge
                 elif api_name_actual == "temperature":
-                    MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter erreurs 500
+                    MAX_CODES_PER_REQUEST = 1  # ✅ CORRECTIF: 1 station à la fois pour respecter limite 20k
                 elif api_name_actual == "onde":
                     MAX_CODES_PER_REQUEST = 3  # ✅ CORRECTIF: Réduction drastique - API très instable
                 else:
@@ -631,12 +651,20 @@ class HubeauClient:
                         try:
                             chunk_data = await _execute_chunk(chunk)
                         except Exception as e:
-                            # ✅ CORRECTIF D: Tracking erreurs par type
+                            # ✅ CORRECTIF D: Tracking erreurs par type avec plus de détails
                             message = str(e)
                             if "500" in message:
                                 self.metrics.erreurs_http_500 += 1
+                                self.logger.warning(
+                                    f"⚠️ Erreur HTTP 500 détectée dans chunk {i + 1} "
+                                    f"(département: {chunk[0] if chunk else 'N/A'}): {message[:100]}..."
+                                )
                             elif "timeout" in message.lower():
                                 self.metrics.erreurs_timeout += 1
+                                self.logger.warning(
+                                    f"⚠️ Timeout détecté dans chunk {i + 1} "
+                                    f"(département: {chunk[0] if chunk else 'N/A'}): {message[:100]}..."
+                                )
 
                             if len(chunk) > 1:
                                 self.logger.warning(
@@ -649,21 +677,21 @@ class HubeauClient:
                                 right = await fetch_chunk(i, chunk[mid:], depth + 1)
                                 return (left or []) + (right or [])
 
-                            # ✅ CORRECTIF D: Logger les codes fautifs pour observabilité
+                            # ✅ CORRECTIF D: Logger les codes fautifs pour observabilité avec plus de contexte
                             self.metrics.chunks_echoues += 1
                             if chunk:
                                 self.metrics.codes_echoues.append(chunk[0])
                                 self.logger.error(
-                                    "❌ Chunk %s échoué définitivement (code: %s): %s",
+                                    "❌ Chunk %s échoué définitivement (département: %s, erreur: %s)",
                                     i + 1,
                                     chunk[0],
-                                    message,
+                                    message[:200],  # Plus de détails sur l'erreur
                                 )
                             else:
                                 self.logger.error(
                                     "❌ Chunk %s échoué définitivement: %s",
                                     i + 1,
-                                    message,
+                                    message[:200],
                                 )
                             return []
 
@@ -985,6 +1013,143 @@ class HubeauIngestionService:
         base_path.mkdir(parents=True, exist_ok=True)
         return base_path
     
+    async def _ingest_ecoulement_with_campagnes(
+        self, 
+        config: HubeauApiConfig, 
+        date_partition: str,
+        partition_key: str = None
+    ) -> Dict[str, Any]:
+        """Ingestion spéciale pour l'API écoulement utilisant les campagnes pour filtrer les observations"""
+        self.logger.info(f"🌊 Ingestion écoulement avec campagnes pour {partition_key or date_partition}")
+        
+        results: Dict[str, Any] = {}
+        total_records = 0
+        errors: List[str] = []
+        
+        async with HubeauClient(config) as client:
+            # 1. Récupérer les stations
+            try:
+                stations = await client.get_stations("stations")
+                results["stations"] = {
+                    'records_count': len(stations),
+                    'type': 'stations',
+                    'data': stations
+                }
+                total_records += len(stations)
+                self.logger.info(f"✅ Stations récupérées: {len(stations)}")
+            except Exception as e:
+                message = f"Erreur stations: {e}"
+                self.logger.error(message)
+                errors.append(message)
+                stations = []
+            
+            # 2. Récupérer les campagnes de l'année
+            try:
+                # Utiliser l'année complète pour récupérer toutes les campagnes
+                year = partition_key if partition_key else date_partition[:4]
+                campagnes = await client.get_observations(
+                    "campagnes", 
+                    [],  # Pas besoin de codes stations pour les campagnes
+                    f"{year}-01-01",  # Début d'année
+                    config.name,
+                    realtime=False,
+                    partition_key=partition_key
+                )
+                
+                results["campagnes"] = {
+                    'records_count': len(campagnes),
+                    'type': 'campagnes',
+                    'data': campagnes
+                }
+                total_records += len(campagnes)
+                self.logger.info(f"✅ Campagnes récupérées: {len(campagnes)}")
+                
+                # 3. Utiliser les dates des campagnes pour récupérer les observations
+                if campagnes:
+                    # Extraire les dates des campagnes (API écoulement utilise 'date_campagne')
+                    campagne_dates = []
+                    for campagne in campagnes:
+                        date_campagne = campagne.get('date_campagne')
+                        if date_campagne:
+                            # Pour l'API écoulement, chaque campagne a une seule date
+                            campagne_dates.append(date_campagne)
+                    
+                    self.logger.info(f"📅 Dates de campagnes trouvées: {len(campagne_dates)} dates")
+                    
+                    # STRATÉGIE ALTERNATIVE: L'API écoulement ignore les paramètres temporels
+                    # Récupérer les observations par dates de campagnes individuelles
+                    self.logger.info(f"📊 Récupération des observations par dates de campagnes ({len(campagne_dates)} dates)")
+                    
+                    observations = []
+                    campagne_dates_set = set(campagne_dates)
+                    
+                    # Traiter par chunks de dates pour éviter trop de requêtes
+                    chunk_size = 50  # 50 dates par chunk
+                    for i in range(0, len(campagne_dates), chunk_size):
+                        chunk_dates = campagne_dates[i:i + chunk_size]
+                        self.logger.info(f"🔍 Chunk {i//chunk_size + 1}: traitement de {len(chunk_dates)} dates")
+                        
+                        for date_campagne in chunk_dates:
+                            try:
+                                # Récupérer les observations pour cette date spécifique
+                                date_obs = await client.get_observations(
+                                    "observations",
+                                    [],  # Pas de filtrage par station
+                                    date_campagne,  # Date spécifique
+                                    config.name,
+                                    realtime=False,
+                                    partition_key=partition_key
+                                )
+                                
+                                if date_obs:
+                                    observations.extend(date_obs)
+                                    
+                            except Exception as e:
+                                self.logger.warning(f"⚠️ Erreur pour la date {date_campagne}: {e}")
+                        
+                        self.logger.info(f"✅ Chunk {i//chunk_size + 1} terminé: {len(observations)} observations total")
+                    
+                    self.logger.info(f"🔍 Observations récupérées: {len(observations)} au total")
+                    
+                    results["observations"] = {
+                        'records_count': len(observations),
+                        'type': 'observations',
+                        'data': observations
+                    }
+                    total_records += len(observations)
+                    self.logger.info(f"✅ Observations récupérées: {len(observations)}")
+                else:
+                    self.logger.warning("⚠️ Aucune campagne trouvée, pas d'observations récupérées")
+                    results["observations"] = {
+                        'records_count': 0,
+                        'type': 'observations',
+                        'data': []
+                    }
+                    
+            except Exception as e:
+                message = f"Erreur campagnes/observations: {e}"
+                self.logger.error(message)
+                errors.append(message)
+        
+        # Sauvegarder dans MinIO
+        try:
+            self._save_to_minio(config.name, partition_key or date_partition, results)
+            self.logger.info(f"💾 Données écoulement sauvegardées dans MinIO")
+        except Exception as e:
+            message = f"Erreur sauvegarde MinIO: {e}"
+            self.logger.error(message)
+            errors.append(message)
+        
+        return {
+            "execution_date": datetime.now().isoformat(),
+            "partition_date": partition_key or date_partition,
+            "api_name": config.name,
+            "status": "success" if not errors else "error",
+            "total_records_ingested": total_records,
+            "results_by_endpoint": results,
+            "errors": errors
+        }
+    
     async def ingest_api_data(
         self, 
         config: HubeauApiConfig, 
@@ -993,6 +1158,9 @@ class HubeauIngestionService:
     ) -> Dict[str, Any]:
         """Ingestion complète d'une API Hub'Eau"""
         self.logger.info(f"Ingestion {config.name} pour {partition_key or date_partition}")
+        
+        # Pas de logique spéciale pour l'API écoulement - utilise la logique normale
+        # Les campagnes sont récupérées comme endpoint normal
         
         results: Dict[str, Any] = {}
         total_records = 0
@@ -1049,6 +1217,37 @@ class HubeauIngestionService:
                             self.logger.warning(f"⚠️ Aucun code station valide trouvé pour {endpoint_name}")
                     else:
                         station_codes = []
+                    
+                    # ✅ LOGIQUE SPÉCIALE TEMPÉRATURE: Traitement par station pour respecter limite 20k
+                    if config.name == "temperature" and station_codes:
+                        self.logger.info(f"🌡️ Température: Traitement de {len(station_codes)} stations une par une")
+                        all_observations = []
+                        
+                        # Traiter les stations par chunks de 1 pour respecter la limite 20k
+                        for i, station_code in enumerate(station_codes):
+                            try:
+                                self.logger.debug(f"🌡️ Station {i+1}/{len(station_codes)}: {station_code}")
+                                station_observations = await client.get_observations(
+                                    endpoint_name, 
+                                    [station_code],  # Une seule station à la fois
+                                    date_partition,
+                                    config.name,
+                                    partition_key=partition_key
+                                )
+                                all_observations.extend(station_observations)
+                                self.logger.debug(f"🌡️ Station {station_code}: {len(station_observations)} observations")
+                            except Exception as e:
+                                self.logger.warning(f"⚠️ Erreur station {station_code}: {e}")
+                                continue
+                        
+                        results[endpoint_name] = {
+                            'records_count': len(all_observations),
+                            'type': 'observations',
+                            'data': all_observations
+                        }
+                        total_records += len(all_observations)
+                        self.logger.info(f"✅ Température: {len(all_observations)} observations récupérées")
+                        continue  # Passer au prochain endpoint
                     
                     observations = await client.get_observations(
                         endpoint_name, 
@@ -1130,14 +1329,14 @@ class HubeauIngestionService:
     def _get_observations_endpoints(self, config: HubeauApiConfig) -> List[str]:
         """Retourne les endpoints d'observations selon l'API"""
         observation_endpoints = {
-            "hydrometry": ["observations_tr", "obs_elab"],
+            "hydrometry": ["observations_tr", "obs_elab", "referentiel_sites", "referentiel_stations"],
             "piezometry": ["chroniques_tr", "chroniques"],
             "superficial_waterbodies_quality": ["analyse_pc"],  # ✅ operation_pc utilisé pour filtrage seulement
             "ground_water_quality": ["analyses"],
             "temperature": ["chronique"],
-            "onde": ["observations"],  # ✅ campagnes utilisé pour filtrage seulement
+            "ecoulement": ["campagnes", "observations", "stations"],  # ✅ Campagnes en premier pour filtrage temporel
             "hydrobiology": ["indices", "taxons"],
-            "prelevements": ["chroniques"]
+            "prelevements": ["chroniques", "points_prelevement", "ouvrages"]
         }
         return observation_endpoints.get(config.name, [])
     
@@ -1149,7 +1348,7 @@ class HubeauIngestionService:
             "superficial_waterbodies_quality": "code_station",
             "ground_water_quality": "code_bss",
             "temperature": "code_station",
-            "onde": "code_station",
+            "ecoulement": "code_station",
             "hydrobiology": "code_station_hydrobio",
             "prelevements": "code_ouvrage"
         }
@@ -1180,7 +1379,13 @@ class HubeauIngestionService:
                 "api_name": api_name,
                 "partition_date": date_partition,
                 "execution_date": datetime.now().isoformat(),
-                "results_by_endpoint": results,
+                "endpoints_summary": {
+                    endpoint_name: {
+                        "records_count": endpoint_result.get('records_count', 0),
+                        "has_data": endpoint_result.get('records_count', 0) > 0
+                    }
+                    for endpoint_name, endpoint_result in results.items()
+                },
                 "total_records": sum(r.get('records_count', 0) for r in results.values()),
                 "metrics": metrics.model_dump() if metrics else {}  # ✅ CORRECTIF D
             }

@@ -194,26 +194,104 @@ async def hubeau_water_quality_groundwater_bronze(context: AssetExecutionContext
     return await ingest_hubeau_api(context, "ground_water_quality")
 
 @asset(
-    partitions_def=DAILY_PARTITIONS,
+    partitions_def=YEARLY_PARTITIONS,  # ✅ OPTIMISATION: Partitions annuelles (données historiques)
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
     tags={"api": "hubeau"},  # ✅ Tag pour limitation de concurrence
-    description="🌡️ Ingestion Température Hub'Eau (température des cours d'eau)"
+    description="🌡️ Ingestion Température Hub'Eau (température des cours d'eau - données historiques)"
 )
 async def hubeau_temperature_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingestion température Hub'Eau avec vraies APIs"""
-    return await ingest_hubeau_api(context, "temperature")
+    """Ingestion température Hub'Eau - Partitions annuelles (récupère toutes les données de l'année)"""
+    partition_key = context.partition_key
+    
+    # Pour la température, on utilise l'année complète pour récupérer toutes les données
+    if len(partition_key) == 4:  # Année seulement (ex: "2024")
+        year = partition_key
+        context.log.info(f"🌡️ Température: Récupération des données pour l'année {year}")
+        
+        try:
+            configs = get_all_hubeau_configs()
+            config = configs["temperature"]
+            
+            minio_resource = getattr(context.resources, "s3", None)
+            service = HubeauIngestionService(minio_resource=minio_resource)
+            
+            # Utiliser l'année complète pour récupérer toutes les données
+            result = await service.ingest_api_data(config, f"{year}-01-01", partition_key=partition_key)
+            
+            context.log.info(f"✅ Ingestion température terminée: {result['total_records_ingested']} records")
+            return result
+            
+        except Exception as e:
+            context.log.error(f"❌ Erreur ingestion température: {str(e)}")
+            return {
+                "execution_date": datetime.now().isoformat(),
+                "partition_date": partition_key,
+                "api_name": "temperature",
+                "status": "error",
+                "error": str(e),
+                "total_records_ingested": 0
+            }
+    else:
+        context.log.warning(f"⚠️ Partition température invalide: {partition_key} (attendu: année comme '2024')")
+        return {
+            "execution_date": datetime.now().isoformat(),
+            "partition_date": partition_key,
+            "api_name": "temperature",
+            "status": "error",
+            "error": f"Partition invalide: {partition_key}",
+            "total_records_ingested": 0
+        }
 
 @asset(
     partitions_def=YEARLY_PARTITIONS,  # ✅ OPTIMISATION: Partitions annuelles (récupère toutes les campagnes de l'année)
     group_name="bronze_hubeau",
     required_resource_keys={"s3"},
     tags={"api": "hubeau"},
-    description="🌊 Ingestion ONDE Hub'Eau (Opération Nationale Des Étiages - récupération annuelle)"
+    description="🌊 Ingestion Écoulement Hub'Eau (Observatoire National Des Étiages - utilise les campagnes pour les dates)"
 )
-async def hubeau_onde_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingestion ONDE Hub'Eau - Partitions annuelles (récupère toutes les campagnes estivales de l'année)"""
-    return await ingest_hubeau_api(context, "onde")
+async def hubeau_ecoulement_bronze(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingestion Écoulement Hub'Eau - Utilise les campagnes pour déterminer les bonnes dates d'observation"""
+    partition_key = context.partition_key
+    
+    # Pour l'écoulement, on utilise l'année complète pour récupérer toutes les campagnes
+    if len(partition_key) == 4:  # Année seulement (ex: "2024")
+        year = partition_key
+        context.log.info(f"🚀 Écoulement: Récupération des campagnes et observations pour l'année {year}")
+        
+        try:
+            configs = get_all_hubeau_configs()
+            config = configs["ecoulement"]
+            
+            minio_resource = getattr(context.resources, "s3", None)
+            service = HubeauIngestionService(minio_resource=minio_resource)
+            
+            # Utiliser l'année complète pour récupérer toutes les campagnes
+            result = await service.ingest_api_data(config, f"{year}-01-01", partition_key=partition_key)
+            
+            context.log.info(f"✅ Ingestion écoulement terminée: {result['total_records_ingested']} records")
+            return result
+            
+        except Exception as e:
+            context.log.error(f"❌ Erreur ingestion écoulement: {str(e)}")
+            return {
+                "execution_date": datetime.now().isoformat(),
+                "partition_date": partition_key,
+                "api_name": "ecoulement",
+                "status": "error",
+                "error": str(e),
+                "total_records_ingested": 0
+            }
+    else:
+        context.log.warning(f"⚠️ Partition écoulement invalide: {partition_key} (attendu: année comme '2024')")
+        return {
+            "execution_date": datetime.now().isoformat(),
+            "partition_date": partition_key,
+            "api_name": "ecoulement",
+            "status": "error",
+            "error": f"Partition invalide: {partition_key}",
+            "total_records_ingested": 0
+        }
 
 @asset(
     partitions_def=YEARLY_PARTITIONS,  # ✅ OPTIMISATION: Partitions annuelles (campagnes saisonnières 1-2x/an)
@@ -238,9 +316,9 @@ async def hubeau_prelevements_bronze(context: AssetExecutionContext) -> Dict[str
     return await ingest_hubeau_api(context, "prelevements")
 
 @asset(
-    partitions_def=DAILY_PARTITIONS,
+    partitions_def=YEARLY_PARTITIONS,  # ✅ OPTIMISATION: Partitions annuelles pour synthèse
     group_name="bronze_hubeau",
-    description="📊 Synthèse de l'ingestion Hub'Eau (2 APIs quotidiennes)",
+    description="📊 Synthèse de l'ingestion Hub'Eau (APIs avec données historiques)",
     ins={
         "piezometry": AssetIn(key=AssetKey("hubeau_piezometry_bronze")),
         "temperature": AssetIn(key=AssetKey("hubeau_temperature_bronze")),
@@ -249,7 +327,7 @@ async def hubeau_prelevements_bronze(context: AssetExecutionContext) -> Dict[str
         # - hubeau_water_quality_surface_bronze (partitions annuelles)
         # - hubeau_water_quality_groundwater_bronze (partitions annuelles)
         # - hubeau_hydrobiology_bronze (partitions annuelles)
-        # - hubeau_onde_bronze (partitions mensuelles)
+        # - hubeau_ecoulement_bronze (partitions annuelles)
         # - hubeau_prelevements_bronze (partitions annuelles)
     },
 )
@@ -258,16 +336,16 @@ def hubeau_ingestion_summary(
     piezometry: Dict[str, Any],
     temperature: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Synthétise les résultats d'ingestion des 2 APIs Hub'Eau à partitions quotidiennes (séries continues)."""
+    """Synthétise les résultats d'ingestion des APIs Hub'Eau à partitions annuelles (données historiques)."""
 
-    day = context.partition_key
-    context.log.info(f"📊 Génération du résumé d'ingestion Hub'Eau pour {day}")
+    year = context.partition_key
+    context.log.info(f"📊 Génération du résumé d'ingestion Hub'Eau pour l'année {year}")
 
     api_results = {
         "piezometry": piezometry,
         "temperature": temperature,
         # Note: hydrometry exclu (non partitionné)
-        # Note: APIs à partitions mensuelles ou annuelles exclues
+        # Note: APIs à partitions annuelles exclues (incompatibles avec cette synthèse)
     }
 
     total_records = 0
@@ -307,7 +385,7 @@ def hubeau_ingestion_summary(
 
     return {
         "execution_date": datetime.now().isoformat(),
-        "partition_date": day,
+        "partition_date": year,
         "api_name": "ingestion_summary",
         "status": overall_status,
         "total_records_ingested": total_records,

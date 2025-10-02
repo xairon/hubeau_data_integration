@@ -38,10 +38,10 @@ hubeau_water_quality_groundwater_job = define_asset_job(
     selection=AssetSelection.assets("hubeau_water_quality_groundwater_bronze"),
 )
 
-hubeau_onde_job = define_asset_job(
-    name="hubeau_onde_job",
-    description="🌊 ONDE - Observatoire National Des Étiages",
-    selection=AssetSelection.assets("hubeau_onde_bronze"),
+hubeau_ecoulement_job = define_asset_job(
+    name="hubeau_ecoulement_job",
+    description="🌊 Écoulement - Observatoire National Des Étiages",
+    selection=AssetSelection.assets("hubeau_ecoulement_bronze"),
 )
 
 hubeau_hydrobiology_job = define_asset_job(
@@ -83,7 +83,7 @@ hubeau_jobs = [
     hubeau_temperature_job,
     hubeau_water_quality_surface_job,
     hubeau_water_quality_groundwater_job,
-    hubeau_onde_job,
+    hubeau_ecoulement_job,
     hubeau_hydrobiology_job,
     hubeau_prelevements_job,
 ]
