@@ -80,8 +80,8 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str) -> Dict[str, An
         bucket_url=f"s3://bronze",
         credentials=credentials,
         dataset_name=cfg.get("dataset_name", "bronze"),
-        file_format=cfg.get("file_format", "parquet"),
-        layout=cfg.get("layout", "{schema_name}/{table_name}/format=parquet/run_date={curr_date}/part-{file_id}"),
+        file_format=cfg.get("file_format", "json"),
+        layout=cfg.get("layout", "{table_name}/{curr_date}/data.json"),
         state_fs_options={
             "aws_access_key_id": TSecretValue(minio_user),
             "aws_secret_access_key": TSecretValue(minio_pass),

@@ -23,6 +23,19 @@ def _local_state_path(source: str, stream: str) -> Path:
     return Path(".state") / f"{source}_{stream}.json"
 
 
+def _json_serializer(obj):
+    """Custom JSON serializer to handle DateTime objects."""
+    if hasattr(obj, 'isoformat'):
+        # Handle datetime objects
+        return obj.isoformat()
+    elif hasattr(obj, '__dict__'):
+        # Handle other objects with __dict__
+        return obj.__dict__
+    else:
+        # Fallback to string representation
+        return str(obj)
+
+
 def save_state_copy(
     source: str,
     stream: str,
