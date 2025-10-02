@@ -495,7 +495,7 @@ class HubeauClient:
             if self.config.name == "prelevements":
                 chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
             elif self.config.name == "temperature":
-                chunk_size = 1  # ✅ Température: 1 département pour respecter limite 20k (données très denses)
+                chunk_size = 101  # ✅ CORRECTIF: TOUS les départements d'un coup (pas de chunking départemental)
             elif self.config.name == "hydrobiology":
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
             elif self.config.name == "superficial_waterbodies_quality":
