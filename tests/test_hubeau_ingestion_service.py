@@ -9,7 +9,10 @@ import pytest
 from botocore.stub import ANY, Stubber
 
 from hubeau_pipeline.assets.bronze.hubeau_client import HubeauIngestionService, IngestionMetrics
-from hubeau_pipeline.assets.bronze.hubeau_configs import get_hydrobiology_config
+from hubeau_pipeline.assets.bronze.hubeau_configs import (
+    get_hydrobiology_config,
+    get_temperature_config,
+)
 
 
 def _build_stubbed_s3_client():
@@ -188,3 +191,68 @@ def test_ingestion_persists_metadata_for_empty_partitions(tmp_path, monkeypatch)
         assert result["errors"] == []
 
     asyncio.run(_run_test())
+
+
+def test_temperature_ingestion_uses_monthly_strategy(monkeypatch):
+    """L'ingestion température annuelle doit utiliser la stratégie mensuelle dédiée."""
+
+    class DummyTemperatureClient:
+        def __init__(self, config):
+            self.metrics = IngestionMetrics()
+            self.config = config
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get_stations(self, endpoint_name):
+            return [{"code_station": "ST001"}]
+
+        async def get_temperature_observations_yearly(self, station_code, date_partition):
+            assert station_code == "ST001"
+            assert date_partition == "2023-01-01"
+            return [
+                {
+                    "code_station": station_code,
+                    "date_mesure_temp": "2023-01-01",
+                    "resultat": 15.5,
+                }
+            ]
+
+        async def get_observations(
+            self,
+            endpoint_name,
+            entity_codes,
+            date_partition,
+            api_name=None,
+            realtime=False,
+            partition_key=None,
+        ):
+            raise AssertionError("La stratégie mensuelle doit éviter get_observations pour les partitions annuelles")
+
+    monkeypatch.setattr(
+        "hubeau_pipeline.assets.bronze.hubeau_client.HubeauClient",
+        DummyTemperatureClient,
+    )
+
+    def _noop_save(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        HubeauIngestionService,
+        "_save_to_minio",
+        _noop_save,
+    )
+
+    async def _run():
+        service = HubeauIngestionService()
+        config = get_temperature_config()
+        result = await service.ingest_api_data(config, "2023-01-01", partition_key="2023")
+
+        observations = result["results_by_endpoint"]["chronique"]
+        assert observations["records_count"] == 1
+        assert observations["data"][0]["resultat"] == 15.5
+
+    asyncio.run(_run())

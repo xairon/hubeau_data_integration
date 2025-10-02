@@ -362,9 +362,92 @@ class HubeauClient:
 
         return cursor_values[0]
     
+    async def get_temperature_observations_yearly(
+        self,
+        station_code: str,
+        date_partition: str,
+    ) -> List[Dict[str, Any]]:
+        """Récupère les observations de température mois par mois pour éviter la limite de 20k enregistrements.
+
+        L'API Hub'Eau limite la profondeur d'accès (page * size) à 20 000 enregistrements. Certaines stations
+        de température disposent d'une mesure toutes les 5 minutes, ce qui dépasse cette limite sur une année
+        complète (≈100k enregistrements). Pour garantir une ingestion exhaustive, on découpe donc l'année en
+        12 fenêtres mensuelles et on interroge l'endpoint `chronique` pour chacune d'elles.
+        """
+
+        endpoint_name = "chronique"
+        if endpoint_name not in self.config.endpoints:
+            self.logger.error("❌ Endpoint 'chronique' introuvable pour l'API température")
+            return []
+
+        endpoint_config = self.config.endpoints[endpoint_name]
+        temporal_params = endpoint_config.temporal_params or {}
+        start_key = temporal_params.get("start")
+        end_key = temporal_params.get("end")
+
+        if not start_key or not end_key:
+            self.logger.error("❌ Configuration temporelle manquante pour l'endpoint chronique (température)")
+            return []
+
+        try:
+            partition_dt = datetime.strptime(date_partition, "%Y-%m-%d")
+        except ValueError:
+            # Support des partitions ISO complètes (ex: "2024")
+            partition_dt = datetime(int(date_partition[:4]), 1, 1)
+
+        year = partition_dt.year
+        all_data: List[Dict[str, Any]] = []
+
+        self.logger.info(
+            "🌡️ Température: récupération mensuelle pour la station %s (année %s)",
+            station_code,
+            year,
+        )
+
+        base_params = {"format": "json", "size": endpoint_config.page_size, "code_station": station_code}
+
+        for month in range(1, 13):
+            start_dt = datetime(year, month, 1)
+            if month == 12:
+                end_dt = datetime(year + 1, 1, 1)
+            else:
+                end_dt = datetime(year, month + 1, 1)
+
+            month_params = base_params.copy()
+            month_params[start_key] = start_dt.strftime("%Y-%m-%d")
+            month_params[end_key] = end_dt.strftime("%Y-%m-%d")
+
+            self.logger.debug(
+                "🌡️ Température: station %s, mois %02d → fenêtre [%s → %s[",
+                station_code,
+                month,
+                month_params[start_key],
+                month_params[end_key],
+            )
+
+            month_data = await self._fetch_all_pages(endpoint_config, month_params)
+            all_data.extend(month_data)
+
+            if month_data:
+                self.logger.info(
+                    "✅ Température: %s observations pour %s-%02d",
+                    len(month_data),
+                    year,
+                    month,
+                )
+
+        self.logger.info(
+            "🎯 Température: %s observations totales récupérées pour %s (%s)",
+            len(all_data),
+            station_code,
+            year,
+        )
+
+        return all_data
+
     async def get_observations(
-        self, 
-        endpoint_name: str, 
+        self,
+        endpoint_name: str,
         entity_codes: List[str],
         date_partition: str,
         api_name: str = None,
@@ -1222,24 +1305,38 @@ class HubeauIngestionService:
                     if config.name == "temperature" and station_codes:
                         self.logger.info(f"🌡️ Température: Traitement de {len(station_codes)} stations une par une")
                         all_observations = []
-                        
-                        # Traiter les stations par chunks de 1 pour respecter la limite 20k
+
                         for i, station_code in enumerate(station_codes):
                             try:
                                 self.logger.debug(f"🌡️ Station {i+1}/{len(station_codes)}: {station_code}")
-                                station_observations = await client.get_observations(
-                                    endpoint_name, 
-                                    [station_code],  # Une seule station à la fois
-                                    date_partition,
-                                    config.name,
-                                    partition_key=partition_key
-                                )
+
+                                original_key = partition_key if partition_key else date_partition
+                                is_yearly_partition = len(original_key) == 4
+
+                                if is_yearly_partition:
+                                    station_observations = await client.get_temperature_observations_yearly(
+                                        station_code,
+                                        date_partition,
+                                    )
+                                else:
+                                    station_observations = await client.get_observations(
+                                        endpoint_name,
+                                        [station_code],
+                                        date_partition,
+                                        config.name,
+                                        partition_key=partition_key
+                                    )
+
                                 all_observations.extend(station_observations)
-                                self.logger.debug(f"🌡️ Station {station_code}: {len(station_observations)} observations")
+                                self.logger.debug(
+                                    "🌡️ Station %s: %s observations cumulées",
+                                    station_code,
+                                    len(station_observations),
+                                )
                             except Exception as e:
                                 self.logger.warning(f"⚠️ Erreur station {station_code}: {e}")
                                 continue
-                        
+
                         results[endpoint_name] = {
                             'records_count': len(all_observations),
                             'type': 'observations',
