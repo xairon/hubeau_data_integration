@@ -1,132 +1,104 @@
 """
-Définition des schedules pour l'orchestration
-Schedules adaptés aux fréquences réelles des données
+Schedules Dagster - Planification automatique des jobs
 """
 
 from dagster import ScheduleDefinition
 
-# Import des jobs
-from hubeau_pipeline.jobs import (
-    bdlisa_bronze_job,
-    hubeau_hydrobiology_job,
+# Schedules ancienne architecture (deprecated)
+from ..jobs import (
     hubeau_hydrometry_job,
-    hubeau_ecoulement_job,
     hubeau_piezometry_job,
-    hubeau_prelevements_job,
     hubeau_temperature_job,
-    hubeau_water_quality_groundwater_job,
-    hubeau_water_quality_surface_job,
-    sandre_bronze_job,
+    hubeau_ecoulement_job,
+    hubeau_hydrobiology_job,
+    hubeau_prelevements_job,
 )
 
-# ================================
-# SCHEDULES QUOTIDIENS (Séries continues)
-# ================================
+# Schedules nouvelle architecture dlt (recommended)
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+
+from dagster.jobs import (
+    sync_hubeau_daily_schedule,
+    sync_hubeau_realtime_schedule,
+    sync_hubeau_quality_schedule,
+)
+
+# ====================================
+# SCHEDULES ANCIENNE ARCHITECTURE (deprecated)
+# ====================================
 
 hydrometry_schedule = ScheduleDefinition(
     job=hubeau_hydrometry_job,
-    cron_schedule="0 6 * * *",  # Quotidien 6h
-    execution_timezone="Europe/Paris",
-    name="hydrometry_schedule",
-    description="🌊 Hydrométrie: 30 derniers jours automatique (quotidien)"
+    cron_schedule="0 */2 * * *",  # Toutes les 2 heures
 )
 
 piezometry_schedule = ScheduleDefinition(
     job=hubeau_piezometry_job,
-    cron_schedule="0 6 * * *",  # Quotidien 6h
-    execution_timezone="Europe/Paris",
-    name="piezometry_schedule",
-    description="🏔️ Piézométrie: Niveaux nappes (quotidien)"
+    cron_schedule="30 */4 * * *",  # Toutes les 4 heures
 )
 
 temperature_schedule = ScheduleDefinition(
     job=hubeau_temperature_job,
-    cron_schedule="0 6 * * *",  # Quotidien 6h
-    execution_timezone="Europe/Paris",
-    name="temperature_schedule",
-    description="🌡️ Température: Mesures horaires (quotidien)"
+    cron_schedule="0 6 * * *",  # Tous les jours à 6h
 )
-
-# ================================
-# SCHEDULES ANNUELS (Campagnes)
-# ================================
 
 ecoulement_schedule = ScheduleDefinition(
     job=hubeau_ecoulement_job,
-    cron_schedule="0 7 15 1 *",  # 15 janvier 7h (campagnes estivales année précédente)
-    execution_timezone="Europe/Paris",
-    name="ecoulement_schedule",
-    description="🌊 Écoulement: Campagnes estivales (annuel)"
-)
-
-water_quality_surface_schedule = ScheduleDefinition(
-    job=hubeau_water_quality_surface_job,
-    cron_schedule="0 8 15 1 *",  # 15 janvier 8h (prélèvements année précédente)
-    execution_timezone="Europe/Paris",
-    name="water_quality_surface_schedule",
-    description="🧪 Qualité Cours d'Eau: Récupération annuelle (annuel)"
-)
-
-water_quality_groundwater_schedule = ScheduleDefinition(
-    job=hubeau_water_quality_groundwater_job,
-    cron_schedule="0 8 15 1 *",  # 15 janvier 8h (prélèvements année précédente)
-    execution_timezone="Europe/Paris",
-    name="water_quality_groundwater_schedule",
-    description="🧪 Qualité Nappes: Récupération annuelle (annuel)"
+    cron_schedule="0 5 * * *",  # Tous les jours à 5h
 )
 
 hydrobiology_schedule = ScheduleDefinition(
     job=hubeau_hydrobiology_job,
-    cron_schedule="0 10 15 1 *",  # 15 janvier 10h (campagnes année précédente)
-    execution_timezone="Europe/Paris",
-    name="hydrobiology_schedule",
-    description="🐟 Hydrobiologie: Campagnes saisonnières (annuel)"
+    cron_schedule="0 3 * * *",  # Tous les jours à 3h
 )
 
 prelevements_schedule = ScheduleDefinition(
     job=hubeau_prelevements_job,
-    cron_schedule="0 9 15 1 *",  # 15 janvier 9h (déclarations annuelles)
-    execution_timezone="Europe/Paris",
-    name="prelevements_schedule",
-    description="💧 Prélèvements: Déclarations annuelles (annuel)"
+    cron_schedule="0 7 * * *",  # Tous les jours à 7h
 )
 
-# ================================
-# SCHEDULES EXTERNES
-# ================================
-
-bdlisa_schedule = ScheduleDefinition(
-    job=bdlisa_bronze_job,
-    cron_schedule="0 8 1 * *",  # Premier du mois 8h
-    execution_timezone="Europe/Paris",
-    name="bdlisa_schedule",
-    description="🗺️ BDLISA: Géologie (mensuel)"
-)
-
-sandre_schedule = ScheduleDefinition(
-    job=sandre_bronze_job,
-    cron_schedule="0 9 1 * *",  # Premier du mois 9h
-    execution_timezone="Europe/Paris",
-    name="sandre_schedule",
-    description="📚 Sandre: Nomenclatures (mensuel)"
-)
-
-# ================================
-# EXPORTS
-# ================================
-
-all_schedules = [
-    # Quotidiens (séries continues)
+# Schedules ancienne architecture
+old_schedules = [
     hydrometry_schedule,
     piezometry_schedule,
     temperature_schedule,
-    # Annuels (campagnes + déclarations)
     ecoulement_schedule,
-    water_quality_surface_schedule,
-    water_quality_groundwater_schedule,
     hydrobiology_schedule,
     prelevements_schedule,
-    # Externes
-    bdlisa_schedule,
-    sandre_schedule,
+]
+
+# ====================================
+# SCHEDULES NOUVELLE ARCHITECTURE DLT (recommended)
+# ====================================
+
+# Schedules nouvelle architecture dlt
+dlt_schedules = [
+    sync_hubeau_daily_schedule,      # Tous les jours à 4h (toutes les APIs)
+    sync_hubeau_realtime_schedule,   # Toutes les heures (hydrométrie + piézométrie)
+    sync_hubeau_quality_schedule,    # Tous les dimanches à 2h (qualité)
+]
+
+# ✅ NOUVELLE ARCHITECTURE: Utiliser les schedules dlt par défaut
+all_schedules = dlt_schedules
+
+__all__ = [
+    # Schedules nouvelle architecture dlt (recommended)
+    "dlt_schedules",
+    "sync_hubeau_daily_schedule",
+    "sync_hubeau_realtime_schedule",
+    "sync_hubeau_quality_schedule",
+    
+    # Schedules ancienne architecture (deprecated)
+    "old_schedules",
+    "hydrometry_schedule",
+    "piezometry_schedule",
+    "temperature_schedule",
+    "ecoulement_schedule",
+    "hydrobiology_schedule",
+    "prelevements_schedule",
+    
+    # Tous les schedules
+    "all_schedules"
 ]

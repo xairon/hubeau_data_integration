@@ -3,7 +3,7 @@ Assets Bronze Hub'Eau - Architecture moderne et claire
 httpx + tenacity + pydantic pour une ingestion robuste et performante
 """
 
-# Assets Hub'Eau Bronze
+# Assets Hub'Eau Bronze (ancienne architecture - deprecated)
 from .hubeau_assets import (
     hubeau_hydrometry_bronze,
     hubeau_piezometry_bronze,
@@ -15,14 +15,26 @@ from .hubeau_assets import (
     hubeau_prelevements_bronze,
     hubeau_ingestion_summary
 )
-from dagster.assets.dlt_assets import hydrobio_taxons
+
+# Assets Hub'Eau dlt (nouvelle architecture - recommended)
+from dagster.assets.dlt_assets import (
+    hydrobio_taxons,
+    hydrobio_indices,
+    hydrometry_observations,
+    piezometry_chroniques,
+    quality_rivers_analyses,
+    quality_groundwater_analyses,
+    ecoulement_observations,
+    prelevements_chroniques,
+    temperature_chroniques,
+)
 
 # Sources externes (référentiels géographiques et thesaurus)
 from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
 from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 
-# Assets de production Hub'Eau
-hubeau_bronze_assets = [
+# Assets de production Hub'Eau (ancienne architecture - à migrer progressivement)
+hubeau_bronze_assets_old = [
     hubeau_hydrometry_bronze,
     hubeau_piezometry_bronze,
     hubeau_water_quality_surface_bronze,
@@ -31,8 +43,20 @@ hubeau_bronze_assets = [
     hubeau_ecoulement_bronze,
     hubeau_hydrobiology_bronze,
     hubeau_prelevements_bronze,
-    hydrobio_taxons,
     hubeau_ingestion_summary
+]
+
+# Assets de production Hub'Eau (nouvelle architecture dlt - recommandé)
+hubeau_bronze_assets_dlt = [
+    hydrobio_taxons,
+    hydrobio_indices,
+    hydrometry_observations,
+    piezometry_chroniques,
+    quality_rivers_analyses,
+    quality_groundwater_analyses,
+    ecoulement_observations,
+    prelevements_chroniques,
+    temperature_chroniques,
 ]
 
 # Assets externes (référentiels complémentaires)
@@ -41,12 +65,24 @@ external_bronze_assets = [
     sandre_thesaurus_bronze_real     # Sandre : Nomenclatures et référentiels
 ]
 
-# Tous les assets bronze
-all_bronze_assets = hubeau_bronze_assets + external_bronze_assets
+# ✅ NOUVELLE ARCHITECTURE: Utiliser les assets dlt par défaut
+all_bronze_assets = hubeau_bronze_assets_dlt + external_bronze_assets
 
 __all__ = [
-    # Assets Hub'Eau Bronze
-    "hubeau_bronze_assets",
+    # Assets Hub'Eau dlt (nouvelle architecture)
+    "hubeau_bronze_assets_dlt",
+    "hydrobio_taxons",
+    "hydrobio_indices",
+    "hydrometry_observations",
+    "piezometry_chroniques",
+    "quality_rivers_analyses",
+    "quality_groundwater_analyses",
+    "ecoulement_observations",
+    "prelevements_chroniques",
+    "temperature_chroniques",
+    
+    # Assets Hub'Eau Bronze (ancienne architecture - deprecated)
+    "hubeau_bronze_assets_old",
     "hubeau_hydrometry_bronze",
     "hubeau_piezometry_bronze",
     "hubeau_water_quality_surface_bronze",
@@ -55,7 +91,6 @@ __all__ = [
     "hubeau_ecoulement_bronze",
     "hubeau_hydrobiology_bronze",
     "hubeau_prelevements_bronze",
-    "hydrobio_taxons",
     "hubeau_ingestion_summary",
     
     # Assets externes (référentiels)

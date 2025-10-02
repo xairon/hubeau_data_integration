@@ -1,0 +1,35 @@
+name: piezometry_chroniques
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
+path: /chroniques_tr
+method: GET
+params_default:
+  format: json
+  size: 1000
+records_path: $.data
+primary_keys: [code_bss, date_mesure]
+replication_key: date_mesure
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 1000
+  until_expr: "len($.data) < 1000"
+slicer:
+  mode: datetime
+  start_param: date_debut_mesure
+  end_param: date_fin_mesure
+  window_days: 30  # Fenêtre mensuelle pour piézométrie
+  start_date: "2023-01-01"
+  end_offset_days: 1
+rate_limit:
+  target_rps: 1.5
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Piézométrie - Chroniques temps réel
+  - Données mensuelles, trimestrielles selon les stations
+  - ~15,000 stations au total
+  - Aucune limite de profondeur spécifique
+
