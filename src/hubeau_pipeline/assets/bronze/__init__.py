@@ -17,7 +17,7 @@ from .hubeau_assets import (
 )
 
 # Assets Hub'Eau dlt (nouvelle architecture - recommended)
-from dagster.assets.dlt_assets import (
+from .dlt_assets import (
     hydrobio_taxons,
     hydrobio_indices,
     hydrometry_observations,
@@ -27,6 +27,7 @@ from dagster.assets.dlt_assets import (
     ecoulement_observations,
     prelevements_chroniques,
     temperature_chroniques,
+    temperature_stations_reference,
 )
 
 # Sources externes (référentiels géographiques et thesaurus)
@@ -57,6 +58,7 @@ hubeau_bronze_assets_dlt = [
     ecoulement_observations,
     prelevements_chroniques,
     temperature_chroniques,
+    temperature_stations_reference,
 ]
 
 # Assets externes (référentiels complémentaires)
@@ -80,6 +82,7 @@ __all__ = [
     "ecoulement_observations",
     "prelevements_chroniques",
     "temperature_chroniques",
+    "temperature_stations_reference",
     
     # Assets Hub'Eau Bronze (ancienne architecture - deprecated)
     "hubeau_bronze_assets_old",

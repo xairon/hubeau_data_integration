@@ -143,11 +143,6 @@ def hubeau_source(cfg: Dict[str, Any]):
     return stream
 
 
-@dlt.pipeline(
-    pipeline_name="hubeau_to_minio",
-    destination="filesystem",
-    dataset_name="bronze",
-)
 def run_pipeline(
     cfg: Dict[str, Any],
     *,
@@ -175,16 +170,29 @@ def run_pipeline(
     )
 
     destination = filesystem(**destination_kwargs)
-    pipeline = run_pipeline.pipeline(destination=destination, dataset_name=target_dataset)
-    load_info = pipeline.run(hubeau_source(cfg))
-    state = pipeline.state.asdict()
-    save_state_copy(
-        cfg["source"],
-        cfg["name"],
-        state,
-        fs_url=cfg.get("state_store"),
-        fs_options=state_fs_options,
+    
+    # Create a dlt pipeline
+    pipeline_name = f"hubeau_{cfg['name']}"
+    pipeline = dlt.pipeline(
+        pipeline_name=pipeline_name,
+        destination=destination,
+        dataset_name=target_dataset,
     )
+    
+    # Run the pipeline
+    load_info = pipeline.run(hubeau_source(cfg))
+    
+    # Save state
+    state = pipeline.state
+    if state:
+        save_state_copy(
+            cfg["source"],
+            cfg["name"],
+            state,
+            fs_url=cfg.get("state_store"),
+            fs_options=state_fs_options,
+        )
+    
     return load_info
 
 
