@@ -197,30 +197,41 @@ def get_ground_water_quality_config() -> HubeauApiConfig:
     )
 
 def get_temperature_config() -> HubeauApiConfig:
-    """Configuration API Température"""
+    """
+    Configuration API Température des cours d'eau
+    
+    Selon la documentation officielle: https://hubeau.eaufrance.fr/page/api-temperature-continu
+    - ~760 stations de mesure (dont ~50 encore en service)
+    - Données mises à jour trimestriellement depuis Naïades
+    - Limite de profondeur: 20 000 enregistrements par requête
+    - Filtrage spatial: code_departement pour stations ET chroniques
+    """
     return HubeauApiConfig(
         name="temperature",
         base_url="https://hubeau.eaufrance.fr/api/v1/temperature",
         version="v1",
-        max_retries=8,  # ✅ CORRECTIF: Plus de retries pour API sensible aux erreurs 500
-        rate_limit_delay=1.5,  # ✅ CORRECTIF: Rate limit plus respectueux pour éviter erreurs 500
+        max_retries=8,
+        rate_limit_delay=1.5,
         endpoints={
-                   "station": HubeauEndpointConfig(
-                       path="station",
-                       page_size=5000,
-                       max_pages=10,
-                       cache_duration=30,
-                       depth_limit=50000  # Limite élevée pour éviter troncature
-                   ),
-                   "chronique": HubeauEndpointConfig(
-                       path="chronique",
-                       temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
-                       page_size=1000,
-                       max_pages=20,  # ✅ CORRECTIF: Limite à 20 pages (20k records max selon doc)
-                       cache_duration=30,
-                       requires_spatial_filter=False,  # ✅ CORRECTIF: Pas de filtre spatial pour observations (récupération par station)
-                       depth_limit=20000  # ✅ CORRECTIF: Respecter la limite officielle de 20k
-                   )
+            "station": HubeauEndpointConfig(
+                path="station",
+                page_size=5000,
+                max_pages=None,  # ✅ Pas de limite (seulement ~760 stations)
+                cache_duration=30,
+                requires_spatial_filter=True,
+                spatial_params={"dept": "code_departement"},
+                depth_limit=50000
+            ),
+            "chronique": HubeauEndpointConfig(
+                path="chronique",
+                temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
+                page_size=1000,
+                max_pages=20,  # ✅ Limite de profondeur 20k records
+                cache_duration=30,
+                requires_spatial_filter=True,  # ✅ CORRECTIF: Filtrage par département
+                spatial_params={"dept": "code_departement"},  # ✅ Comme les stations
+                depth_limit=20000
+            )
         }
     )
 
