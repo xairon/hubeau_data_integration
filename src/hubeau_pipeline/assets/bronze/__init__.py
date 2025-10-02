@@ -10,7 +10,7 @@ from .hubeau_assets import (
     hubeau_water_quality_surface_bronze,
     hubeau_water_quality_groundwater_bronze,
     hubeau_temperature_bronze,
-    hubeau_onde_bronze,
+    hubeau_ecoulement_bronze,
     hubeau_hydrobiology_bronze,
     hubeau_prelevements_bronze,
     hubeau_ingestion_summary
@@ -27,7 +27,7 @@ hubeau_bronze_assets = [
     hubeau_water_quality_surface_bronze,
     hubeau_water_quality_groundwater_bronze,
     hubeau_temperature_bronze,
-    hubeau_onde_bronze,
+    hubeau_ecoulement_bronze,
     hubeau_hydrobiology_bronze,
     hubeau_prelevements_bronze,
     hubeau_ingestion_summary
@@ -50,7 +50,7 @@ __all__ = [
     "hubeau_water_quality_surface_bronze",
     "hubeau_water_quality_groundwater_bronze",
     "hubeau_temperature_bronze",
-    "hubeau_onde_bronze",
+    "hubeau_ecoulement_bronze",
     "hubeau_hydrobiology_bronze",
     "hubeau_prelevements_bronze",
     "hubeau_ingestion_summary",

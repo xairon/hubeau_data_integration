@@ -10,7 +10,7 @@ from hubeau_pipeline.jobs import (
     bdlisa_bronze_job,
     hubeau_hydrobiology_job,
     hubeau_hydrometry_job,
-    hubeau_onde_job,
+    hubeau_ecoulement_job,
     hubeau_piezometry_job,
     hubeau_prelevements_job,
     hubeau_temperature_job,
@@ -51,12 +51,12 @@ temperature_schedule = ScheduleDefinition(
 # SCHEDULES ANNUELS (Campagnes)
 # ================================
 
-onde_schedule = ScheduleDefinition(
-    job=hubeau_onde_job,
+ecoulement_schedule = ScheduleDefinition(
+    job=hubeau_ecoulement_job,
     cron_schedule="0 7 15 1 *",  # 15 janvier 7h (campagnes estivales année précédente)
     execution_timezone="Europe/Paris",
-    name="onde_schedule",
-    description="🌊 ONDE: Campagnes estivales (annuel)"
+    name="ecoulement_schedule",
+    description="🌊 Écoulement: Campagnes estivales (annuel)"
 )
 
 water_quality_surface_schedule = ScheduleDefinition(
@@ -121,7 +121,7 @@ all_schedules = [
     piezometry_schedule,
     temperature_schedule,
     # Annuels (campagnes + déclarations)
-    onde_schedule,
+    ecoulement_schedule,
     water_quality_surface_schedule,
     water_quality_groundwater_schedule,
     hydrobiology_schedule,
