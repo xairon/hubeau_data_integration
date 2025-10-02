@@ -218,19 +218,17 @@ def get_temperature_config() -> HubeauApiConfig:
                 page_size=5000,
                 max_pages=None,  # ✅ Pas de limite (seulement ~760 stations)
                 cache_duration=30,
-                requires_spatial_filter=True,
-                spatial_params={"dept": "code_departement"},
+                requires_spatial_filter=False,  # ✅ CORRECTIF: Récupérer TOUTES les stations (pas de filtre départemental)
                 depth_limit=50000
             ),
             "chronique": HubeauEndpointConfig(
                 path="chronique",
                 temporal_params={"start": "date_debut_mesure", "end": "date_fin_mesure"},
                 page_size=1000,
-                max_pages=20,  # ✅ Limite de profondeur 20k records
+                max_pages=None,  # ✅ CORRECTIF: Pas de limite (fallback mensuel gère la troncature)
                 cache_duration=30,
-                requires_spatial_filter=True,  # ✅ CORRECTIF: Filtrage par département
-                spatial_params={"dept": "code_departement"},  # ✅ Comme les stations
-                depth_limit=20000
+                requires_spatial_filter=False,  # ✅ CORRECTIF: Pas de filtre spatial (trop de données par département)
+                depth_limit=None  # ✅ CORRECTIF: Pas de limite (fallback mensuel gère la troncature)
             )
         }
     )

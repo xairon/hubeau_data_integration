@@ -133,6 +133,7 @@ class HubeauClient:
         self.config = config
         self.logger = logger
         self.metrics = IngestionMetrics()  # ✅ CORRECTIF D: Métriques d'observabilité
+        self._last_truncation_info = {}  # ✅ CORRECTIF: Info de troncature pour température
         
         # Configuration httpx
         self.client = httpx.AsyncClient(
@@ -331,6 +332,7 @@ class HubeauClient:
                     raise error from exc
 
         # Warning de troncature seulement si max_pages défini
+        truncated = False
         if endpoint_config.max_pages is not None:
             expected_records_cap = endpoint_config.max_pages * page_size
             if pages_fetched >= endpoint_config.max_pages and len(all_data) >= expected_records_cap:
@@ -340,6 +342,11 @@ class HubeauClient:
                     endpoint_config.path,
                     len(all_data),
             )
+                truncated = True
+
+        # ✅ CORRECTIF: Retourner aussi l'info de troncature pour la température
+        if hasattr(self, '_last_truncation_info'):
+            self._last_truncation_info[endpoint_config.path] = truncated
 
         return all_data
 
@@ -487,6 +494,8 @@ class HubeauClient:
             # Déterminer chunk_size selon l'API et la configuration
             if self.config.name == "prelevements":
                 chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
+            elif self.config.name == "temperature":
+                chunk_size = 1  # ✅ Température: 1 département pour respecter limite 20k (données très denses)
             elif self.config.name == "hydrobiology":
                 chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
             elif self.config.name == "superficial_waterbodies_quality":
@@ -508,6 +517,8 @@ class HubeauClient:
             # Parallélisation adaptative selon l'API
             if self.config.name == "prelevements" and chunk_size == 1:
                 MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
+            elif self.config.name == "temperature":
+                MAX_CONCURRENT_SPATIAL = 5   # ✅ Température: parallélisme modéré (API sensible aux erreurs 500)
             elif self.config.name == "hydrobiology":
                 MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
             elif self.config.name == "superficial_waterbodies_quality":
@@ -1146,6 +1157,128 @@ class HubeauIngestionService:
             "errors": errors
         }
     
+    async def _get_temperature_observations_with_fallback(
+        self,
+        client: 'HubeauClient',
+        endpoint_name: str,
+        station_codes: List[str],
+        date_partition: str,
+        api_name: str,
+        partition_key: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Récupère les observations température avec fallback temporel si nécessaire.
+        
+        Stratégie :
+        1. Essayer toute l'année d'un coup
+        2. Si troncature détectée → découper par mois
+        3. Si encore tronqué → découper par semaine
+        """
+        original_key = partition_key if partition_key else date_partition
+        is_yearly_partition = len(original_key) == 4
+        
+        if not is_yearly_partition:
+            # Pas une partition annuelle → utiliser la logique normale
+            return await client.get_observations(
+                endpoint_name, station_codes, date_partition, api_name, 
+                realtime=False, partition_key=partition_key
+            )
+        
+        # ✅ CORRECTIF RADICAL: Station par station avec découpage mensuel
+        # Raison: Trop de stations dans une requête = erreurs 500
+        self.logger.info(f"🌡️ Température: Partition annuelle détectée → station par station avec découpage mensuel")
+        return await self._get_temperature_observations_station_by_station(
+            client, endpoint_name, station_codes, date_partition, api_name, partition_key
+        )
+    
+    async def _get_temperature_observations_station_by_station(
+        self,
+        client: 'HubeauClient',
+        endpoint_name: str,
+        station_codes: List[str],
+        date_partition: str,
+        api_name: str,
+        partition_key: str = None
+    ) -> List[Dict[str, Any]]:
+        """Récupère les observations température station par station avec découpage mensuel"""
+        year = int(partition_key) if partition_key and len(partition_key) == 4 else int(date_partition[:4])
+        
+        self.logger.info(f"🌡️ Température: Récupération station par station pour l'année {year} ({len(station_codes)} stations)")
+        
+        all_observations = []
+        
+        for i, station_code in enumerate(station_codes, 1):
+            try:
+                self.logger.debug(f"🌡️ Station {i}/{len(station_codes)}: {station_code}")
+                
+                # Récupérer les observations de cette station mois par mois
+                station_observations = []
+                
+                for month in range(1, 13):
+                    try:
+                        # Créer une date de partition pour le mois
+                        month_date = f"{year}-{month:02d}-01"
+                        
+                        # Requête pour cette station uniquement
+                        month_observations = await client.get_observations(
+                            endpoint_name, [station_code], month_date, api_name,
+                            realtime=False, partition_key=partition_key
+                        )
+                        
+                        station_observations.extend(month_observations)
+                        
+                    except Exception as e:
+                        self.logger.debug(f"⚠️ Erreur station {station_code} mois {month:02d}: {e}")
+                        continue
+                
+                all_observations.extend(station_observations)
+                
+                if i % 50 == 0:  # Log tous les 50 stations
+                    self.logger.info(f"🌡️ Progression: {i}/{len(station_codes)} stations traitées ({len(all_observations)} observations)")
+                
+            except Exception as e:
+                self.logger.warning(f"⚠️ Erreur station {station_code}: {e}")
+                continue
+        
+        self.logger.info(f"✅ Température: {len(all_observations)} observations récupérées (méthode station par station)")
+        return all_observations
+
+    async def _get_temperature_observations_monthly(
+        self,
+        client: 'HubeauClient',
+        endpoint_name: str,
+        station_codes: List[str],
+        date_partition: str,
+        api_name: str,
+        partition_key: str = None
+    ) -> List[Dict[str, Any]]:
+        """Récupère les observations température mois par mois"""
+        year = int(partition_key) if partition_key and len(partition_key) == 4 else int(date_partition[:4])
+        
+        self.logger.info(f"🌡️ Température: Récupération mensuelle pour l'année {year}")
+        
+        all_observations = []
+        
+        for month in range(1, 13):
+            try:
+                # Créer une date de partition pour le mois
+                month_date = f"{year}-{month:02d}-01"
+                
+                month_observations = await client.get_observations(
+                    endpoint_name, station_codes, month_date, api_name,
+                    realtime=False, partition_key=partition_key
+                )
+                
+                all_observations.extend(month_observations)
+                self.logger.debug(f"🌡️ Mois {month:02d}: {len(month_observations)} observations")
+                
+            except Exception as e:
+                self.logger.warning(f"⚠️ Erreur mois {month:02d}: {e}")
+                continue
+        
+        self.logger.info(f"✅ Température: {len(all_observations)} observations récupérées (méthode mensuelle)")
+        return all_observations
+    
     async def ingest_api_data(
         self, 
         config: HubeauApiConfig, 
@@ -1214,14 +1347,21 @@ class HubeauIngestionService:
                     else:
                         station_codes = []
                     
-                    observations = await client.get_observations(
-                        endpoint_name, 
-                        station_codes,
-                        date_partition,
-                        config.name,
-                        realtime=False,
-                        partition_key=partition_key  # ✅ CORRECTIF: Passer partition originale
-                    )
+                    # ✅ LOGIQUE SPÉCIALE TEMPÉRATURE: Toujours utiliser le fallback station par station
+                    if config.name == "temperature":
+                        self.logger.info(f"🌡️ TEMPÉRATURE: Utilisation du fallback station par station (ignorer le filtrage normal)")
+                        observations = await self._get_temperature_observations_with_fallback(
+                            client, endpoint_name, station_codes, date_partition, config.name, partition_key
+                        )
+                    else:
+                        observations = await client.get_observations(
+                            endpoint_name, 
+                            station_codes,
+                            date_partition,
+                            config.name,
+                            realtime=False,
+                            partition_key=partition_key  # ✅ CORRECTIF: Passer partition originale
+                        )
                     
                     # ✅ CORRECTIF: Vérifier que observations n'est pas None
                     if observations is None:
