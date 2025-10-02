@@ -147,6 +147,12 @@ def hubeau_source(cfg: Dict[str, Any], *, client: HttpClient | None = None):
 
                 for batch in buffered_batches:
                     for record in batch:
+                        # Clean up NULL values in critical fields
+                        if record.get("code_bss") is None and record.get("bss_id"):
+                            record["code_bss"] = record["bss_id"]
+                        elif record.get("code_bss") is None:
+                            record["code_bss"] = f"unknown_{record.get('timestamp_mesure', 'unknown')}"
+                        
                         record["_slice_id"] = slice_obj.slice_id
                         record["_scope"] = slice_obj.scope
                         yield record

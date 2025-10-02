@@ -8,7 +8,7 @@ params_default:
   format: json
   size: 1000
 records_path: $.data
-primary_keys: [code_bss, date_mesure]
+primary_keys: [code_bss, timestamp_mesure]
 replication_key: date_mesure
 pagination:
   type: page
