@@ -16,12 +16,22 @@ class DummyHttpClient:
         self.cfg = cfg
         self.calls = []
 
-    def get(self, path: str, params: Dict[str, Any]):
+    def request(self, method: str, path: str, **kwargs):
+        params = kwargs.get("params") or kwargs.get("json_body") or {}
         self.calls.append((path, params))
         return {"data": [{"id_taxon": 1, "code_station": "A", "date_prelevement": "2024-01-01"}]}
 
     def extract_records(self, payload: Dict[str, Any], records_path: str):
         return payload["data"]
+
+    def close(self):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 def test_pipeline_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("DESTINATION__FILESYSTEM__PATH", str(tmp_path))

@@ -1,6 +1,7 @@
 """Generic dlt pipeline that ingests HubEau endpoints defined via YAML."""
 from __future__ import annotations
 
+import os
 import re
 from collections import deque
 from pathlib import Path
@@ -85,9 +86,14 @@ def _should_stop_pagination(
 
 
 @dlt.source(name="hubeau")
-def hubeau_source(cfg: Dict[str, Any]):
+def hubeau_source(cfg: Dict[str, Any], *, client: HttpClient | None = None):
+    """Return the dlt resource streaming Hub'Eau data."""
+
     validated_cfg = validate_config(cfg)
-    client = HttpClient(cfg)
+    resolved_cfg = validated_cfg.model_dump(mode="python")
+
+    http_client = client or HttpClient(resolved_cfg)
+    owns_client = client is None
 
     @dlt.resource(
         name=validated_cfg.name,
@@ -95,50 +101,58 @@ def hubeau_source(cfg: Dict[str, Any]):
         primary_key=validated_cfg.primary_keys,
     )
     def stream() -> Iterator[Dict[str, Any]]:
-        pagination = cfg.get("pagination") or {}
-        slices: Deque[Slice] = deque(build_slices(cfg))
+        pagination = resolved_cfg.get("pagination") or {}
+        method = resolved_cfg.get("method", "GET").upper()
+        slices: Deque[Slice] = deque(build_slices(resolved_cfg))
 
-        while slices:
-            slice_obj = slices.popleft()
-            page = 1
-            buffered_batches: List[List[Dict[str, Any]]] = []
-            total_records = 0
-            truncated = False
+        try:
+            while slices:
+                slice_obj = slices.popleft()
+                page = 1
+                buffered_batches: List[List[Dict[str, Any]]] = []
+                total_records = 0
+                truncated = False
 
-            while True:
-                params = _build_params(cfg, slice_obj, page if pagination else None)
-                payload = client.get(cfg["path"], params=params)
-                batch = list(client.extract_records(payload, cfg.get("records_path")))
-                buffered_batches.append(batch)
-                total_records += len(batch)
+                while True:
+                    params = _build_params(resolved_cfg, slice_obj, page if pagination else None)
+                    request_kwargs: Dict[str, Any] = {"params": params}
+                    if method in {"POST", "PUT", "PATCH"}:
+                        request_kwargs["json_body"] = params
+                    payload = http_client.request(method, resolved_cfg["path"], **request_kwargs)
+                    batch = list(http_client.extract_records(payload, resolved_cfg.get("records_path")))
+                    buffered_batches.append(batch)
+                    total_records += len(batch)
 
-                if needs_truncation(total_records, cfg):
-                    truncated = True
-                    break
+                    if needs_truncation(total_records, resolved_cfg):
+                        truncated = True
+                        break
 
-                if _should_stop_pagination(payload, batch, pagination):
-                    break
+                    if _should_stop_pagination(payload, batch, pagination):
+                        break
 
-                page += 1
+                    page += 1
 
-            if truncated:
-                fallback_slices = generate_fallback_slices(slice_obj, cfg, slice_obj.level)
-                if not fallback_slices:
-                    for batch in buffered_batches:
-                        for record in batch:
-                            record["_slice_id"] = slice_obj.slice_id
-                            record["_scope"] = slice_obj.scope
-                            yield record
+                if truncated:
+                    fallback_slices = generate_fallback_slices(slice_obj, resolved_cfg, slice_obj.level)
+                    if not fallback_slices:
+                        for batch in buffered_batches:
+                            for record in batch:
+                                record["_slice_id"] = slice_obj.slice_id
+                                record["_scope"] = slice_obj.scope
+                                yield record
+                        continue
+                    for new_slice in reversed(fallback_slices):
+                        slices.appendleft(new_slice)
                     continue
-                for new_slice in reversed(fallback_slices):
-                    slices.appendleft(new_slice)
-                continue
 
-            for batch in buffered_batches:
-                for record in batch:
-                    record["_slice_id"] = slice_obj.slice_id
-                    record["_scope"] = slice_obj.scope
-                    yield record
+                for batch in buffered_batches:
+                    for record in batch:
+                        record["_slice_id"] = slice_obj.slice_id
+                        record["_scope"] = slice_obj.scope
+                        yield record
+        finally:
+            if owns_client:
+                http_client.close()
 
     return stream
 
@@ -149,51 +163,85 @@ def run_pipeline(
     bucket_url: Optional[str] = None,
     credentials: Optional[Dict[str, Any]] = None,
     dataset_name: Optional[str] = None,
-    file_format: str = "parquet",
+    file_format: str = "json",
     layout: Optional[str] = None,
     state_fs_options: Optional[Dict[str, Any]] = None,
 ) -> dlt.LoadInfo:
-    destination_kwargs: Dict[str, Any] = {
-        "bucket_url": bucket_url,
-        "credentials": credentials,
-        "file_format": file_format,
-    }
-    if layout:
-        destination_kwargs["layout"] = layout
+    validated_cfg = validate_config(cfg)
+    resolved_cfg = validated_cfg.model_dump(mode="python")
+
+    destination_kwargs: Dict[str, Any] = {}
+    resolved_bucket = bucket_url or resolved_cfg.get("bucket_url")
+    if not resolved_bucket:
+        env_path = os.getenv("DESTINATION__FILESYSTEM__PATH")
+        if env_path:
+            resolved_bucket = Path(env_path).expanduser().resolve().as_uri()
+    if resolved_bucket:
+        destination_kwargs["bucket_url"] = resolved_bucket
+    if credentials:
+        destination_kwargs["credentials"] = credentials
+
+    explicit_file_format = resolved_cfg.get("file_format") or file_format
+    if explicit_file_format:
+        destination_kwargs["file_format"] = explicit_file_format
+    if layout or resolved_cfg.get("layout"):
+        destination_kwargs["layout"] = resolved_cfg.get("layout") or layout
+
     # Remove empty values to let dlt rely on defaults when not provided
     destination_kwargs = {k: v for k, v in destination_kwargs.items() if v}
 
-    target_dataset = dataset_name or cfg.get("dataset_name") or cfg["source"]
-    destination_kwargs.setdefault(
-        "layout",
-        "{schema_name}/{table_name}/format=parquet/run_date={curr_date}/part-{file_id}",
-    )
+    target_dataset = dataset_name or resolved_cfg.get("dataset_name") or "bronze"
+    destination_kwargs.setdefault("layout", "{table_name}/{curr_date}/data.json")
 
-    destination = filesystem(**destination_kwargs)
-    
-    # Create a dlt pipeline
-    pipeline_name = f"hubeau_{cfg['name']}"
+    destination = filesystem(**destination_kwargs) if destination_kwargs else filesystem()
+
+    pipeline_name = f"hubeau_{resolved_cfg['name']}"
     pipeline = dlt.pipeline(
         pipeline_name=pipeline_name,
         destination=destination,
         dataset_name=target_dataset,
     )
-    
-    # Run the pipeline
-    load_info = pipeline.run(hubeau_source(cfg))
-    
-    # Save state
+
+    with HttpClient(resolved_cfg) as http_client:
+        load_info = pipeline.run(hubeau_source(resolved_cfg, client=http_client))
+
     state = pipeline.state
     if state:
         save_state_copy(
-            cfg["source"],
-            cfg["name"],
+            resolved_cfg["source"],
+            resolved_cfg["name"],
             state,
-            fs_url=cfg.get("state_store"),
-            fs_options=state_fs_options,
+            fs_url=resolved_cfg.get("state_store"),
+            fs_options=_normalise_state_options(state_fs_options),
         )
-    
+
     return load_info
+
+
+def _normalise_state_options(options: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Convert user-provided state options to fsspec compatible values."""
+
+    if not options:
+        return None
+
+    normalised: Dict[str, Any] = {}
+    client_kwargs: Dict[str, Any] = {}
+    for key, value in options.items():
+        if value in (None, ""):
+            continue
+        if key == "aws_access_key_id":
+            normalised["key"] = str(value)
+        elif key == "aws_secret_access_key":
+            normalised["secret"] = str(value)
+        elif key in {"endpoint_url", "region_name"}:
+            client_kwargs[key] = value
+        else:
+            normalised[key] = value
+    if client_kwargs:
+        merged_kwargs = dict(normalised.get("client_kwargs", {}))
+        merged_kwargs.update(client_kwargs)
+        normalised["client_kwargs"] = merged_kwargs
+    return normalised or None
 
 
 def run_from_file(config_path: str | Path) -> dlt.LoadInfo:

@@ -26,10 +26,13 @@ class DummyClient:
         self.responses = responses
         self.calls = 0
 
-    def get(self, *args, **kwargs):
+    def request(self, *args, **kwargs):
         response = self.responses[self.calls]
         self.calls += 1
         return response
+
+    def close(self):
+        return None
 
 
 def test_retry_on_429(monkeypatch):
@@ -39,9 +42,35 @@ def test_retry_on_429(monkeypatch):
     http_client = HttpClient(cfg, client=client)
     http_client.bucket.consume = MagicMock()  # avoid sleeping
     http_client.bucket.consume.side_effect = lambda *args, **kwargs: None
+    monkeypatch.setattr("pipelines.dlt.http_client.time.sleep", lambda *_args, **_kwargs: None)
     data = http_client.get("/endpoint", params={})
     assert client.calls == 2
     assert data == {"data": []}
+
+
+def test_request_stops_after_max_attempts(monkeypatch):
+    error = httpx.TransportError("boom")
+
+    class FailingClient:
+        def __init__(self):
+            self.calls = 0
+
+        def request(self, *args, **kwargs):
+            self.calls += 1
+            raise error
+
+        def close(self):
+            return None
+
+    failing_client = FailingClient()
+    cfg = {"base_url": "https://example.com", "max_attempts": 3}
+    http_client = HttpClient(cfg, client=failing_client)
+    http_client.bucket.consume = MagicMock(side_effect=lambda *args, **kwargs: None)
+    monkeypatch.setattr("pipelines.dlt.http_client.time.sleep", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(httpx.TransportError):
+        http_client.request("GET", "/endpoint", params={})
+    assert failing_client.calls == 3
 
 
 def test_extract_records_jsonpath():

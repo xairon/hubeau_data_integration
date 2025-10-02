@@ -62,40 +62,84 @@ class HttpClient:
         self.default_headers = cfg.get("headers", {})
         self.backoff_initial = cfg.get("backoff_initial", 1.0)
         self.backoff_max = cfg.get("backoff_max", 120.0)
+        self.max_attempts = max(int(cfg.get("max_attempts", 5)), 1)
+
+    # --- context management --------------------------------------------
+    def close(self) -> None:
+        if hasattr(self.session, "close"):
+            self.session.close()
+
+    def __enter__(self) -> "HttpClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     # --- public API -----------------------------------------------------
-    def get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Perform a GET request with retry/backoff.
-
-        The method retries on 5xx status codes and HTTP 429 (rate limit).
-        For other codes, :meth:`httpx.Response.raise_for_status` is called.
-        """
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        json_body: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Perform an HTTP request with retry/backoff support."""
 
         url = f"{self.base_url}/{path.lstrip('/')}"
+        method = method.upper()
         backoff = self.backoff_initial
-        while True:
+        attempts = 0
+        header_payload = dict(self.default_headers)
+        if headers:
+            header_payload.update(headers)
+
+        while attempts < self.max_attempts:
+            attempts += 1
             self.bucket.consume(1.0)
             try:
-                response = self.session.get(url, params=params, headers=self.default_headers)
-            except httpx.HTTPError as exc:  # network errors
+                response = self.session.request(
+                    method,
+                    url,
+                    params=params or None,
+                    json=json_body,
+                    data=data,
+                    headers=header_payload or None,
+                )
+            except httpx.HTTPError:
+                if attempts >= self.max_attempts:
+                    raise
                 time.sleep(min(backoff, self.backoff_max))
                 backoff = min(self.backoff_max, backoff * 1.7)
                 continue
 
             if response.status_code == 429:
                 self._handle_429()
+                if attempts >= self.max_attempts:
+                    response.raise_for_status()
                 time.sleep(min(backoff, self.backoff_max))
                 backoff = min(self.backoff_max, backoff * 1.7)
                 continue
 
             if response.status_code >= 500:
+                if attempts >= self.max_attempts:
+                    response.raise_for_status()
                 time.sleep(min(backoff, self.backoff_max))
                 backoff = min(self.backoff_max, backoff * 1.7)
                 continue
 
             response.raise_for_status()
             self._maybe_increase_rps()
-            return response.json()
+            return self._decode_response(response)
+
+        raise RuntimeError("HTTP request failed after exhausting retry attempts")
+
+    def get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Backward compatible helper for GET requests."""
+
+        return self.request("GET", path, params=params)
 
     def extract_records(self, payload: Dict[str, Any], records_path: Optional[str]) -> Iterable[Dict[str, Any]]:
         """Extract records from the JSON payload using JSONPath.
@@ -113,10 +157,16 @@ class HttpClient:
         matches = parse(records_path).find(payload)
         if not matches:
             return []
-        records = matches[0].value
-        if isinstance(records, list):
-            return records
-        return [records]
+        aggregated = []
+        for match in matches:
+            value = match.value
+            if value is None:
+                continue
+            if isinstance(value, list):
+                aggregated.extend(value)
+            else:
+                aggregated.append(value)
+        return aggregated
 
     # --- helpers --------------------------------------------------------
     def _handle_429(self) -> None:
@@ -131,6 +181,12 @@ class HttpClient:
         now = time.monotonic()
         if now - self.last_429_ts > self.rate_limit_cfg.rps_increase_cooldown_s:
             self.bucket.fill_rate = min(self.bucket.fill_rate * 1.05, 5.0)
+
+    def _decode_response(self, response: httpx.Response) -> Dict[str, Any]:
+        try:
+            return response.json()
+        except ValueError as exc:  # pragma: no cover - defensive branch
+            raise ValueError("Expected JSON response from API") from exc
 
 
 __all__ = ["HttpClient", "TokenBucket"]

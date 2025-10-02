@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
-import fsspec
+from fsspec.core import url_to_fs
+
+try:  # pragma: no cover - optional dependency
+    import pendulum
+
+    _PENDULUM_TYPES: Iterable[type] = (pendulum.DateTime,)
+except ImportError:  # pragma: no cover - optional dependency
+    pendulum = None
+    _PENDULUM_TYPES = ()
 
 
 def _local_state_path(source: str, stream: str) -> Path:
@@ -24,14 +33,31 @@ def save_state_copy(
 ) -> Path:
     path = _local_state_path(source, stream)
     path.parent.mkdir(parents=True, exist_ok=True)
+    serializable_state = _make_json_serializable(state)
     with path.open("w", encoding="utf-8") as fp:
-        json.dump(state, fp, ensure_ascii=False, indent=2)
+        json.dump(serializable_state, fp, ensure_ascii=False, indent=2)
 
     if fs_url:
         options = dict(fs_options or {})
         options.setdefault("skip_instance_cache", True)
-        fs = fsspec.filesystem("s3", **options)
-        remote_path = os.path.join(fs_url.rstrip("/"), f"{source}/{stream}.state.json")
-        with fs.open(remote_path, "w") as remote:
-            json.dump(state, remote, ensure_ascii=False)
+        fs, base_path = url_to_fs(fs_url, **options)
+        remote_path = f"{base_path.rstrip('/')}/{source}/{stream}.state.json"
+        with fs.open(remote_path, "w", encoding="utf-8") as remote:
+            json.dump(serializable_state, remote, ensure_ascii=False)
     return path
+
+
+def _make_json_serializable(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if _PENDULUM_TYPES and isinstance(value, tuple(_PENDULUM_TYPES)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _make_json_serializable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_make_json_serializable(v) for v in value]
+    if hasattr(value, "to_dict"):
+        return _make_json_serializable(value.to_dict())
+    return repr(value)

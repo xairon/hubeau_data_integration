@@ -73,7 +73,7 @@ def _resolve_reference_values(cfg: Dict[str, Any], key: str) -> List[str]:
         if isinstance(values, list):
             return values
 
-    pre_scan_cfg = cfg.get("pre_scan", {}).get(key.rstrip("s") + "s", {})
+    pre_scan_cfg = (cfg.get("pre_scan") or {}).get(key.rstrip("s") + "s", {})
     if pre_scan_cfg.get("enabled") and "values" in pre_scan_cfg:
         values = pre_scan_cfg["values"]
         if isinstance(values, list):
@@ -253,7 +253,7 @@ def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level
 def generate_fallback_slices(slice_obj: Slice, cfg: Dict[str, Any], current_level: int) -> List[Slice]:
     """Generate fallback slices following the configured split chain."""
 
-    chain = cfg.get("fallbacks", {}).get("split_chain", []) or []
+    chain = (cfg.get("fallbacks") or {}).get("split_chain", []) or []
     if current_level >= len(chain):
         return []
     strategy = chain[current_level]
@@ -265,7 +265,8 @@ def generate_fallback_slices(slice_obj: Slice, cfg: Dict[str, Any], current_leve
 
 
 def needs_truncation(count: int, cfg: Dict[str, Any]) -> bool:
-    threshold = cfg.get("fallbacks", {}).get("truncation_threshold", TRUNCATION_DEFAULT)
+    fallbacks_cfg = cfg.get("fallbacks") or {}
+    threshold = fallbacks_cfg.get("truncation_threshold", TRUNCATION_DEFAULT)
     return count >= threshold
 
 

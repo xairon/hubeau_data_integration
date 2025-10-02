@@ -44,6 +44,6 @@ all_assets = production_assets  # Seulement Bronze réels pour tests
 
 __all__ = [
     "all_assets",
-    "production_assets"
+    "production_assets",
     # "demo_assets"  # Temporairement désactivé
 ]
