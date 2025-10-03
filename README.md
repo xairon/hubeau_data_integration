@@ -38,16 +38,16 @@ curl http://localhost:9001  # MinIO
 
 ## 📊 APIs Hub'Eau Intégrées
 
-| API | Endpoints | Volume | Partitioning | Stratégie DLT |
-|-----|-----------|--------|--------------|---------------|
-| **Hydrométrie** | stations, observations_tr | ~50M records | Daily | `datetime` + fallback `dept_datetime` |
-| **Piézométrie** | stations, chroniques | ~30M records | Yearly | `station_month` + fallback `day` |
-| **Qualité Cours d'Eau** | stations, analyses | ~5M records | Yearly | `day` + fallback `station_month` |
-| **Qualité Eaux Souterraines** | stations, analyses | ~2M records | Yearly | `day` + fallback `station_month` |
-| **Température** | stations, chronique | ~10M records | Yearly | `dept_datetime` + fallback `station_month` |
-| **ONDE (Écoulement)** | stations, observations | ~500K records | Daily | `datetime` + fallback `dept_datetime` |
-| **Hydrobiologie** | stations, indices, taxons | ~1M records | Yearly | `global` + fallback `station_month` |
-| **Prélèvements** | stations, chroniques | ~20M records | Yearly | `station_month` + fallback `day` |
+| API | Endpoints | Volume | Partitioning |
+|-----|-----------|--------|--------------|
+| **Hydrométrie** | stations, observations_tr | ~50M records | Daily |
+| **Piézométrie** | stations, chroniques | ~30M records | Yearly |
+| **Qualité Cours d'Eau** | stations, analyses | ~5M records | Yearly |
+| **Qualité Eaux Souterraines** | stations, analyses | ~2M records | Yearly |
+| **Température** | stations, chronique | ~10M records | Yearly |
+| **ONDE (Écoulement)** | stations, observations | ~500K records | Daily |
+| **Hydrobiologie** | stations, indices, taxons | ~1M records | Yearly |
+| **Prélèvements** | stations, chroniques | ~20M records | Yearly |
 
 ## 🎯 Accès aux Services
 
@@ -58,69 +58,9 @@ curl http://localhost:9001  # MinIO
 - **Neo4j :** http://localhost:7474 (neo4j/your_neo4j_password)
 - **pgAdmin :** http://localhost:5050
 
-## 🔧 Configuration DLT
+## 🔧 Configuration
 
-### Structure des Fichiers de Configuration
-
-Chaque API Hub'Eau a son fichier de configuration YAML dans `configs/hubeau/` :
-
-```yaml
-# Exemple: configs/hubeau/temperature_chroniques.yml
-name: temperature_chroniques
-source: hubeau
-dataset_name: hubeau
-base_url: https://hubeau.eaufrance.fr/api/v1/temperature
-path: /chronique
-method: GET
-
-# Paramètres par défaut
-params_default:
-  format: json
-  size: 20000  # Pages de 20K records (optimisé)
-
-# Clés primaires et réplication
-primary_keys: [code_station, date_mesure_temp]
-replication_key: date_mesure_temp
-
-# Pagination
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000
-  until_expr: "len($.data) == 0"
-
-# Stratégie de découpage (slicing)
-slicer:
-  mode: dept_datetime  # Mode optimisé département×temps
-  start_param: date_debut_mesure
-  end_param: date_fin_mesure
-  window_days: 30
-  start_date: "{{ partition_date }}"
-  end_date: "2024-12-31"  # Limite à l'année de partition
-  dept_param: code_departement
-  dept_chunk_size: 5  # 5 départements par requête
-  dept_list: ["01", "02", "03", ...]  # Liste complète des départements
-
-# Fallbacks automatiques
-fallbacks:
-  truncation_threshold: 20000  # Si > 20K records → fallback
-  split_chain: [station_month]  # Fallback vers station×mois
-
-# Rate limiting
-rate_limit:
-  target_rps: 0.7  # 0.7 requêtes par seconde
-  max_concurrency: 1
-```
-
-### Modes de Slicing DLT
-
-1. **`global`** : Une seule requête globale
-2. **`datetime`** : Découpage temporel (quotidien/mensuel)
-3. **`station_month`** : Station × Mois (pour données historiques)
-4. **`dept_datetime`** : Département × Temps (optimisé)
-5. **`day`** : Découpage quotidien
-6. **`campaign`** : Par campagne (hydrobiologie)
+Chaque API Hub'Eau a son fichier de configuration YAML dans `configs/hubeau/` qui définit les endpoints, la pagination et les stratégies d'ingestion optimisées.
 
 ## 🎮 Jobs Dagster
 
@@ -208,25 +148,10 @@ def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
 - **Filtrage** : Seules les stations actives sont traitées
 - **Optimisation** : Évite les requêtes inutiles (0 records)
 
-## 📈 Optimisations Performance
-
-### Stratégies par API
-
-| API | Stratégie | Requêtes | Optimisation |
-|-----|-----------|----------|--------------|
-| **Température** | `dept_datetime` | ~252 | 38x moins que station×mois |
-| **Hydrométrie** | `datetime` | ~30 | Temps réel uniquement |
-| **Piézométrie** | `station_month` | ~9,120 | Fallback automatique |
-| **Qualité** | `day` | ~365 | Découpage quotidien |
-
-### Pages Optimisées
-- **Taille de page** : 20,000 records (au lieu de 1,000)
-- **Troncature** : Détection automatique à 20K records
-- **Fallback** : Découpage automatique si limite atteinte
 
 ## 🚨 Restrictions APIs Hub'Eau
 
-- **Rate limiting** : 0.5-2.0 requêtes par seconde selon l'API
+- **Rate limiting** : 0.6-2.0 requêtes par seconde selon l'API
 - **Timeout** : 60s par requête
 - **Retry** : Backoff exponentiel (2s → 120s)
 - **Concurrence** : Max 1 requête simultanée par API
