@@ -17,7 +17,7 @@ pagination:
   page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
 slicer:
-  mode: dept  # Filtrage départemental obligatoire
+  mode: dept  # ✅ Filtrage départemental obligatoire (1 département à la fois)
   param: code_departement
   values:
     - "01"
@@ -121,12 +121,12 @@ slicer:
     - "973"
     - "974"
     - "976"
-# Ajout du filtre temporel pour chaque département
+# ✅ Filtre temporel optimisé pour chaque département
 temporal_filter:
   start_param: date_debut_prelevement
   end_param: date_fin_prelevement
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 1
+  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
 fallbacks:
   truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
   split_chain: [day]  # Si troncature → découpage par jour

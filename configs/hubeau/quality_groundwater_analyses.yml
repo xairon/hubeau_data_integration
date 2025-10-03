@@ -126,7 +126,7 @@ temporal_filter:
   start_param: date_debut_prelevement
   end_param: date_fin_prelevement
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 1
+  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
 fallbacks:
   truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
   split_chain: [day]  # Si troncature → découpage par jour

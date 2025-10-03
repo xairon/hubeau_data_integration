@@ -21,12 +21,12 @@ slicer:
   mode: dept_datetime  # ✅ Mode département×temps optimisé
   start_param: date_debut_mesure
   end_param: date_fin_mesure
-  window_days: 30  # Fenêtre mensuelle
+  window_days: 30  # ✅ Fenêtre mensuelle exacte (utilise month_windows automatiquement)
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
   end_date: "2024-12-31"  # ✅ Limite à l'année 2024 uniquement
-  end_offset_days: 1
+  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
   dept_param: code_departement  # Paramètre département pour l'API
-  dept_chunk_size: 5  # 5 départements par requête (équilibre performance/limite API)
+  dept_chunk_size: 8  # ✅ Optimisé : 8 départements par requête (101÷8≈13 chunks)
   dept_list: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "971", "972", "973", "974", "976"]
 fallbacks:
   truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
@@ -58,11 +58,12 @@ comment: |
   - Fallback intelligent: Se découpe automatiquement si nécessaire
   - Compatible API: Utilise les paramètres supportés par Hub'Eau
   
-  Calcul des requêtes:
-  - 101 départements ÷ 5 (chunk_size) = ~21 chunks
-  - 21 chunks × 12 mois = ~252 requêtes total (2024 uniquement)
+  Calcul des requêtes OPTIMISÉ:
+  - 101 départements ÷ 8 (chunk_size) = ~13 chunks
+  - 13 chunks × 12 mois exacts = ~156 requêtes total (2024 uniquement)
   - vs ancien code: 760 stations × 12 mois = 9,120 requêtes
-  - Optimisation: Pages de 20K records (au lieu de 5K) = 4x moins de pagination
+  - vs configuration précédente: 462 requêtes → 156 requêtes (3x moins !)
+  - Optimisation: Pages de 20K records + fenêtres mensuelles exactes
   
   Données:
   - Mise à jour trimestrielle depuis Naïades
