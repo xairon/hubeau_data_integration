@@ -5,7 +5,7 @@ import calendar
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, Optional
 
 import yaml
 
@@ -52,7 +52,7 @@ def month_windows(start: date, end: date) -> Iterator[tuple[date, date]]:
             cursor = date(cursor.year, cursor.month + 1, 1)
 
 
-def load_reference_list(ref_cfg: Dict[str, Any]) -> List[str]:
+def load_reference_list(ref_cfg: Dict[str, Any]) -> list[str]:
     path = Path(ref_cfg["path"])
     if not path.exists():
         raise FileNotFoundError(f"Reference file not found: {path}")
@@ -66,7 +66,7 @@ def load_reference_list(ref_cfg: Dict[str, Any]) -> List[str]:
     return values
 
 
-def _resolve_reference_values(cfg: Dict[str, Any], key: str) -> List[str]:
+def _resolve_reference_values(cfg: Dict[str, Any], key: str) -> list[str]:
     slicer_cfg = cfg.get("slicer", {})
     if key in slicer_cfg:
         values = slicer_cfg[key]
@@ -139,6 +139,56 @@ def build_slices(
             params = {param_name: dept}
             metadata = {"mode": "dept", "dept": dept, "param": param_name}
             yield Slice(params=params, slice_id=f"dept_{dept}", scope=f"dept-{dept}", metadata=metadata)
+    elif mode == "dept_datetime":
+        # Mode dept_datetime : chunking par département + temps
+        dept_list = slicer_cfg.get("dept_list")
+        if not dept_list:
+            raise ValueError("dept_datetime slicer requires dept_list")
+        
+        dept_chunk_size = slicer_cfg.get("dept_chunk_size", 5)
+        dept_param = slicer_cfg.get("dept_param", "code_departement")
+        
+        # Paramètres temporels
+        start_date = override_start or slicer_cfg.get("start_date")
+        end_offset_days = slicer_cfg.get("end_offset_days", 1)
+        if not start_date:
+            raise ValueError("dept_datetime slicer requires start_date")
+        start = date.fromisoformat(start_date)
+        today = date.today()
+        end_candidate = today - timedelta(days=end_offset_days)
+        if override_end:
+            end_candidate = min(end_candidate, date.fromisoformat(override_end))
+        window_days = slicer_cfg.get("window_days", 30)
+        start_param = slicer_cfg["start_param"]
+        end_param = slicer_cfg["end_param"]
+        
+        # Chunking par département
+        for i in range(0, len(dept_list), dept_chunk_size):
+            dept_chunk = dept_list[i:i + dept_chunk_size]
+            
+            # Chunking temporel
+            for d0, d1 in daterange(start, end_candidate, window_days):
+                params = {
+                    dept_param: ",".join(dept_chunk),
+                    start_param: d0.isoformat(),
+                    end_param: d1.isoformat(),
+                }
+                metadata = {
+                    "mode": "dept_datetime",
+                    "dept_chunk": dept_chunk,
+                    "start": d0.isoformat(),
+                    "end": d1.isoformat(),
+                    "dept_param": dept_param,
+                    "start_param": start_param,
+                    "end_param": end_param,
+                }
+                dept_str = "_".join(dept_chunk)
+                yield Slice(
+                    params=params,
+                    slice_id=f"dept_{dept_str}_{d0.isoformat()}",
+                    scope=f"dept-{dept_str}",
+                    metadata=metadata,
+                )
     elif mode == "station_month":
         stations = _resolve_reference_values(cfg, "stations")
         if not stations:
@@ -186,7 +236,7 @@ def build_slices(
         raise ValueError(f"Unsupported slicer mode: {mode}")
 
 
-def _split_slice_day(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> List[Slice]:
+def _split_slice_day(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> list[Slice]:
     meta = slice_obj.metadata
     if not meta or "start" not in meta or "end" not in meta:
         return []
@@ -194,7 +244,7 @@ def _split_slice_day(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> 
     end = date.fromisoformat(meta["end"])
     start_param = meta.get("start_param") or cfg["slicer"]["start_param"]
     end_param = meta.get("end_param") or cfg["slicer"]["end_param"]
-    result: List[Slice] = []
+    result: list[Slice] = []
     for d0, d1 in daterange(start, end, 1):
         params = dict(slice_obj.params)
         params[start_param] = d0.isoformat()
@@ -213,7 +263,7 @@ def _split_slice_day(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> 
     return result
 
 
-def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> List[Slice]:
+def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> list[Slice]:
     meta = slice_obj.metadata
     if not meta or "start" not in meta or "end" not in meta:
         return []
@@ -225,7 +275,7 @@ def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level
     start_param = meta.get("start_param") or cfg["slicer"].get("start_param", "date_debut")
     end_param = meta.get("end_param") or cfg["slicer"].get("end_param", "date_fin")
     station_param = cfg["slicer"].get("station_param", "code_station")
-    result: List[Slice] = []
+    result: list[Slice] = []
     for station in stations:
         for d0, d1 in month_windows(start, end):
             params = dict(slice_obj.params)
@@ -253,7 +303,7 @@ def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level
     return result
 
 
-def generate_fallback_slices(slice_obj: Slice, cfg: Dict[str, Any], current_level: int) -> List[Slice]:
+def generate_fallback_slices(slice_obj: Slice, cfg: Dict[str, Any], current_level: int) -> list[Slice]:
     """Generate fallback slices following the configured split chain."""
 
     chain = (cfg.get("fallbacks") or {}).get("split_chain", []) or []

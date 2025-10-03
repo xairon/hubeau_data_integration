@@ -30,10 +30,14 @@ class SlicerConfig(BaseModel):
     window_days: int | None = Field(default=None, ge=1)
     start_date: str | None = None
     end_offset_days: int | None = Field(default=1, ge=0)
+    # Paramètres pour le mode dept_datetime
+    dept_param: str | None = None
+    dept_chunk_size: int | None = Field(default=None, ge=1)
+    dept_list: list[str] | None = None
 
     @field_validator("mode")
     def validate_mode(cls, value: str) -> str:
-        allowed = {"datetime", "dept", "station_month", "campaign", "global"}
+        allowed = {"datetime", "dept", "dept_datetime", "station_month", "campaign", "global"}
         if value not in allowed:
             raise ValueError(f"Unsupported slicer mode: {value}")
         return value

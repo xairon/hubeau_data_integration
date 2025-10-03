@@ -28,6 +28,14 @@ from .dlt_assets import (
     prelevements_chroniques,
     temperature_chroniques,
     temperature_stations_reference,
+    # Nouveaux assets de stations de référence
+    hydrometry_stations_reference,
+    piezometry_stations_reference,
+    quality_rivers_stations_reference,
+    quality_groundwater_stations_reference,
+    ecoulement_stations_reference,
+    hydrobio_stations_reference,
+    prelevements_stations_reference,
 )
 
 # Sources externes (référentiels géographiques et thesaurus)
@@ -49,6 +57,17 @@ hubeau_bronze_assets_old = [
 
 # Assets de production Hub'Eau (nouvelle architecture dlt - recommandé)
 hubeau_bronze_assets_dlt = [
+    # Assets de stations de référence (pas de partition)
+    hydrometry_stations_reference,
+    piezometry_stations_reference,
+    quality_rivers_stations_reference,
+    quality_groundwater_stations_reference,
+    ecoulement_stations_reference,
+    hydrobio_stations_reference,
+    prelevements_stations_reference,
+    temperature_stations_reference,
+    
+    # Assets d'observations/analyses (avec partitions)
     hydrobio_taxons,
     hydrobio_indices,
     hydrometry_observations,
@@ -58,7 +77,6 @@ hubeau_bronze_assets_dlt = [
     ecoulement_observations,
     prelevements_chroniques,
     temperature_chroniques,
-    temperature_stations_reference,
 ]
 
 # Assets externes (référentiels complémentaires)
@@ -83,6 +101,14 @@ __all__ = [
     "prelevements_chroniques",
     "temperature_chroniques",
     "temperature_stations_reference",
+    # Nouveaux assets de stations de référence
+    "hydrometry_stations_reference",
+    "piezometry_stations_reference",
+    "quality_rivers_stations_reference",
+    "quality_groundwater_stations_reference",
+    "ecoulement_stations_reference",
+    "hydrobio_stations_reference",
+    "prelevements_stations_reference",
     
     # Assets Hub'Eau Bronze (ancienne architecture - deprecated)
     "hubeau_bronze_assets_old",

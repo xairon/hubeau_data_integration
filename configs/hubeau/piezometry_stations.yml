@@ -1,0 +1,46 @@
+name: piezometry_stations
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
+path: /stations
+method: GET
+params_default:
+  format: json
+  size: 5000
+records_path: $.data
+primary_keys: [code_bss]
+replication_key: date_maj_infos
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 5000
+  until_expr: "len($.data) == 0"
+slicer:
+  mode: global  # Pas de filtrage nécessaire - récupération globale
+rate_limit:
+  target_rps: 2.0
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Piézométrie Hub'Eau v1 - Référentiel des stations piézométriques
+  
+  📊 Données de référence:
+  - ~5,000 stations piézométriques (BSS - Banque du Sous-Sol)
+  - Données de référence (pas de partition temporelle)
+  - Mise à jour occasionnelle des informations de station
+  
+  🎯 Utilisation:
+  - Référentiel pour les chroniques piézométriques (chroniques_tr, chroniques)
+  - Filtrage des stations actives pour les observations
+  - Informations géographiques et techniques des stations
+  
+  📋 Champs clés:
+  - code_bss: Identifiant BSS unique de la station
+  - nom_station: Nom de la station
+  - coordonnee_x, coordonnee_y: Coordonnées géographiques
+  - profondeur_nappe: Profondeur de la nappe (m)
+  - code_departement: Code département
+  - en_service: Station en service (true/false)
+  
+  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-niveaux-nappes

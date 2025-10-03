@@ -7,7 +7,7 @@ import time
 import logging
 from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterator, List, Optional
+from typing import Any, Deque, Dict, Iterator, Optional
 
 import dlt
 from jsonpath_ng import parse
@@ -29,6 +29,24 @@ if not logger.handlers:
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+
+
+def _replace_templates(config: Dict[str, Any], partition_date: str) -> Dict[str, Any]:
+    """Remplace les templates {{ partition_date }} dans la configuration."""
+    import copy
+    import json
+    
+    # Créer une copie profonde pour éviter de modifier l'original
+    config_copy = copy.deepcopy(config)
+    
+    # Convertir en JSON string pour remplacer facilement
+    config_str = json.dumps(config_copy)
+    
+    # Remplacer {{ partition_date }} par la vraie date
+    config_str = config_str.replace('"{{ partition_date }}"', f'"{partition_date}"')
+    
+    # Reconvertir en dict
+    return json.loads(config_str)
 
 
 def _build_params(cfg: Dict[str, Any], slice_obj: Slice, page: int | None = None, cursor_value: str | None = None) -> Dict[str, Any]:
@@ -129,7 +147,8 @@ def _should_stop_pagination(
 def hubeau_source(
     cfg: Dict[str, Any],
     client: Optional[HttpClient] = None,
-    dagster_log: Optional[logging.Logger] = None
+    dagster_log: Optional[logging.Logger] = None,
+    stations_data: Optional[list[str]] = None
 ) -> dlt.sources:
     """dlt source for the Hub'Eau APIs."""
     validated_cfg = validate_config(cfg)
@@ -158,6 +177,13 @@ def hubeau_source(
     def stream() -> Iterator[Dict[str, Any]]:
         pagination = resolved_cfg.get("pagination") or {}
         method = resolved_cfg.get("method", "GET").upper()
+        # Si des stations sont fournies, les ajouter à la config pour le slicing
+        if stations_data:
+            slicer_cfg = resolved_cfg.get("slicer", {})
+            if slicer_cfg.get("mode") == "station_month" and slicer_cfg.get("stations_source") == "dagster_asset":
+                slicer_cfg["stations"] = stations_data
+                resolved_cfg["slicer"] = slicer_cfg
+        
         slices: Deque[Slice] = deque(build_slices(resolved_cfg))
         
         # Statistiques globales
@@ -328,16 +354,29 @@ def run_pipeline(
     layout: Optional[str] = None,
     state_fs_options: Optional[Dict[str, Any]] = None,
     dagster_log: Optional[logging.Logger] = None,
+    stations_data: Optional[list[str]] = None,
+    partition_date: Optional[str] = None,
 ) -> dlt.LoadInfo:
     validated_cfg = validate_config(cfg)
     resolved_cfg = validated_cfg.model_dump(mode="python")
 
     destination_kwargs: Dict[str, Any] = {}
     resolved_bucket = bucket_url or resolved_cfg.get("bucket_url")
+    
+    # Configuration MinIO par défaut si pas de bucket spécifié
     if not resolved_bucket:
-        env_path = os.getenv("DESTINATION__FILESYSTEM__PATH")
-        if env_path:
-            resolved_bucket = Path(env_path).expanduser().resolve().as_uri()
+        minio_endpoint = os.getenv("AWS_ENDPOINT_URL", "http://minio:9000")
+        minio_bucket = os.getenv("MINIO_BRONZE_BUCKET", "bronze")
+        resolved_bucket = f"s3://{minio_bucket}"
+        
+        # Configuration des credentials MinIO
+        destination_kwargs["credentials"] = {
+            "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID", "minioadmin"),
+            "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+            "endpoint_url": minio_endpoint,
+            "region_name": os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        }
+    
     if resolved_bucket:
         destination_kwargs["bucket_url"] = resolved_bucket
     if credentials:
@@ -371,8 +410,12 @@ def run_pipeline(
     
     pipeline_start_time = time.time()
     
+    # Remplacer les templates dans la configuration
+    if partition_date:
+        resolved_cfg = _replace_templates(resolved_cfg, partition_date)
+    
     with HttpClient(resolved_cfg) as http_client:
-        load_info = pipeline.run(hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log))
+        load_info = pipeline.run(hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log, stations_data=stations_data))
 
     pipeline_duration = time.time() - pipeline_start_time
     

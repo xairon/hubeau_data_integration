@@ -1,0 +1,36 @@
+name: ecoulement_stations
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
+path: /stations
+method: GET
+params_default:
+  format: json
+  size: 5000
+records_path: $.data
+primary_keys: [code_station]
+replication_key: date_maj_infos
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 5000
+  until_expr: "len($.data) == 0"
+slicer:
+  mode: global  # Pas de filtrage nécessaire - récupération globale
+rate_limit:
+  target_rps: 2.0
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Écoulement Hub'Eau (ONDE) - Référentiel des stations d'observation
+  
+  📊 Données de référence:
+  - ~3,500 stations d'observation d'écoulement
+  - Données de référence (pas de partition temporelle)
+  - Mise à jour occasionnelle des informations de station
+  
+  🎯 Utilisation:
+  - Référentiel pour les observations d'écoulement
+  - Filtrage des stations actives pour les observations
+  - Informations géographiques et techniques des stations
