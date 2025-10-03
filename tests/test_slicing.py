@@ -35,8 +35,14 @@ def test_build_datetime_slices(monkeypatch, datetime_cfg):
 
 
 def test_needs_truncation_default():
-    assert needs_truncation(25_000, {})
-    assert not needs_truncation(1_000, {})
+    assert not needs_truncation(25_000, {})
+
+
+def test_needs_truncation_with_threshold():
+    cfg = {"fallbacks": {"truncation_threshold": 10_000}}
+    assert needs_truncation(10_000, cfg)
+    assert needs_truncation(25_000, cfg)
+    assert not needs_truncation(9_999, cfg)
 
 
 def test_fallback_day(monkeypatch, datetime_cfg):
