@@ -46,10 +46,10 @@ Construire un entrepôt de données structuré permettant :
 - Visualisations et dashboards
 - Services de données pour applications
 
-### 3. Optimisation Performance
-- Réduction de 38x du nombre de requêtes API (ex: température)
-- Pages optimisées (20K records au lieu de 1K)
+### 3. Performance et Fiabilité
+- Gestion optimisée des volumes de données
 - Filtrage intelligent des stations actives
+- Respect des contraintes techniques des APIs
 
 ## 📈 Partitions et Fréquence
 
@@ -67,10 +67,10 @@ Construire un entrepôt de données structuré permettant :
 ## 🔧 Fonctionnalités Clés
 
 ### Ingestion Intelligente
-- **Slicing adaptatif** : Découpage automatique selon le volume de données
-- **Fallbacks automatiques** : Passage à des stratégies plus granulaires si limite atteinte
+- **Découpage adaptatif** : Gestion automatique des volumes de données
+- **Fallbacks automatiques** : Stratégies de récupération en cas de limite
 - **Rate limiting** : Respect des contraintes API Hub'Eau
-- **Retry intelligent** : Backoff exponentiel avec gestion d'erreurs
+- **Gestion d'erreurs** : Retry intelligent avec backoff exponentiel
 
 ### Monitoring et Observabilité
 - **UI Dagster** : Interface de monitoring des pipelines
@@ -80,7 +80,7 @@ Construire un entrepôt de données structuré permettant :
 
 ### Scalabilité
 - **Architecture Docker** : Déploiement containerisé
-- **Bases spécialisées** : Optimisation par type de données
+- **Bases spécialisées** : TimescaleDB, PostGIS, Neo4j selon le type de données
 - **Partitioning automatique** : Gestion des volumes importants
 
 ## 🎓 Contexte Académique
