@@ -4,50 +4,14 @@
 
 ```mermaid
 graph TB
-    subgraph Sources["Sources de Donnees"]
-        H1["API Hydrometrie"]
-        H2["API Piezometrie"]
-        H3["API Qualite"]
-        H4["API Temperature"]
-        H5["API Ecoulement"]
-        H6["API Hydrobiologie"]
-        H7["API Prelevements"]
-    end
-    
-    subgraph Orchestration["Orchestration"]
-        DAG["Dagster"]
-    end
-    
-    subgraph DataLake["Data Lake"]
-        MINIO["MinIO<br/>Bronze Layer"]
-    end
-    
-    subgraph Bases["Bases Specialisees"]
-        TS["TimescaleDB<br/>Time Series"]
-        PG["PostGIS<br/>Geospatial"]
-        NEO["Neo4j<br/>Graph"]
-    end
-    
-    subgraph Analytics["Analytics"]
-        GOLD["Gold Layer<br/>Metriques & Dashboards"]
-    end
-    
-    H1 --> DAG
-    H2 --> DAG
-    H3 --> DAG
-    H4 --> DAG
-    H5 --> DAG
-    H6 --> DAG
-    H7 --> DAG
-    
-    DAG --> MINIO
-    MINIO --> TS
-    MINIO --> PG
-    MINIO --> NEO
-    
-    TS --> GOLD
-    PG --> GOLD
-    NEO --> GOLD
+    A[APIs Hubeau] --> B[Dagster]
+    B --> C[MinIO]
+    C --> D[TimescaleDB]
+    C --> E[PostGIS]
+    C --> F[Neo4j]
+    D --> G[Analytics]
+    E --> G
+    F --> G
 ```
 
 ## Choix Architecturaux
@@ -93,37 +57,12 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph Bronze["Bronze Layer"]
-        BRONZE["MinIO<br/>Donnees Brutes<br/>JSON + Metadonnees"]
-    end
-    
-    subgraph Silver["Silver Layer"]
-        SILVER1["TimescaleDB<br/>Time Series<br/>Compression"]
-        SILVER2["PostGIS<br/>Geometries<br/>Indexes Spatiaux"]
-        SILVER3["Neo4j<br/>Relations<br/>Sandre/SOSA"]
-    end
-    
-    subgraph Gold["Gold Layer"]
-        GOLD1["Dashboards<br/>Metriques"]
-        GOLD2["APIs<br/>Services"]
-        GOLD3["Rapports<br/>Analytics"]
-    end
-    
-    BRONZE --> SILVER1
-    BRONZE --> SILVER2
-    BRONZE --> SILVER3
-    
-    SILVER1 --> GOLD1
-    SILVER2 --> GOLD2
-    SILVER3 --> GOLD3
-    
-    style BRONZE fill:#cd7f32
-    style SILVER1 fill:#c0c0c0
-    style SILVER2 fill:#c0c0c0
-    style SILVER3 fill:#c0c0c0
-    style GOLD1 fill:#ffd700
-    style GOLD2 fill:#ffd700
-    style GOLD3 fill:#ffd700
+    A[Bronze MinIO] --> B[Silver TimescaleDB]
+    A --> C[Silver PostGIS]
+    A --> D[Silver Neo4j]
+    B --> E[Gold Analytics]
+    C --> E
+    D --> E
 ```
 
 ### Bronze Layer (MinIO)
@@ -151,26 +90,26 @@ graph LR
 
 ```mermaid
 sequenceDiagram
-    participant API as "APIs Hubeau"
-    participant DLT as "DLT Pipeline"
-    participant MINIO as "MinIO Bronze"
-    participant DB as "Bases Specialisees"
-    participant GOLD as "Gold Analytics"
+    participant API as APIs
+    participant DLT as DLT Pipeline
+    participant MINIO as MinIO
+    participant DB as Databases
+    participant GOLD as Analytics
     
     Note over API,GOLD: Ingestion Automatisee
     
-    API->>DLT: Requete avec slicing intelligent
+    API->>DLT: Requete avec slicing
     DLT->>DLT: Pagination + Fallbacks
     DLT->>MINIO: Stockage JSON brut
-    MINIO->>DB: Transformation par cas d usage
+    MINIO->>DB: Transformation
     
-    Note over DB: TimescaleDB: Time Series<br/>PostGIS: Geometries<br/>Neo4j: Relations
+    Note over DB: TimescaleDB PostGIS Neo4j
     
-    DB->>GOLD: Agregations et metriques
-    GOLD->>GOLD: Dashboards et APIs
+    DB->>GOLD: Agregations
+    GOLD->>GOLD: Dashboards APIs
     
     Note over API,GOLD: Monitoring Dagster
-    DLT->>DLT: Logs et metriques
+    DLT->>DLT: Logs metriques
     DLT->>DLT: Retry automatique
 ```
 
@@ -178,24 +117,24 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph Orchestration["Orchestration"]
-        DAGSTER["Dagster<br/>Pipelines & Monitoring"]
+    subgraph Orchestration
+        DAGSTER[Dagster Pipelines]
     end
     
-    subgraph DataLoading["Data Loading"]
-        DLT["DLT<br/>Data Load Tool<br/>Slicing & Fallbacks"]
+    subgraph DataLoading
+        DLT[DLT Data Load Tool]
     end
     
-    subgraph Storage["Storage"]
-        MINIO["MinIO<br/>S3-Compatible<br/>Bronze Layer"]
-        TS["TimescaleDB<br/>Time Series<br/>Compression"]
-        PG["PostGIS<br/>Geospatial<br/>Indexes"]
-        NEO["Neo4j<br/>Graph<br/>Relations"]
+    subgraph Storage
+        MINIO[MinIO S3-Compatible]
+        TS[TimescaleDB Time Series]
+        PG[PostGIS Geospatial]
+        NEO[Neo4j Graph]
     end
     
-    subgraph Services["Services"]
-        UI["Dagster UI<br/>Monitoring"]
-        API["Analytics APIs<br/>Services"]
+    subgraph Services
+        UI[Dagster UI]
+        API[Analytics APIs]
     end
     
     DAGSTER --> DLT
