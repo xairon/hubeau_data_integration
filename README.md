@@ -201,10 +201,9 @@ docker-compose exec minio mc ls minio/bronze/
 
 ## 📚 Documentation Complète
 
-- **[Guide DLT Complet](docs/GUIDE_DLT_COMPLET.md)** : Architecture et configuration
-- **[Configuration APIs](docs/CONFIGURATION_APIS.md)** : Détails des fichiers YAML
-- **[Architecture Moderne](docs/ARCHITECTURE_MODERNE.md)** : Stack technique
-- **[Migration DLT](docs/MIGRATION_DLT.md)** : Historique des changements
+- **[Architecture Moderne](docs/ARCHITECTURE_MODERNE.md)** : Stack technique et choix architecturaux
+- **[APIs Hub'Eau](docs/APIS_HUBEAU_COMPLETE.md)** : Documentation des APIs intégrées
+- **[Stratégies de Stockage](docs/DATA_STORAGE_STRATEGY.md)** : Architecture medallion et bases de données
 
 ## 🤝 Contribution
 
