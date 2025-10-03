@@ -211,7 +211,6 @@ docker-compose exec minio mc ls minio/bronze/
 
 - **[Description du Projet](PROJET.md)** : Objectifs, données intégrées, architecture
 - **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** : Comprendre les fichiers de configuration
-- **[Schémas d'Architecture](docs/ARCHITECTURE_SCHEMAS.md)** : Diagrammes Mermaid (medallion, stack, flux)
 - **[Architecture Moderne](docs/ARCHITECTURE_MODERNE.md)** : Stack technique et choix architecturaux
 - **[APIs Hub'Eau](docs/APIS_HUBEAU_COMPLETE.md)** : Documentation des APIs intégrées
 - **[Stratégies de Stockage](docs/DATA_STORAGE_STRATEGY.md)** : Architecture medallion et bases de données

@@ -93,7 +93,6 @@ Ce projet est développé dans le cadre académique de l'**Université de Tours*
 ## 📚 Documentation
 
 - **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** : Guide complet des configurations
-- **[Schémas d'Architecture](docs/ARCHITECTURE_SCHEMAS.md)** : Diagrammes techniques
 - **[APIs Hub'Eau](docs/APIS_HUBEAU_COMPLETE.md)** : Documentation des sources
 - **[Architecture Moderne](docs/ARCHITECTURE_MODERNE.md)** : Choix techniques
 
