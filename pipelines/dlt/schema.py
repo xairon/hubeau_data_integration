@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, ConfigDict
 
 
 class PaginationConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     type: str = Field(default="page")
     page_param: str = Field(default="page")
     page_size_param: str = Field(default="size")
@@ -15,7 +17,14 @@ class PaginationConfig(BaseModel):
 
 
 class SlicerConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     mode: str
+    param: str | None = None
+    values: list[str] | None = None
+    reference: Dict[str, Any] | None = None
+    stations: list[str] | None = None
+    campaigns: list[Any] | None = None
     start_param: str | None = None
     end_param: str | None = None
     window_days: int | None = Field(default=None, ge=1)
@@ -31,6 +40,8 @@ class SlicerConfig(BaseModel):
 
 
 class ConfigModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     name: str
     source: str
     base_url: str
