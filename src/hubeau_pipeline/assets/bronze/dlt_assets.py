@@ -1,5 +1,7 @@
 from typing import Any, Dict, Optional
 
+import time
+
 import dlt
 from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
 from dlt.common.typing import TSecretValue

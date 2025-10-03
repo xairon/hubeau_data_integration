@@ -193,10 +193,43 @@ def build_slices(
         stations = _resolve_reference_values(cfg, "stations")
         if not stations:
             raise ValueError("station_month slicer requires stations/reference")
-        start_date = date.fromisoformat(slicer_cfg.get("start_date"))
+
+        # Autoriser les alias historiques et valeurs dynamiques (ex: stations injectées via Dagster)
+        window_days = slicer_cfg.get("window_days", 30)
+        if not isinstance(window_days, int) or window_days <= 0:
+            window_days = 30
+
+        start_date_raw = slicer_cfg.get("start_date")
+        if start_date_raw:
+            if isinstance(start_date_raw, date):
+                start_date = start_date_raw
+            else:
+                try:
+                    start_date = date.fromisoformat(str(start_date_raw))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "station_month slicer start_date must be ISO formatted (YYYY-MM-DD)"
+                    ) from exc
+        else:
+            # Fallback intelligent : on se limite à la fenêtre récente (ex: API temps réel)
+            start_date = date.today() - timedelta(days=window_days)
+
         end_offset_days = slicer_cfg.get("end_offset_days", 1)
+        if not isinstance(end_offset_days, int) or end_offset_days < 0:
+            end_offset_days = 1
         end_candidate = date.today() - timedelta(days=end_offset_days)
-        station_param = slicer_cfg.get("station_param", "code_station")
+        if start_date > end_candidate:
+            start_date = end_candidate
+
+        # Normaliser la fenêtre calculée pour les logs, les fallbacks et les tests
+        slicer_cfg["start_date"] = start_date.isoformat()
+        slicer_cfg["end_date"] = end_candidate.isoformat()
+
+        station_param = (
+            slicer_cfg.get("station_param")
+            or slicer_cfg.get("param")
+            or "code_station"
+        )
         start_param = slicer_cfg.get("start_param", "date_debut")
         end_param = slicer_cfg.get("end_param", "date_fin")
         for station in stations:
