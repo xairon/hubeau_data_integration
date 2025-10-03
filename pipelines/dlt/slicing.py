@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import yaml
 
-TRUNCATION_DEFAULT = 20_000
+TRUNCATION_DEFAULT = float('inf')  # Par défaut, pas de troncature (récupère tout)
 
 
 @dataclass
@@ -100,7 +100,7 @@ def build_slices(
     cfg: Dict[str, Any], *, override_start: Optional[str] = None, override_end: Optional[str] = None
 ) -> Iterable[Slice]:
     slicer_cfg = cfg.get("slicer", {})
-    mode = slicer_cfg.get("mode", "datetime")
+    mode = slicer_cfg.get("mode", "global")  # Par défaut, mode global (une seule slice)
 
     if mode == "datetime":
         start_date = override_start or slicer_cfg.get("start_date")
@@ -125,6 +125,9 @@ def build_slices(
                 "end_param": end_param,
             }
             yield Slice(params=params, slice_id=f"{d0.isoformat()}_{d1.isoformat()}", metadata=metadata)
+    elif mode == "global":
+        # Mode global : une seule slice sans paramètres de filtrage
+        yield Slice(params={}, slice_id="global", scope="global", metadata={"mode": "global"})
     elif mode == "dept":
         departments = slicer_cfg.get("values")
         if not departments:

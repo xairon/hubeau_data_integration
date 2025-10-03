@@ -11,18 +11,20 @@ records_path: $.data
 primary_keys: [code_station, date_obs, grandeur_hydro]
 replication_key: date_obs
 pagination:
-  type: page
-  page_param: cursor
+  type: cursor
+  cursor_param: cursor
+  cursor_path: $.next
   page_size_param: size
   page_size: 1000
-  until_expr: "len($.data) < 1000"
+  until_expr: "len($.data) == 0"
 slicer:
-  mode: datetime
-  start_param: date_debut_obs
-  end_param: date_fin_obs
-  window_days: 7
-  start_date: "2023-01-01"
-  end_offset_days: 30  # ⚠️ RESTRICTION API v2: Max 30 jours
+  mode: global  # ⚠️ API v2 ne permet pas de filtrage par dates
+  # mode: datetime
+  # start_param: date_debut_obs
+  # end_param: date_fin_obs
+  # window_days: 7
+  # start_date: "2024-09-01"  # ⚠️ RESTRICTION API v2: Max 30 jours - utiliser dates récentes
+  # end_offset_days: 30  # ⚠️ RESTRICTION API v2: Max 30 jours
 rate_limit:
   target_rps: 2.0  # 2 requêtes par seconde max
   max_concurrency: 1
