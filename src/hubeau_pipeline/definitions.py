@@ -13,13 +13,17 @@ from .jobs import all_jobs
 # Import des schedules
 from .schedules import all_schedules
 
+# Import des capteurs
+from .sensors import all_sensors
+
 # Import des resources
 from .resources import RESOURCES
 
 # Définitions centrales
 defs = Definitions(
     assets=all_assets,
-    jobs=all_jobs, 
+    jobs=all_jobs,
     schedules=all_schedules,
-    resources=RESOURCES
+    resources=RESOURCES,
+    sensors=all_sensors,
 )
