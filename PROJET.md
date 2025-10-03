@@ -2,7 +2,7 @@
 
 ## 🎯 Objectif
 
-Ce projet vise à intégrer les données du BRGM (Bureau de Recherches Géologiques et Minières) disponibles via les APIs Hub'Eau dans un entrepôt de données moderne et performant.
+Ce projet vise à intégrer les données du BRGM (Bureau de Recherches Géologiques et Minières) disponibles via les APIs Hub'Eau dans un entrepôt de données.
 
 ## 📊 Données Intégrées
 
@@ -51,18 +51,6 @@ Construire un entrepôt de données structuré permettant :
 - Filtrage intelligent des stations actives
 - Respect des contraintes techniques des APIs
 
-## 📈 Partitions et Fréquence
-
-### Données Temps Réel (Daily)
-- **Hydrométrie** : Observations des 30 derniers jours
-- **Écoulement** : Observations saisonnières
-
-### Données Historiques (Yearly)
-- **Piézométrie** : Chroniques historiques
-- **Qualité** : Analyses par année
-- **Température** : Chroniques annuelles
-- **Hydrobiologie** : Indices et taxons
-- **Prélèvements** : Chroniques de prélèvements
 
 ## 🔧 Fonctionnalités Clés
 
@@ -85,11 +73,7 @@ Construire un entrepôt de données structuré permettant :
 
 ## 🎓 Contexte Académique
 
-Ce projet est développé dans le cadre académique de l'**Université de Tours** et vise à :
-- Contribuer à la recherche en sciences de l'eau
-- Fournir un outil réutilisable pour la communauté scientifique
-- Démonstrer les bonnes pratiques en ingénierie des données
-
+Ce projet est développé dans le cadre académique de l'**Université de Tours** et vise à fournir un outil réutilisable pour la communauté scientifique
 ## 📚 Documentation
 
 - **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** : Guide complet des configurations

@@ -347,20 +347,6 @@ Ce document décrit les 8 APIs Hub'Eau intégrées dans notre pipeline. Les info
 - **Backoff initial** : 2.0 secondes
 - **Backoff maximum** : 120.0 secondes
 
-### Temporalité d'Intégration
-
-#### Données Temps Réel (Daily Partitions)
-- **Hydrométrie** : Observations des 30 derniers jours
-- **Écoulement** : Observations saisonnières (mai-octobre)
-
-#### Données Historiques (Yearly Partitions)
-- **Piézométrie** : Chroniques historiques complètes
-- **Qualité Cours d'Eau** : Analyses par année
-- **Qualité Eaux Souterraines** : Analyses par année
-- **Température** : Chroniques annuelles complètes
-- **Hydrobiologie** : Indices et taxons par campagne
-- **Prélèvements** : Chroniques de prélèvements
-
 ## Documentation Officielle
 
 Pour plus de détails sur chaque API, consultez la documentation officielle Hub'Eau :

@@ -2,7 +2,7 @@
 
 Pipeline d'intégration des données Hub'Eau (8 APIs) avec architecture medallion et orchestration Dagster + DLT.
 
-## 🏗️ Architecture Moderne
+## 🏗️ Architecture
 
 ```mermaid
 graph LR
@@ -43,19 +43,6 @@ docker-compose up -d
 curl http://localhost:8080  # Dagster UI
 curl http://localhost:9001  # MinIO
 ```
-
-## 📊 APIs Hub'Eau Intégrées
-
-| API | Endpoints | Partitioning |
-|-----|-----------|--------------|
-| **Hydrométrie** | stations, observations_tr | Daily |
-| **Piézométrie** | stations, chroniques | Yearly |
-| **Qualité Cours d'Eau** | stations, analyses | Yearly |
-| **Qualité Eaux Souterraines** | stations, analyses | Yearly |
-| **Température** | stations, chronique | Yearly |
-| **ONDE (Écoulement)** | stations, observations | Daily |
-| **Hydrobiologie** | stations, indices, taxons | Yearly |
-| **Prélèvements** | stations, chroniques | Yearly |
 
 ## 🎯 Accès aux Services
 
