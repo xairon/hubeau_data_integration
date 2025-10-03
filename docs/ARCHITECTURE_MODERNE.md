@@ -2,16 +2,30 @@
 
 ## Vue d'Ensemble
 
-```mermaid
-graph TB
-    A[APIs Hubeau] --> B[Dagster]
-    B --> C[MinIO]
-    C --> D[TimescaleDB]
-    C --> E[PostGIS]
-    C --> F[Neo4j]
-    D --> G[Analytics]
-    E --> G
-    F --> G
+```
+┌─────────────────┐    ┌──────────┐    ┌─────────┐
+│   APIs Hubeau   │───▶│ Dagster  │───▶│  MinIO  │
+│                 │    │          │    │ Bronze  │
+│ • Hydrometrie   │    │          │    │         │
+│ • Piezometrie   │    │          │    │         │
+│ • Qualite       │    │          │    │         │
+│ • Temperature   │    │          │    │         │
+│ • Ecoulement    │    │          │    │         │
+│ • Hydrobiologie │    │          │    │         │
+│ • Prelevements  │    │          │    │         │
+└─────────────────┘    └──────────┘    └─────────┘
+                                              │
+                                              ▼
+                    ┌─────────────┬─────────────┬─────────────┐
+                    │TimescaleDB  │   PostGIS   │    Neo4j    │
+                    │Time Series  │ Geospatial  │    Graph    │
+                    └─────────────┴─────────────┴─────────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────┐
+                                    │   Analytics     │
+                                    │   Gold Layer    │
+                                    └─────────────────┘
 ```
 
 ## Choix Architecturaux
@@ -55,14 +69,35 @@ graph TB
 
 ## Architecture Medallion
 
-```mermaid
-graph LR
-    A[Bronze MinIO] --> B[Silver TimescaleDB]
-    A --> C[Silver PostGIS]
-    A --> D[Silver Neo4j]
-    B --> E[Gold Analytics]
-    C --> E
-    D --> E
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        BRONZE LAYER                             │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    MinIO                                 │   │
+│  │  • Donnees brutes JSON                                  │   │
+│  │  • Metadonnees d'ingestion                              │   │
+│  │  • Partitioning par API et date                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        SILVER LAYER                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │TimescaleDB  │  │   PostGIS   │  │    Neo4j    │             │
+│  │Time Series  │  │ Geospatial  │  │    Graph    │             │
+│  │Compression  │  │   Indexes   │  │ Relations   │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         GOLD LAYER                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ Dashboards  │  │    APIs     │  │   Rapports  │             │
+│  │  Metriques  │  │  Services   │  │  Analytics  │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Bronze Layer (MinIO)
@@ -88,64 +123,82 @@ graph LR
 
 ## Flux de Données avec DLT
 
-```mermaid
-sequenceDiagram
-    participant API as APIs
-    participant DLT as DLT Pipeline
-    participant MINIO as MinIO
-    participant DB as Databases
-    participant GOLD as Analytics
-    
-    Note over API,GOLD: Ingestion Automatisee
-    
-    API->>DLT: Requete avec slicing
-    DLT->>DLT: Pagination + Fallbacks
-    DLT->>MINIO: Stockage JSON brut
-    MINIO->>DB: Transformation
-    
-    Note over DB: TimescaleDB PostGIS Neo4j
-    
-    DB->>GOLD: Agregations
-    GOLD->>GOLD: Dashboards APIs
-    
-    Note over API,GOLD: Monitoring Dagster
-    DLT->>DLT: Logs metriques
-    DLT->>DLT: Retry automatique
+```
+1. INGESTION AUTOMATISEE
+   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+   │ APIs Hubeau │───▶│ DLT Pipeline│───▶│ MinIO Bronze│
+   │             │    │             │    │             │
+   │ • Slicing   │    │ • Pagination│    │ • JSON brut │
+   │ • Rate limit│    │ • Fallbacks │    │ • Metadonnees│
+   └─────────────┘    └─────────────┘    └─────────────┘
+                                │
+                                ▼
+2. TRANSFORMATION
+   ┌─────────────┬─────────────┬─────────────┐
+   │TimescaleDB  │   PostGIS   │    Neo4j    │
+   │Time Series  │ Geospatial  │    Graph    │
+   │Compression  │   Indexes   │ Relations   │
+   └─────────────┴─────────────┴─────────────┘
+                                │
+                                ▼
+3. ANALYTICS
+   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+   │ Dashboards  │    │    APIs     │    │   Rapports  │
+   │  Metriques  │    │  Services   │    │  Analytics  │
+   └─────────────┘    └─────────────┘    └─────────────┘
+
+MONITORING DAGSTER
+• Logs et metriques
+• Retry automatique
+• Alertes
 ```
 
 ## Stack Technologique
 
-```mermaid
-graph TB
-    subgraph Orchestration
-        DAGSTER[Dagster Pipelines]
-    end
-    
-    subgraph DataLoading
-        DLT[DLT Data Load Tool]
-    end
-    
-    subgraph Storage
-        MINIO[MinIO S3-Compatible]
-        TS[TimescaleDB Time Series]
-        PG[PostGIS Geospatial]
-        NEO[Neo4j Graph]
-    end
-    
-    subgraph Services
-        UI[Dagster UI]
-        API[Analytics APIs]
-    end
-    
-    DAGSTER --> DLT
-    DLT --> MINIO
-    MINIO --> TS
-    MINIO --> PG
-    MINIO --> NEO
-    
-    DAGSTER --> UI
-    TS --> API
-    PG --> API
-    NEO --> API
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATION                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    Dagster                              │   │
+│  │  • Pipelines & Monitoring                               │   │
+│  │  • Schedules & Sensors                                  │   │
+│  │  • UI integree                                          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATA LOADING                                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    DLT                                 │   │
+│  │  • Data Load Tool                                      │   │
+│  │  • Slicing & Fallbacks                                 │   │
+│  │  • Retry automatique                                   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      STORAGE                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │    MinIO    │  │TimescaleDB  │  │   PostGIS   │             │
+│  │S3-Compatible│  │Time Series  │  │ Geospatial  │             │
+│  │Bronze Layer │  │Compression  │  │   Indexes   │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+│  ┌─────────────┐                                               │
+│  │    Neo4j    │                                               │
+│  │    Graph    │                                               │
+│  │ Relations   │                                               │
+│  └─────────────┘                                               │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     SERVICES                                   │
+│  ┌─────────────┐  ┌─────────────┐                              │
+│  │ Dagster UI  │  │Analytics APIs│                              │
+│  │ Monitoring  │  │   Services   │                              │
+│  └─────────────┘  └─────────────┘                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
