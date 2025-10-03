@@ -4,8 +4,16 @@ Pipeline d'intégration des données Hub'Eau (8 APIs) avec architecture medallio
 
 ## 🏗️ Architecture Moderne
 
-```
-Hub'Eau APIs → DLT Pipeline → MinIO (Bronze) → Specialized DBs (Silver) → Analytics (Gold)
+```mermaid
+graph LR
+    A[Hub'Eau APIs] --> B[DLT Pipeline]
+    B --> C[MinIO Bronze]
+    C --> D[TimescaleDB]
+    C --> E[PostGIS]
+    C --> F[Neo4j]
+    D --> G[Analytics Gold]
+    E --> G
+    F --> G
 ```
 
 **Stack technique :**
@@ -201,6 +209,8 @@ docker-compose exec minio mc ls minio/bronze/
 
 ## 📚 Documentation Complète
 
+- **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** : Comprendre les fichiers de configuration
+- **[Schémas d'Architecture](docs/ARCHITECTURE_SCHEMAS.md)** : Diagrammes Mermaid (medallion, stack, flux)
 - **[Architecture Moderne](docs/ARCHITECTURE_MODERNE.md)** : Stack technique et choix architecturaux
 - **[APIs Hub'Eau](docs/APIS_HUBEAU_COMPLETE.md)** : Documentation des APIs intégrées
 - **[Stratégies de Stockage](docs/DATA_STORAGE_STRATEGY.md)** : Architecture medallion et bases de données
