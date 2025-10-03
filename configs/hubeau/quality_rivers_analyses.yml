@@ -15,7 +15,7 @@ pagination:
   page_param: page
   page_size_param: size
   page_size: 2000
-  until_expr: "len($.data) < 2000"
+  until_expr: "len($.data) == 0"
 slicer:
   mode: dept  # Filtrage départemental obligatoire
   param: code_departement

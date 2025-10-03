@@ -15,7 +15,7 @@ pagination:
   page_param: page
   page_size_param: size
   page_size: 500
-  until_expr: "len($.data) < 500"
+  until_expr: "len($.data) == 0"
 slicer:
   mode: datetime
   start_param: date_debut_prelevement

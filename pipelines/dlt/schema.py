@@ -24,7 +24,7 @@ class SlicerConfig(BaseModel):
 
     @field_validator("mode")
     def validate_mode(cls, value: str) -> str:
-        allowed = {"datetime", "dept", "station_month", "campaign"}
+        allowed = {"datetime", "dept", "station_month", "campaign", "global"}
         if value not in allowed:
             raise ValueError(f"Unsupported slicer mode: {value}")
         return value
@@ -41,7 +41,7 @@ class ConfigModel(BaseModel):
     primary_keys: list[str]
     replication_key: str | None = None
     pagination: PaginationConfig | None = None
-    slicer: SlicerConfig
+    slicer: SlicerConfig | None = None
     fallbacks: Dict[str, Any] | None = None
     rate_limit: Dict[str, Any] | None = None
     pre_scan: Dict[str, Any] | None = None
