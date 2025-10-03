@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import yaml
 
-TRUNCATION_DEFAULT = float('inf')  # Par défaut, pas de troncature (récupère tout)
+TRUNCATION_DEFAULT = float("inf")  # Par défaut, pas de troncature (récupère toutes les données)
 
 
 @dataclass
