@@ -38,16 +38,16 @@ curl http://localhost:9001  # MinIO
 
 ## 📊 APIs Hub'Eau Intégrées
 
-| API | Endpoints | Volume | Partitioning |
-|-----|-----------|--------|--------------|
-| **Hydrométrie** | stations, observations_tr | ~50M records | Daily |
-| **Piézométrie** | stations, chroniques | ~30M records | Yearly |
-| **Qualité Cours d'Eau** | stations, analyses | ~5M records | Yearly |
-| **Qualité Eaux Souterraines** | stations, analyses | ~2M records | Yearly |
-| **Température** | stations, chronique | ~10M records | Yearly |
-| **ONDE (Écoulement)** | stations, observations | ~500K records | Daily |
-| **Hydrobiologie** | stations, indices, taxons | ~1M records | Yearly |
-| **Prélèvements** | stations, chroniques | ~20M records | Yearly |
+| API | Endpoints | Partitioning |
+|-----|-----------|--------------|
+| **Hydrométrie** | stations, observations_tr | Daily |
+| **Piézométrie** | stations, chroniques | Yearly |
+| **Qualité Cours d'Eau** | stations, analyses | Yearly |
+| **Qualité Eaux Souterraines** | stations, analyses | Yearly |
+| **Température** | stations, chronique | Yearly |
+| **ONDE (Écoulement)** | stations, observations | Daily |
+| **Hydrobiologie** | stations, indices, taxons | Yearly |
+| **Prélèvements** | stations, chroniques | Yearly |
 
 ## 🎯 Accès aux Services
 

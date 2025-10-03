@@ -21,7 +21,7 @@
 #### TimescaleDB (Time Series)
 **Justification :** Optimisé pour données temporelles, compression automatique, requêtes analytiques
 - Hypertables pour partitionnement temporel automatique
-- Compression jusqu'à 90% sur données historiques
+- Compression automatique sur données historiques
 - Fonctions analytiques (LAG, LEAD, window functions)
 - Indexes B-tree et BRIN optimisés
 
@@ -101,7 +101,7 @@ async with HubeauClient(config) as client:
 - PostGIS : Partitioning spatial
 
 ### Vertical
-- Compression TimescaleDB (90% réduction)
+- Compression TimescaleDB automatique
 - Indexes optimisés par cas d'usage
 - Cache Redis pour requêtes fréquentes
 - Connection pooling
