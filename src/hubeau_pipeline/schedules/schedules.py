@@ -16,9 +16,9 @@ from ..jobs import (
 
 # Schedules nouvelle architecture dlt (recommended)
 from ..jobs.dlt_jobs import (
-    sync_hubeau_yearly,
-    sync_hubeau_daily,
-    sync_hubeau_realtime,
+    sync_all_stations,
+    sync_all_yearly_data,
+    sync_realtime_data,
 )
 
 # ====================================
@@ -70,32 +70,24 @@ old_schedules = [
 # ====================================
 
 # Define schedules for dlt jobs
-sync_hubeau_yearly_schedule = ScheduleDefinition(
-    job=sync_hubeau_yearly,
+sync_all_yearly_data_schedule = ScheduleDefinition(
+    job=sync_all_yearly_data,
     cron_schedule="0 3 1 1 *",  # Annually on January 1st at 3 AM
-    name="sync_hubeau_yearly_schedule",
+    name="sync_all_yearly_data_schedule",
     description="Annual schedule to synchronize yearly Hub'Eau data (quality, temperature, etc.).",
 )
 
-sync_hubeau_daily_schedule = ScheduleDefinition(
-    job=sync_hubeau_daily,
-    cron_schedule="0 2 * * *",  # Daily at 2 AM
-    name="sync_hubeau_daily_schedule",
-    description="Daily schedule to synchronize daily Hub'Eau data (piezometry).",
-)
-
-sync_hubeau_realtime_schedule = ScheduleDefinition(
-    job=sync_hubeau_realtime,
+sync_realtime_data_schedule = ScheduleDefinition(
+    job=sync_realtime_data,
     cron_schedule="0 * * * *",  # Hourly
-    name="sync_hubeau_realtime_schedule",
+    name="sync_realtime_data_schedule",
     description="Hourly schedule to synchronize real-time Hub'Eau data (hydrometry 30d).",
 )
 
 # Schedules nouvelle architecture dlt
 dlt_schedules = [
-    sync_hubeau_yearly_schedule,     # 1er janvier à 3h (données annuelles)
-    sync_hubeau_daily_schedule,      # Tous les jours à 2h (piézométrie)
-    sync_hubeau_realtime_schedule,   # Toutes les heures (hydrométrie temps réel)
+    sync_all_yearly_data_schedule,   # 1er janvier à 3h (données annuelles)
+    sync_realtime_data_schedule,     # Toutes les heures (hydrométrie temps réel)
 ]
 
 # ✅ NOUVELLE ARCHITECTURE: Utiliser les schedules dlt par défaut
@@ -104,9 +96,8 @@ all_schedules = dlt_schedules
 __all__ = [
     # Schedules nouvelle architecture dlt (recommended)
     "dlt_schedules",
-    "sync_hubeau_yearly_schedule",
-    "sync_hubeau_daily_schedule",
-    "sync_hubeau_realtime_schedule",
+    "sync_all_yearly_data_schedule",
+    "sync_realtime_data_schedule",
     
     # Schedules ancienne architecture (deprecated)
     "old_schedules",

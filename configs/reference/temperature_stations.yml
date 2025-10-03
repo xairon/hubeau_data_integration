@@ -1,7 +1,0 @@
-# Liste des stations de température Hub'Eau
-# Ce fichier sera automatiquement mis à jour par un job de pré-scan
-# Source: https://hubeau.eaufrance.fr/api/v1/temperature/station
-stations: []
-# Note: Le pré-scan récupérera toutes les stations via l'endpoint /station
-# et mettra à jour ce fichier avec la liste des code_station
-

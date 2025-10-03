@@ -1,0 +1,36 @@
+name: hydrobio_stations
+source: hubeau
+dataset_name: hubeau
+base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
+path: /stations
+method: GET
+params_default:
+  format: json
+  size: 5000
+records_path: $.data
+primary_keys: [code_station_hydrobio]
+replication_key: date_maj_infos
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 5000
+  until_expr: "len($.data) == 0"
+slicer:
+  mode: global  # Pas de filtrage nécessaire - récupération globale
+rate_limit:
+  target_rps: 2.0
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Hydrobiologie Hub'Eau - Référentiel des stations hydrobiologiques
+  
+  📊 Données de référence:
+  - ~2,000 stations hydrobiologiques
+  - Données de référence (pas de partition temporelle)
+  - Mise à jour occasionnelle des informations de station
+  
+  🎯 Utilisation:
+  - Référentiel pour les indices et taxons hydrobiologiques
+  - Filtrage des stations actives pour les analyses
+  - Informations géographiques et techniques des stations

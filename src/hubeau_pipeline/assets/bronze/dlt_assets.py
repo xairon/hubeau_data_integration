@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import dlt
 from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
@@ -18,7 +18,149 @@ DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
 # Generic dlt Ingestion Asset
 # ====================================
 
-def ingest_dlt(context: AssetExecutionContext, config_path: str) -> Dict[str, Any]:
+def extract_station_codes_from_result(result: Dict[str, Any], station_type: str = "temperature") -> list[str]:
+    """
+    Extrait les codes de stations depuis le résultat d'un asset upstream.
+    Cette fonction lit les données depuis MinIO et extrait les codes de stations.
+    
+    Args:
+        result: Résultat de l'asset upstream
+        station_type: Type de stations ("temperature", "hydrometry", "piezometry", etc.)
+    """
+    import boto3
+    import json
+    import gzip
+    import os
+    
+    # Configuration MinIO depuis les variables d'environnement
+    minio_endpoint = os.getenv("AWS_ENDPOINT_URL", "http://minio:9000")
+    minio_user = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+    minio_pass = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+    bucket_name = os.getenv("MINIO_BRONZE_BUCKET", "bronze")
+    
+    try:
+        # Client S3 pour MinIO
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=minio_endpoint,
+            aws_access_key_id=minio_user,
+            aws_secret_access_key=minio_pass,
+            region_name='us-east-1'
+        )
+        
+        # Déterminer le préfixe selon le type de stations
+        station_prefixes = {
+            "temperature": "hubeau/temperature_stations/",
+            "hydrometry": "hubeau/hydrometry_stations/",
+            "piezometry": "hubeau/piezometry_stations/",
+            "quality_rivers": "hubeau/quality_rivers_stations/",
+            "quality_groundwater": "hubeau/quality_groundwater_stations/",
+            "ecoulement": "hubeau/ecoulement_stations/",
+            "hydrobio": "hubeau/hydrobio_stations/",
+            "prelevements": "hubeau/prelevements_stations/"
+        }
+        
+        prefix = station_prefixes.get(station_type, f"hubeau/{station_type}_stations/")
+        
+        # Chercher les fichiers de stations les plus récents
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=prefix
+        )
+        
+        if 'Contents' not in response:
+            print(f"⚠️ No files found in {prefix}, trying alternative paths...")
+            # Essayer d'autres chemins possibles
+            for alt_prefix in [f"{station_type}_stations/", f"bronze/{station_type}_stations/"]:
+                response = s3_client.list_objects_v2(
+                    Bucket=bucket_name,
+                    Prefix=alt_prefix
+                )
+                if 'Contents' in response:
+                    break
+        
+        if 'Contents' not in response:
+            raise ValueError(f"No {station_type} stations data found in MinIO")
+        
+        # Filtrer pour ne prendre que les fichiers JSON (pas les dossiers)
+        json_files = [f for f in response['Contents'] if f['Key'].endswith('.json')]
+        
+        if not json_files:
+            raise ValueError(f"No JSON files found in {station_type}_stations folder")
+        
+        # Prendre le fichier le plus récent
+        latest_file = max(json_files, key=lambda x: x['LastModified'])
+        file_key = latest_file['Key']
+        
+        print(f"📂 Reading {station_type} stations from: {file_key}")
+        
+        # Lire le fichier JSON (DLT stocke les données compressées)
+        obj = s3_client.get_object(Bucket=bucket_name, Key=file_key)
+        
+        # Essayer de décompresser d'abord
+        try:
+            compressed_data = obj['Body'].read()
+            decompressed_data = gzip.decompress(compressed_data)
+            content = decompressed_data.decode('utf-8')
+        except (gzip.BadGzipFile, UnicodeDecodeError):
+            # Si ce n'est pas compressé, lire directement
+            content = obj['Body'].read().decode('utf-8')
+        
+        # DLT stocke les données en JSONL (une ligne par record)
+        stations = []
+        
+        # Déterminer le champ de clé selon le type de stations
+        station_key_fields = {
+            "temperature": "code_station",
+            "hydrometry": "code_station", 
+            "piezometry": "code_bss",
+            "quality_rivers": "code_station",
+            "quality_groundwater": "code_bss",
+            "ecoulement": "code_station",
+            "hydrobio": "code_station_hydrobio",
+            "prelevements": "code_point_prelevement"
+        }
+        
+        key_field = station_key_fields.get(station_type, "code_station")
+        
+        # Parser comme JSONL (format dlt par défaut)
+        for line in content.strip().split('\n'):
+            if line.strip():
+                try:
+                    record = json.loads(line)
+                    if key_field in record:
+                        # Filtrer seulement les stations encore actives
+                        # (avec une date de fin de service récente ou nulle)
+                        date_fin_service = record.get('date_fin_service')
+                        if not date_fin_service or date_fin_service >= "2024-01-01":
+                            stations.append(record[key_field])
+                except json.JSONDecodeError:
+                    pass
+        
+        # Si JSONL n'a pas fonctionné, essayer comme JSON normal
+        if not stations:
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    # Format direct : liste de stations
+                    stations = [station.get(key_field) for station in data if isinstance(station, dict) and key_field in station]
+                elif isinstance(data, dict) and 'data' in data:
+                    # Format API Hub'Eau : {"data": [...]}
+                    stations = [station.get(key_field) for station in data['data'] if station.get(key_field)]
+            except json.JSONDecodeError:
+                pass
+        
+        print(f"✅ Extracted {len(stations)} {station_type} station codes from MinIO")
+        return stations
+        
+    except Exception as e:
+        # En cas d'erreur, retourner une liste vide pour éviter de bloquer le pipeline
+        print(f"⚠️ Erreur lors de la lecture des {station_type} stations depuis MinIO: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[list[str]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
     """
     Generic function to run a dlt pipeline based on a YAML configuration file.
     This is used internally by the dlt assets.
@@ -170,7 +312,9 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str) -> Dict[str, An
                 "endpoint_url": minio_endpoint,
                 "region_name": minio_region,
             },
-            dagster_log=None  # Use monkey-patched print instead
+            dagster_log=None,  # Use monkey-patched print instead
+            stations_data=stations_data,
+            partition_date=partition_date
         )
     finally:
         # Restore original print function
@@ -263,55 +407,167 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str) -> Dict[str, An
     return stats
 
 # ====================================
-# Hub'Eau Specific dlt Assets
+# ASSETS DE STATIONS DE RÉFÉRENCE (définis en premier)
 # ====================================
 
-@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS)
-def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests hydrobiology taxons data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/hydrobio_taxons.yml")
-
-@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS)
-def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests hydrobiology indices data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml")
-
 @asset(group_name="hubeau_hydrometry")
-def hydrometry_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests hydrometry observations data using dlt (30 derniers jours)."""
-    return ingest_dlt(context, "configs/hubeau/hydrometry_observations.yml")
+def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrometry stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
 
-@asset(group_name="hubeau_piezometry", partitions_def=DAILY_PARTITIONS)
-def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests piezometry chroniques data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/piezometry_chroniques.yml")
+@asset(group_name="hubeau_piezometry")
+def piezometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests piezometry stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
 
-@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS)
-def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests superficial waterbodies quality analyses data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/quality_rivers_analyses.yml")
+@asset(group_name="hubeau_quality_rivers")
+def quality_rivers_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests quality rivers stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
 
-@asset(group_name="hubeau_quality_groundwater", partitions_def=YEARLY_PARTITIONS)
-def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests groundwater quality analyses data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml")
+@asset(group_name="hubeau_quality_groundwater")
+def quality_groundwater_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests quality groundwater stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
 
-@asset(group_name="hubeau_ecoulement", partitions_def=YEARLY_PARTITIONS)
-def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests ecoulement observations data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml")
+@asset(group_name="hubeau_ecoulement")
+def ecoulement_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests ecoulement stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
 
-@asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS)
-def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests prelevements chroniques data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml")
+@asset(group_name="hubeau_hydrobio")
+def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrobiology stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
 
-@asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS)
-def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests temperature chroniques data using dlt."""
-    return ingest_dlt(context, "configs/hubeau/temperature_chroniques.yml")
+@asset(group_name="hubeau_prelevements")
+def prelevements_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests prelevements stations reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/prelevements_stations.yml")
 
 @asset(group_name="hubeau_temperature")
 def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature stations reference data using dlt (pas de partition)."""
     return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
+
+# ====================================
+# ASSETS D'OBSERVATIONS/ANALYSES (dépendent des stations)
+# ====================================
+
+@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS, deps=[hydrobio_stations_reference])
+def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrobiology taxons data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "hydrobio")
+    context.log.info(f"📊 Using {len(stations_data)} hydrobio stations for taxons")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/hydrobio_taxons.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS, deps=[hydrobio_stations_reference])
+def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrobiology indices data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "hydrobio")
+    context.log.info(f"📊 Using {len(stations_data)} hydrobio stations for indices")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_hydrometry", deps=[hydrometry_stations_reference])
+def hydrometry_observations(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrometry observations data using dlt (30 derniers jours)."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "hydrometry")
+    context.log.info(f"📊 Using {len(stations_data)} hydrometry stations for observations")
+    
+    return ingest_dlt(context, "configs/hubeau/hydrometry_observations.yml", stations_data=stations_data)
+
+@asset(group_name="hubeau_piezometry", partitions_def=YEARLY_PARTITIONS, deps=[piezometry_stations_reference])
+def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests piezometry chroniques data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "piezometry")
+    context.log.info(f"📊 Using {len(stations_data)} piezometry stations for chroniques")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/piezometry_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
+def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests superficial waterbodies quality analyses data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "quality_rivers")
+    context.log.info(f"📊 Using {len(stations_data)} quality rivers stations for analyses")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/quality_rivers_analyses.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_quality_groundwater", partitions_def=YEARLY_PARTITIONS, deps=[quality_groundwater_stations_reference])
+def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests groundwater quality analyses data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "quality_groundwater")
+    context.log.info(f"📊 Using {len(stations_data)} quality groundwater stations for analyses")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_ecoulement", partitions_def=YEARLY_PARTITIONS, deps=[ecoulement_stations_reference])
+def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests ecoulement observations data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "ecoulement")
+    context.log.info(f"📊 Using {len(stations_data)} ecoulement stations for observations")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS, deps=[prelevements_stations_reference])
+def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests prelevements chroniques data using dlt."""
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "prelevements")
+    context.log.info(f"📊 Using {len(stations_data)} prelevements stations for chroniques")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
+
+
+@asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS, deps=[temperature_stations_reference])
+def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests temperature chroniques data using dlt with yearly partitions and automatic fallback."""
+    
+    # Extraire les codes de stations depuis l'asset upstream
+    stations_data = extract_station_codes_from_result({}, "temperature")
+    context.log.info(f"📊 Using {len(stations_data)} temperature stations for chroniques")
+    
+    # Obtenir la partition (ex: "2024")
+    partition_key = context.partition_key
+    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
+    
+    context.log.info(f"📊 Processing temperature chroniques with automatic fallback (partition: {partition_key})")
+    
+    # Passer la date de partition pour le slicer
+    return ingest_dlt(context, "configs/hubeau/temperature_chroniques.yml", stations_data=stations_data, partition_date=partition_date)

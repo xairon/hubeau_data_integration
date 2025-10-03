@@ -125,7 +125,7 @@ slicer:
 temporal_filter:
   start_param: annee_min
   end_param: annee_max
-  start_date: "2023"
+  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
   end_offset_days: 1
 fallbacks:
   truncation_threshold: 20000  # ⚠️ LIMITE STRICTE 20K !

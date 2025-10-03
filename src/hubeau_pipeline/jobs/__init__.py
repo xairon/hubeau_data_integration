@@ -19,13 +19,14 @@ from .dlt_jobs import (
     hydrobio_job,
     hydrometry_job,
     piezometry_job,
-    quality_job,
+    quality_rivers_job,
+    quality_groundwater_job,
     ecoulement_job,
     prelevements_job,
     temperature_job,
-    sync_hubeau_yearly,
-    sync_hubeau_daily,
-    sync_hubeau_realtime,
+    sync_all_stations,
+    sync_all_yearly_data,
+    sync_realtime_data,
 )
 
 # Jobs ancienne architecture
@@ -45,13 +46,14 @@ dlt_jobs = [
     hydrobio_job,
     hydrometry_job,
     piezometry_job,
-    quality_job,
+    quality_rivers_job,
+    quality_groundwater_job,
     ecoulement_job,
     prelevements_job,
     temperature_job,
-    sync_hubeau_yearly,
-    sync_hubeau_daily,
-    sync_hubeau_realtime,
+    sync_all_stations,
+    sync_all_yearly_data,
+    sync_realtime_data,
 ]
 
 # ✅ NOUVELLE ARCHITECTURE: Utiliser les jobs dlt par défaut
@@ -63,13 +65,14 @@ __all__ = [
     "hydrobio_job",
     "hydrometry_job",
     "piezometry_job",
-    "quality_job",
+    "quality_rivers_job",
+    "quality_groundwater_job",
     "ecoulement_job",
     "prelevements_job",
     "temperature_job",
-    "sync_hubeau_yearly",
-    "sync_hubeau_daily",
-    "sync_hubeau_realtime",
+    "sync_all_stations",
+    "sync_all_yearly_data",
+    "sync_realtime_data",
     
     # Jobs ancienne architecture (deprecated)
     "old_jobs",

@@ -18,20 +18,39 @@ pagination:
   page_size: 1000
   until_expr: "len($.data) == 0"
 slicer:
-  mode: global  # ⚠️ API v2 ne permet pas de filtrage par dates
-  # mode: datetime
-  # start_param: date_debut_obs
-  # end_param: date_fin_obs
-  # window_days: 7
-  # start_date: "2024-09-01"  # ⚠️ RESTRICTION API v2: Max 30 jours - utiliser dates récentes
-  # end_offset_days: 30  # ⚠️ RESTRICTION API v2: Max 30 jours
+  mode: station_month  # ✅ Chunking par station × mois (utilise les stations fournies dynamiquement)
+  param: code_station
+  stations_source: "dagster_asset"  # Indique que les stations viennent d'un asset Dagster
+  start_param: date_debut_obs
+  end_param: date_fin_obs
+  window_days: 30  # Fenêtre de 30 jours (limite API v2)
 rate_limit:
   target_rps: 2.0  # 2 requêtes par seconde max
   max_concurrency: 1
 timeout: 60
 comment: |
+  API Hydrométrie Hub'Eau v2 - Observations temps réel
+  
   ⚠️ RESTRICTION CRITIQUE API v2 : Accès limité aux 30 derniers jours UNIQUEMENT
   - Erreur 400 si date_debut_obs < 30 jours
   - Pas d'accès à l'historique ancien
   - Utiliser obs_elab pour données élaborées (même restriction)
-
+  
+  📊 Données disponibles:
+  - Débits, hauteurs d'eau, niveaux
+  - Fréquence: 15min à 1h selon la station
+  - Volume: ~50,000 observations/jour
+  
+  🎯 Stratégie optimale:
+  - Mode dept: Chunking par département (5 départements par requête)
+  - Pas de partition temporelle (données temps réel uniquement)
+  - Utilisation des stations de référence pour filtrage
+  
+  📋 Champs clés:
+  - code_station: Identifiant de la station
+  - date_obs: Date/heure d'observation
+  - grandeur_hydro: Type de grandeur (Q, H, N)
+  - resultat_obs: Valeur observée
+  - code_qualification: Qualité de la mesure
+  
+  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-hydrometrie
