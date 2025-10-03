@@ -219,6 +219,12 @@ def hubeau_source(
                     total_requests_made += 1
                     
                     batch = list(http_client.extract_records(payload, resolved_cfg.get("records_path")))
+
+                    # Nettoyer immédiatement les champs critiques pour éviter toute valeur NULL
+                    # d'atteindre les étapes ultérieures (ex: troncature sans retraitement).
+                    for record in batch:
+                        _clean_critical_fields(record, resolved_cfg)
+
                     buffered_batches.append(batch)
                     slice_records += len(batch)
                     
@@ -277,9 +283,6 @@ def hubeau_source(
                 # Traitement des records
                 for batch in buffered_batches:
                     for record in batch:
-                        # Clean up NULL values in critical fields for all APIs
-                        _clean_critical_fields(record, resolved_cfg)
-                        
                         record["_slice_id"] = slice_obj.slice_id
                         record["_scope"] = slice_obj.scope
                         yield record
