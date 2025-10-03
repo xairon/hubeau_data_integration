@@ -7,7 +7,7 @@ import time
 import logging
 from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterator, Optional
+from typing import Any, Deque, Dict, Iterator, List, Optional
 
 import dlt
 from jsonpath_ng import parse
