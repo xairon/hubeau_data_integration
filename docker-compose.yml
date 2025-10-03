@@ -21,9 +21,6 @@ services:
     image: hubeau-dagster:latest
     depends_on:
       - dagster_postgres
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: dagster_postgres
@@ -56,9 +53,6 @@ services:
     depends_on:
       - dagster_postgres
       - dagster_webserver
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: dagster_postgres

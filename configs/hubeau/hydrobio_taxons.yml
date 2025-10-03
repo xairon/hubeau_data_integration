@@ -6,7 +6,7 @@ path: /hydrobio/taxons
 method: GET
 params_default:
   format: json
-  size: 500
+  size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [id_taxon, code_station, date_prelevement]
 replication_key: date_prelevement
@@ -14,7 +14,7 @@ pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 500
+  page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept_datetime  # ✅ Chunking par département + temps (comme l'ancien code)
@@ -27,8 +27,8 @@ slicer:
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
   end_offset_days: 1
 fallbacks:
-  truncation_threshold: 20000
-  split_chain: [day]
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  split_chain: [day]  # Si troncature → découper par jour
 # Note: Suppression de la dépendance pre_scan car hydrobio_stations n'existe pas
 # Le slicer datetime fonctionne sans référence externe
 rate_limit:

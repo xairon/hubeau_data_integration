@@ -127,30 +127,41 @@ sync_all_stations = define_asset_job(
     description="Job global : Tous les référentiels de stations (pas de partition)",
 )
 
-# Job pour TOUTES les données avec partitions annuelles
+# Job pour les données avec partitions ANNUELLES uniquement
 sync_all_yearly_data = define_asset_job(
     name="sync_all_yearly_data",
     selection=AssetSelection.assets(
         # Stations d'abord
-        hydrometry_stations_reference,
         piezometry_stations_reference,
         quality_rivers_stations_reference,
         quality_groundwater_stations_reference,
-        ecoulement_stations_reference,
         hydrobio_stations_reference,
         prelevements_stations_reference,
         temperature_stations_reference,
-        # Puis observations/analyses
+        # Puis observations/analyses avec partitions annuelles
         hydrobio_taxons,
         hydrobio_indices,
         piezometry_chroniques,
         quality_rivers_analyses,
         quality_groundwater_analyses,
-        ecoulement_observations,
         prelevements_chroniques,
         temperature_chroniques,
     ),
-    description="Job global : Toutes les données avec partitions annuelles (stations → observations)",
+    description="Job global : Données avec partitions annuelles uniquement (stations → observations)",
+)
+
+# Job pour les données avec partitions QUOTIDIENNES uniquement
+sync_all_daily_data = define_asset_job(
+    name="sync_all_daily_data",
+    selection=AssetSelection.assets(
+        # Stations d'abord
+        hydrometry_stations_reference,
+        ecoulement_stations_reference,
+        # Puis observations avec partitions quotidiennes
+        hydrometry_observations,
+        ecoulement_observations,
+    ),
+    description="Job global : Données avec partitions quotidiennes uniquement (stations → observations temps réel)",
 )
 
 # Job pour les données temps réel uniquement

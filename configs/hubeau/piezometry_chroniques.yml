@@ -6,7 +6,7 @@ path: /chroniques_tr
 method: GET
 params_default:
   format: json
-  size: 1000
+  size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_bss, timestamp_mesure]
 replication_key: date_mesure
@@ -14,7 +14,7 @@ pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 1000
+  page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept_datetime  # ✅ Chunking par département + temps
@@ -26,6 +26,9 @@ slicer:
   window_days: 30  # Fenêtre mensuelle pour piézométrie
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster
   end_offset_days: 1
+fallbacks:
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  split_chain: [station_month]  # Si troncature → découpage station×mois
 rate_limit:
   target_rps: 1.5
   max_concurrency: 1

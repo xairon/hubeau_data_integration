@@ -6,7 +6,7 @@ path: /chroniques
 method: GET
 params_default:
   format: json
-  size: 1000
+  size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_ouvrage, annee, mois]
 replication_key: annee
@@ -14,7 +14,7 @@ pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 1000
+  page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept  # Filtrage départemental obligatoire (1 dept à la fois)
@@ -128,7 +128,7 @@ temporal_filter:
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
   end_offset_days: 1
 fallbacks:
-  truncation_threshold: 20000  # ⚠️ LIMITE STRICTE 20K !
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
   split_chain: [day]  # Si troncature → découper par jour
 rate_limit:
   target_rps: 1.0  # Rate limit respectueux (API sensible)

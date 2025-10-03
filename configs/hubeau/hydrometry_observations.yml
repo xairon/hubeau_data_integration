@@ -6,7 +6,7 @@ path: /observations_tr
 method: GET
 params_default:
   format: json
-  size: 1000
+  size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_station, date_obs, grandeur_hydro]
 replication_key: date_obs
@@ -15,15 +15,18 @@ pagination:
   cursor_param: cursor
   cursor_path: $.next
   page_size_param: size
-  page_size: 1000
+  page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
 slicer:
-  mode: station_month  # ✅ Chunking par station × mois (utilise les stations fournies dynamiquement)
-  param: code_station
-  stations_source: "dagster_asset"  # Indique que les stations viennent d'un asset Dagster
+  mode: datetime  # ✅ Mode datetime pour données temps réel (30 derniers jours)
   start_param: date_debut_obs
   end_param: date_fin_obs
-  window_days: 30  # Fenêtre de 30 jours (limite API v2)
+  window_days: 1  # Fenêtre quotidienne (données temps réel)
+  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
+  end_offset_days: 0  # Pas d'offset pour données temps réel
+fallbacks:
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  split_chain: [dept_datetime]  # Si troncature → découpage par département×temps
 rate_limit:
   target_rps: 2.0  # 2 requêtes par seconde max
   max_concurrency: 1

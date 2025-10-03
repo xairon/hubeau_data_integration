@@ -17,10 +17,35 @@ YEARLY_PARTITIONS = StaticPartitionsDefinition(
 DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
 
 # ====================================
+# UTILITAIRES POUR RÉDUIRE LA REDONDANCE
+# ====================================
+
+def _get_partition_date_yearly(context: AssetExecutionContext) -> str:
+    """Convertit une partition annuelle (ex: '2024') en date (ex: '2024-01-01')."""
+    partition_key = context.partition_key
+    return f"{partition_key}-01-01"
+
+def _get_partition_date_daily(context: AssetExecutionContext) -> str:
+    """Retourne directement la partition quotidienne (ex: '2024-01-01')."""
+    return context.partition_key
+
+def _setup_observation_asset(context: AssetExecutionContext, station_type: str, partition_date: str) -> tuple[list[str], str]:
+    """
+    Configuration commune pour les assets d'observations.
+    
+    Returns:
+        tuple: (stations_data, log_message)
+    """
+    stations_data = extract_station_codes_from_result({}, station_type, partition_date)
+    log_message = f"📊 Using {len(stations_data)} {station_type} stations for observations"
+    context.log.info(log_message)
+    return stations_data, log_message
+
+# ====================================
 # Generic dlt Ingestion Asset
 # ====================================
 
-def extract_station_codes_from_result(result: Dict[str, Any], station_type: str = "temperature") -> list[str]:
+def extract_station_codes_from_result(result: Dict[str, Any], station_type: str = "temperature", partition_date: str = None) -> list[str]:
     """
     Extrait les codes de stations depuis le résultat d'un asset upstream.
     Cette fonction lit les données depuis MinIO et extrait les codes de stations.
@@ -153,6 +178,14 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
                 pass
         
         print(f"✅ Extracted {len(stations)} {station_type} station codes from MinIO")
+        
+        # Si une partition_date est fournie, filtrer les stations qui ont des données pour cette période
+        if partition_date and station_type in ["temperature", "hydrometry", "piezometry", "quality_rivers", "quality_groundwater", "ecoulement", "hydrobio", "prelevements"]:
+            print(f"🔍 Filtrage des stations pour la période {partition_date}")
+            active_stations = _filter_active_stations_for_period(stations, partition_date, station_type)
+            print(f"✅ Stations actives pour {partition_date}: {len(active_stations)} sur {len(stations)}")
+            return active_stations
+        
         return stations
         
     except Exception as e:
@@ -161,6 +194,127 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
         import traceback
         traceback.print_exc()
         return []
+
+def _filter_active_stations_for_period(stations: list[str], partition_date: str, station_type: str) -> list[str]:
+    """
+    Filtre les stations pour ne garder que celles qui ont des données pour la période donnée.
+    
+    Args:
+        stations: Liste des codes de stations
+        partition_date: Date de partition (ex: "2024-01-01")
+        station_type: Type de stations ("temperature", etc.)
+    """
+    import httpx
+    from datetime import datetime, timedelta
+    
+    try:
+        # Construire la période (année complète)
+        year = datetime.strptime(partition_date, "%Y-%m-%d").year
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        
+        print(f"🔍 Test des stations pour la période {start_date} à {end_date}")
+        
+        # Configuration des endpoints par type
+        api_configs = {
+            "temperature": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/temperature",
+                "path": "/chronique",
+                "start_param": "date_debut_mesure",
+                "end_param": "date_fin_mesure",
+                "station_field": "code_station"
+            },
+            "hydrometry": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/hydrometrie",
+                "path": "/observations_tr",
+                "start_param": "date_debut_obs",
+                "end_param": "date_fin_obs",
+                "station_field": "code_station"
+            },
+            "piezometry": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
+                "path": "/chroniques",
+                "start_param": "date_debut_mesure",
+                "end_param": "date_fin_mesure",
+                "station_field": "code_bss"
+            },
+            "quality_rivers": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_rivieres",
+                "path": "/analyses",
+                "start_param": "date_debut_prelevement",
+                "end_param": "date_fin_prelevement",
+                "station_field": "code_station"
+            },
+            "quality_groundwater": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes",
+                "path": "/analyses",
+                "start_param": "date_debut_prelevement",
+                "end_param": "date_fin_prelevement",
+                "station_field": "code_bss"
+            },
+            "ecoulement": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/ecoulement",
+                "path": "/observations",
+                "start_param": "date_debut_obs",
+                "end_param": "date_fin_obs",
+                "station_field": "code_station"
+            },
+            "hydrobio": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/indicateurs_services",
+                "path": "/indices",
+                "start_param": "date_debut_campagne",
+                "end_param": "date_fin_campagne",
+                "station_field": "code_station_hydrobio"
+            },
+            "prelevements": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/prelevements",
+                "path": "/chroniques",
+                "start_param": "date_debut_prelevement",
+                "end_param": "date_fin_prelevement",
+                "station_field": "code_point_prelevement"
+            }
+        }
+        
+        if station_type not in api_configs:
+            print(f"⚠️ Type de station non supporté pour le filtrage: {station_type}")
+            return stations
+        
+        config = api_configs[station_type]
+        
+        # Faire une requête test pour identifier les stations actives
+        params = {
+            "format": "json",
+            "size": 1000,  # Récupérer un échantillon
+            config["start_param"]: start_date,
+            config["end_param"]: end_date
+        }
+        
+        response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=30)
+        
+        if response.status_code not in [200, 206]:
+            print(f"⚠️ Erreur API lors du filtrage: {response.status_code}")
+            return stations
+        
+        data = response.json()
+        records = data.get("data", [])
+        
+        # Extraire les stations qui ont des données
+        active_stations = set()
+        station_field = config["station_field"]
+        for record in records:
+            if station_field in record:
+                active_stations.add(record[station_field])
+        
+        # Filtrer la liste originale pour ne garder que les stations actives
+        filtered_stations = [station for station in stations if station in active_stations]
+        
+        print(f"📊 Résultat du filtrage: {len(filtered_stations)} stations actives sur {len(stations)} total")
+        
+        return filtered_stations
+        
+    except Exception as e:
+        print(f"⚠️ Erreur lors du filtrage des stations: {e}")
+        return stations  # En cas d'erreur, retourner toutes les stations
 
 def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[list[str]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -459,117 +613,64 @@ def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, 
 @asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS, deps=[hydrobio_stations_reference])
 def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology taxons data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "hydrobio")
-    context.log.info(f"📊 Using {len(stations_data)} hydrobio stations for taxons")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "hydrobio", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrobio_taxons.yml", stations_data=stations_data, partition_date=partition_date)
 
 @asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS, deps=[hydrobio_stations_reference])
 def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology indices data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "hydrobio")
-    context.log.info(f"📊 Using {len(stations_data)} hydrobio stations for indices")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "hydrobio", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_hydrometry", deps=[hydrometry_stations_reference])
+@asset(group_name="hubeau_hydrometry", partitions_def=DAILY_PARTITIONS, deps=[hydrometry_stations_reference])
 def hydrometry_observations(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry observations data using dlt (30 derniers jours)."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "hydrometry")
-    context.log.info(f"📊 Using {len(stations_data)} hydrometry stations for observations")
-    
+    partition_date = _get_partition_date_daily(context)
+    stations_data, _ = _setup_observation_asset(context, "hydrometry", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrometry_observations.yml", stations_data=stations_data)
 
 @asset(group_name="hubeau_piezometry", partitions_def=YEARLY_PARTITIONS, deps=[piezometry_stations_reference])
 def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry chroniques data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "piezometry")
-    context.log.info(f"📊 Using {len(stations_data)} piezometry stations for chroniques")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "piezometry", partition_date)
     return ingest_dlt(context, "configs/hubeau/piezometry_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
 
 @asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
 def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests superficial waterbodies quality analyses data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "quality_rivers")
-    context.log.info(f"📊 Using {len(stations_data)} quality rivers stations for analyses")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "quality_rivers", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_rivers_analyses.yml", stations_data=stations_data, partition_date=partition_date)
 
 @asset(group_name="hubeau_quality_groundwater", partitions_def=YEARLY_PARTITIONS, deps=[quality_groundwater_stations_reference])
 def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests groundwater quality analyses data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "quality_groundwater")
-    context.log.info(f"📊 Using {len(stations_data)} quality groundwater stations for analyses")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "quality_groundwater", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_ecoulement", partitions_def=YEARLY_PARTITIONS, deps=[ecoulement_stations_reference])
+@asset(group_name="hubeau_ecoulement", partitions_def=DAILY_PARTITIONS, deps=[ecoulement_stations_reference])
 def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests ecoulement observations data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "ecoulement")
-    context.log.info(f"📊 Using {len(stations_data)} ecoulement stations for observations")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
-    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data, partition_date=partition_date)
+    """Ingests ecoulement observations data using dlt (30 derniers jours)."""
+    partition_date = _get_partition_date_daily(context)
+    stations_data, _ = _setup_observation_asset(context, "ecoulement", partition_date)
+    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data)
 
 @asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS, deps=[prelevements_stations_reference])
 def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests prelevements chroniques data using dlt."""
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "prelevements")
-    context.log.info(f"📊 Using {len(stations_data)} prelevements stations for chroniques")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "prelevements", partition_date)
     return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
 
 
 @asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS, deps=[temperature_stations_reference])
 def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature chroniques data using dlt with yearly partitions and automatic fallback."""
-    
-    # Extraire les codes de stations depuis l'asset upstream
-    stations_data = extract_station_codes_from_result({}, "temperature")
-    context.log.info(f"📊 Using {len(stations_data)} temperature stations for chroniques")
-    
-    # Obtenir la partition (ex: "2024")
-    partition_key = context.partition_key
-    partition_date = f"{partition_key}-01-01"  # Convertir "2024" en "2024-01-01"
-    
-    context.log.info(f"📊 Processing temperature chroniques with automatic fallback (partition: {partition_key})")
-    
-    # Passer la date de partition pour le slicer
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "temperature", partition_date)
+    context.log.info(f"📊 Processing temperature chroniques with automatic fallback (partition: {context.partition_key})")
     return ingest_dlt(context, "configs/hubeau/temperature_chroniques.yml", stations_data=stations_data, partition_date=partition_date)

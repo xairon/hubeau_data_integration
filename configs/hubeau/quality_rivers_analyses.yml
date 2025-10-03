@@ -6,7 +6,7 @@ path: /analyse_pc
 method: GET
 params_default:
   format: json
-  size: 2000
+  size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_station, date_prelevement, libelle_parametre, code_unite]
 replication_key: date_prelevement
@@ -14,7 +14,7 @@ pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 2000
+  page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept  # Filtrage départemental obligatoire
@@ -127,6 +127,9 @@ temporal_filter:
   end_param: date_fin_prelevement
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
   end_offset_days: 1
+fallbacks:
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  split_chain: [day]  # Si troncature → découpage par jour
 rate_limit:
   target_rps: 1.5
   max_concurrency: 1
