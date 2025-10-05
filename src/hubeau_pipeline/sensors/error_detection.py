@@ -3,11 +3,12 @@ Sensor - Détection d'erreurs
 Surveillance des erreurs et alertes
 """
 
-from dagster import sensor, SensorEvaluationContext, RunRequest, SkipReason
-from hubeau_pipeline.jobs import hubeau_bronze_job
+from dagster import RunRequest, SensorEvaluationContext, SkipReason, sensor
+
+from hubeau_pipeline.jobs import sync_all_yearly_data
 
 @sensor(
-    job=hubeau_bronze_job,
+    job=sync_all_yearly_data,
     name="error_detection_sensor",
     description="Détecte les erreurs dans les pipelines"
 )

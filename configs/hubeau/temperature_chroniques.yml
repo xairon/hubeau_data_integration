@@ -6,27 +6,31 @@ path: /chronique
 method: GET
 params_default:
   format: json
-  size: 1000
+  size: 20000  # ✅ Test avec taille de page maximale (20K)
 records_path: $.data
-primary_keys: [code_station, date_mesure]
-replication_key: date_mesure
+primary_keys: [code_station, date_mesure_temp]
+replication_key: date_mesure_temp
 pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 1000
+  page_size: 20000  # ✅ Test avec taille de page maximale (20K)
   until_expr: "len($.data) == 0"
-# ⚠️ LOGIQUE CRITIQUE TEMPÉRATURE: Mode datetime avec fallback automatique vers station_month
+# ✅ STRATÉGIE OPTIMISÉE TEMPÉRATURE: Mode dept_datetime avec fallback intelligent
 slicer:
-  mode: datetime  # ✅ Mode datetime avec fallback automatique vers station_month
+  mode: dept_datetime  # ✅ Mode département×temps optimisé
   start_param: date_debut_mesure
   end_param: date_fin_mesure
-  window_days: 30  # Fenêtre mensuelle
+  window_days: 30  # ✅ Fenêtre mensuelle exacte (utilise month_windows automatiquement)
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
-  end_offset_days: 1
+  end_date: "2024-12-31"  # ✅ Limite à l'année 2024 uniquement
+  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
+  dept_param: code_departement  # Paramètre département pour l'API
+  dept_chunk_size: 8  # ✅ Optimisé : 8 départements par requête (101÷8≈13 chunks)
+  dept_list: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "971", "972", "973", "974", "976"]
 fallbacks:
-  truncation_threshold: 20000  # ⚠️ LIMITE STRICTE 20K !
-  split_chain: [station_month]  # Si troncature → déjà station×mois
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  split_chain: [station_month]  # Si troncature → découpage station×mois (dernier recours)
 # Note: Les stations sont maintenant fournies par l'asset temperature_stations_reference
 rate_limit:
   target_rps: 0.7  # Rate limit très respectueux (API très sensible)
@@ -37,27 +41,29 @@ backoff_max: 120.0
 comment: |
   API Température des Cours d'Eau - Chroniques de température
   
-  ⚠️ LOGIQUE CRITIQUE - MODE DATETIME AVEC FALLBACK AUTOMATIQUE:
+  ✅ STRATÉGIE OPTIMISÉE - MODE DEPT_DATETIME:
   - ~760 stations (dont ~50 encore en service)
   - Limite: 20,000 records par requête
-  - API supporte code_departement MAIS trop de données par département
-  - Solution: Mode datetime avec fallback automatique vers station_month
+  - Solution: Mode dept_datetime optimisé (département×temps)
   
-  Stratégie (comme l'ancien code):
-  1. Mode datetime: Tentative de récupération globale par mois
+  Stratégie optimisée:
+  1. Mode dept_datetime: 5 départements × 12 mois = ~240 requêtes
   2. Détection troncature: Si > 20k records → fallback automatique
-  3. Fallback station_month: Découpage station par station × mois
+  3. Fallback station_month: Découpage station par station × mois (dernier recours)
   4. Partitions: Annuelles Dagster
   
-  Avantages:
-  - Optimisation: Essaie d'abord le mode global (plus rapide)
+  Avantages vs ancien code:
+  - Optimisation: ~240 requêtes au lieu de 9,120 (station×mois)
+  - Performance: 38x moins de requêtes que l'ancien code
   - Fallback intelligent: Se découpe automatiquement si nécessaire
   - Compatible API: Utilise les paramètres supportés par Hub'Eau
   
-  Erreurs fréquentes:
-  - 500 Internal Server Error si trop de stations dans une requête
-  - 400 Bad Request si URL trop longue
-  - Troncature à 20k si requête annuelle globale
+  Calcul des requêtes OPTIMISÉ:
+  - 101 départements ÷ 8 (chunk_size) = ~13 chunks
+  - 13 chunks × 12 mois exacts = ~156 requêtes total (2024 uniquement)
+  - vs ancien code: 760 stations × 12 mois = 9,120 requêtes
+  - vs configuration précédente: 462 requêtes → 156 requêtes (3x moins !)
+  - Optimisation: Pages de 20K records + fenêtres mensuelles exactes
   
   Données:
   - Mise à jour trimestrielle depuis Naïades

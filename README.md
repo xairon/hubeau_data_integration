@@ -1,37 +1,33 @@
 # Hub'Eau Data Integration Pipeline
 
-Pipeline d'intégration des données Hub'Eau (8 APIs) avec architecture medallion et orchestration Dagster.
+Pipeline d'intégration des données Hub'Eau (8 APIs) avec architecture medallion et orchestration Dagster + DLT.
 
 > **Dépôt GitLab :** https://scm.univ-tours.fr/ringuet/hubeau_data_integration
 
-## Architecture
+## 🏗️ Architecture
 
-```
-Hub'Eau APIs → MinIO (Bronze) → Specialized DBs (Silver) → Analytics (Gold)
+```mermaid
+graph LR
+    A[Hub'Eau APIs] --> B[DLT Pipeline]
+    B --> C[MinIO Bronze]
+    C --> D[TimescaleDB]
+    C --> E[PostGIS]
+    C --> F[Neo4j]
+    D --> G[Analytics Gold]
+    E --> G
+    F --> G
 ```
 
 **Stack technique :**
 - **Orchestration :** Dagster
+- **Data Loading :** DLT (Data Load Tool)
 - **Data Lake :** MinIO (S3-compatible)
 - **Time Series :** TimescaleDB
 - **Geospatial :** PostGIS
 - **Graph :** Neo4j
 - **Infrastructure :** Docker Compose
 
-## APIs Intégrées
-
-| API | Endpoints | Volume | Partitioning |
-|-----|-----------|--------|--------------|
-| Hydrométrie | stations, observations_tr, obs_elab | ~50M records | Daily |
-| Piézométrie | stations, chroniques_tr, chroniques | ~30M records | Daily |
-| Qualité Cours d'Eau | station_pc, analyse_pc | ~5M records | Annual |
-| Qualité Eaux Souterraines | stations, analyses | ~2M records | Annual |
-| Température | station, chronique | ~10M records | Daily |
-| ONDE | stations, observations | ~500K records | Annual |
-| Hydrobiologie | stations_hydrobio, indices, taxons | ~1M records | Annual |
-| Prélèvements | points_prelevement, chroniques | ~20M records | Annual |
-
-## Installation
+## 🚀 Installation Rapide
 
 ```bash
 # Prérequis
@@ -42,11 +38,15 @@ python 3.11+
 cp env.example .env
 # Éditer .env avec les mots de passe
 
-# Démarrage
+# Démarrage complet
 docker-compose up -d
+
+# Vérification
+curl http://localhost:8080  # Dagster UI
+curl http://localhost:9001  # MinIO
 ```
 
-## Accès
+## 🎯 Accès aux Services
 
 - **Dagster UI :** http://localhost:8080
 - **MinIO :** http://localhost:9001 (admin/your_minio_password)
@@ -55,85 +55,165 @@ docker-compose up -d
 - **Neo4j :** http://localhost:7474 (neo4j/your_neo4j_password)
 - **pgAdmin :** http://localhost:5050
 
-## Configuration
+## 🔧 Configuration
 
-### Dagster
-```yaml
-# dagster.yaml
-execution:
-  multiprocess:
-    max_concurrent: 3
-```
+Chaque API Hub'Eau a son fichier de configuration YAML dans `configs/hubeau/` qui définit les endpoints, la pagination et les stratégies d'ingestion optimisées.
 
-### MinIO Buckets
-- `bronze` : Données brutes Hub'Eau
-- `silver` : Données transformées
-- `gold` : Données analytiques
+## 🎮 Jobs Dagster
 
-## Jobs Dagster
-
-### Ingestion Bronze
-```bash
-# Ingestion complète
-dagster job execute -j hubeau_bronze_ingestion_job
-
-# Ingestion par API
-dagster job execute -j hubeau_hydrometry_bronze_job
-dagster job execute -j hubeau_piezometry_bronze_job
-dagster job execute -j hubeau_quality_bronze_job
-dagster job execute -j hubeau_temperature_bronze_job
-dagster job execute -j hubeau_onde_bronze_job
-dagster job execute -j hubeau_hydrobiology_bronze_job
-dagster job execute -j hubeau_prelevements_bronze_job
-```
-
-### Backfill
-```bash
-# Backfill hydrométrie (derniers 30 jours)
-dagster asset materialize -a hubeau_hydrometry_bronze --partition 2024-09-01
-
-# Backfill piézométrie (derniers 7 jours)
-dagster asset materialize -a hubeau_piezometry_bronze --partition 2024-09-30
-```
-
-## Restrictions APIs Hub'Eau
-
-- **Rate limiting :** 0.5s entre requêtes
-- **Timeout :** 60s par requête
-- **Retry :** 3 tentatives avec backoff exponentiel
-- **Concurrence :** Max 10 requêtes simultanées (toutes APIs confondues)
-- **Pagination :** 1000 records par page
-- **Limites :** Certaines APIs limitées à 10K records (hydrobiologie, qualité)
-
-## Structure Projet
-
-```
-src/hubeau_pipeline/
-├── assets/
-│   ├── bronze/          # Ingestion Hub'Eau → MinIO
-│   ├── silver/          # Transformation → Specialized DBs
-│   └── gold/            # Analytics et dashboards
-├── jobs/                # Jobs Dagster
-├── schedules/           # Planification
-├── sensors/            # Monitoring
-└── resources.py         # Configuration ressources
-```
-
-## Connexions Bases de Données
+### Jobs par Type de Partition
 
 ```bash
-# TimescaleDB
-psql -h localhost -p 5432 -U postgres -d water_timeseries
+# Données avec partitions ANNUELLES
+dagster job execute -j sync_all_yearly_data
 
-# PostGIS
-psql -h localhost -p 5433 -U postgres -d water_geo
+# Données avec partitions QUOTIDIENNES  
+dagster job execute -j sync_all_daily_data
 
-# Neo4j
-cypher-shell -u neo4j -p $NEO4J_PASSWORD
+# Données temps réel (hydrométrie, écoulement)
+dagster job execute -j sync_realtime_data
 ```
 
-## Monitoring
+### Jobs par API Spécifique
 
-- **Logs :** `docker-compose logs -f dagster_webserver`
-- **Métriques :** Dagster UI → Assets → Metrics
-- **Erreurs :** Dagster UI → Runs → Failed
+```bash
+# Température (partitions annuelles)
+dagster job execute -j temperature_job
+
+# Hydrométrie (partitions quotidiennes)
+dagster job execute -j hydrometry_job
+
+# Piézométrie (partitions annuelles)
+dagster job execute -j piezometry_job
+```
+
+### Backfill par Partition
+
+```bash
+# Backfill température 2024
+dagster asset materialize -a temperature_chroniques --partition 2024
+
+# Backfill hydrométrie du 1er janvier 2024
+dagster asset materialize -a hydrometry_observations --partition 2024-01-01
+```
+
+## 📁 Structure du Projet
+
+```
+hubeau_data_integration/
+├── configs/hubeau/           # Configuration DLT par API
+│   ├── temperature_chroniques.yml
+│   ├── hydrometry_observations.yml
+│   ├── piezometry_chroniques.yml
+│   └── ...
+├── pipelines/dlt/           # Pipeline DLT générique
+│   ├── hubeau_generic.py    # Source DLT Hub'Eau
+│   ├── slicing.py           # Logique de découpage
+│   ├── http_client.py       # Client HTTP avec retry
+│   └── schema.py            # Schémas de données
+├── src/hubeau_pipeline/
+│   ├── assets/bronze/       # Assets Dagster + DLT
+│   ├── jobs/                # Jobs Dagster
+│   ├── schedules/           # Planification
+│   └── sensors/             # Monitoring
+└── docker/                  # Configuration Docker
+```
+
+## 🔄 Flux de Données
+
+### 1. **Stations de Référence**
+```python
+@asset(group_name="hubeau_temperature")
+def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Récupère toutes les stations (~760 stations)"""
+    return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
+```
+
+### 2. **Observations avec Filtrage Intelligent**
+```python
+@asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS, deps=[temperature_stations_reference])
+def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Filtre les stations actives et récupère les observations"""
+    partition_date = _get_partition_date_yearly(context)  # "2024-01-01"
+    stations_data, _ = _setup_observation_asset(context, "temperature", partition_date)
+    # stations_data = stations filtrées (ex: 1 station active sur 760)
+    return ingest_dlt(context, "configs/hubeau/temperature_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
+```
+
+### 3. **Filtrage Automatique des Stations**
+- **Test API** : Requête test pour identifier les stations avec données
+- **Filtrage** : Seules les stations actives sont traitées
+- **Optimisation** : Évite les requêtes inutiles (0 records)
+
+
+## 🚨 Restrictions APIs Hub'Eau
+
+- **Rate limiting** : 0.6-2.0 requêtes par seconde selon l'API
+- **Timeout** : 60s par requête
+- **Retry** : Backoff exponentiel (2s → 120s)
+- **Concurrence** : Max 1 requête simultanée par API
+- **Limites** : 20,000 records par requête globale
+
+## 🔍 Monitoring et Debugging
+
+### Logs Dagster
+```bash
+# Logs en temps réel
+docker-compose logs -f dagster_daemon
+
+# Logs spécifiques température
+docker-compose logs dagster_daemon | grep temperature_chroniques
+```
+
+### Métriques DLT
+- **Slices traités** : Progression des découpages
+- **Records récupérés** : Volume de données par slice
+- **Requêtes API** : Nombre et durée des appels
+- **Fallbacks** : Détection des troncatures
+
+### Debugging
+```bash
+# Test configuration DLT
+python -c "from pipelines.dlt.hubeau_generic import test_config; test_config('configs/hubeau/temperature_chroniques.yml')"
+
+# Vérification MinIO
+docker-compose exec minio mc ls minio/bronze/
+```
+
+## 🛠️ Développement
+
+### Ajouter une Nouvelle API
+
+1. **Créer le fichier de config** : `configs/hubeau/nouvelle_api.yml`
+2. **Définir l'asset Dagster** : `src/hubeau_pipeline/assets/bronze/dlt_assets.py`
+3. **Ajouter au job** : `src/hubeau_pipeline/jobs/dlt_jobs.py`
+4. **Tester** : `dagster job execute -j nouvelle_api_job`
+
+### Modifier une Configuration DLT
+
+1. **Éditer le YAML** : `configs/hubeau/api.yml`
+2. **Tester localement** : `python pipelines/dlt/test_config.py`
+3. **Déployer** : `git add . && git commit && git push gitlab main`
+4. **Exécuter** : Dagster UI → Jobs → Execute
+
+## 📚 Documentation Complète
+
+- **[Description du Projet](PROJET.md)** : Objectifs, données intégrées, architecture
+- **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** : Comprendre les fichiers de configuration
+- **[Architecture Moderne](docs/ARCHITECTURE_MODERNE.md)** : Stack technique et choix architecturaux
+- **[APIs Hub'Eau](docs/APIS_HUBEAU_COMPLETE.md)** : Documentation des APIs intégrées
+- **[Stratégies de Stockage](docs/DATA_STORAGE_STRATEGY.md)** : Architecture medallion et bases de données
+
+## 🤝 Contribution
+
+**Dépôt principal :** [GitLab Université de Tours](https://scm.univ-tours.fr/ringuet/hubeau_data_integration)
+
+**Workflow :**
+1. Fork du projet
+2. Créer une branche feature
+3. Tests et validation
+4. Pull Request vers main
+
+## 📄 Licence
+
+Ce projet est développé dans le cadre académique de l'Université de Tours.

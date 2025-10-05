@@ -7,7 +7,7 @@ import time
 import logging
 from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterator, Optional
+from typing import Any, Deque, Dict, Iterator, List, Optional
 
 import dlt
 from jsonpath_ng import parse
@@ -178,11 +178,11 @@ def hubeau_source(
         pagination = resolved_cfg.get("pagination") or {}
         method = resolved_cfg.get("method", "GET").upper()
         # Si des stations sont fournies, les ajouter à la config pour le slicing
+        # (nécessaire pour les fallbacks station_month)
         if stations_data:
             slicer_cfg = resolved_cfg.get("slicer", {})
-            if slicer_cfg.get("mode") == "station_month" and slicer_cfg.get("stations_source") == "dagster_asset":
-                slicer_cfg["stations"] = stations_data
-                resolved_cfg["slicer"] = slicer_cfg
+            slicer_cfg["stations"] = stations_data  # Toujours passer les stations pour les fallbacks
+            resolved_cfg["slicer"] = slicer_cfg
         
         slices: Deque[Slice] = deque(build_slices(resolved_cfg))
         
@@ -257,15 +257,15 @@ def hubeau_source(
                     req_msg = f"✅ Requête {slice_requests} réussie: {len(batch)} records en {request_duration:.2f}s"
                     log(f"✅ DLT: {req_msg}")
 
+                    if _should_stop_pagination(payload, batch, pagination):
+                        log(f"🛑 Arrêt pagination: condition remplie (batch de {len(batch)} records)")
+                        break
+
                     if needs_truncation(slice_records, resolved_cfg):
                         truncated = True
                         fallbacks = resolved_cfg.get('fallbacks') or {}
                         threshold = fallbacks.get('truncation_threshold', 'non définie')
                         log(f"⚠️ Troncature détectée: {slice_records} records (limite: {threshold})")
-                        break
-
-                    if _should_stop_pagination(payload, batch, pagination):
-                        log(f"🛑 Arrêt pagination: condition remplie (batch de {len(batch)} records)")
                         break
 
                     # Mise à jour du cursor ou de la page
@@ -528,7 +528,7 @@ def _clean_critical_fields(record: Dict[str, Any], cfg: Dict[str, Any]) -> None:
         if record.get(primary_key) is None:
             # Log pour debug
             print(f"🔍 NULL détecté dans {primary_key} pour API {api_name}")
-            print(f"   Champs disponibles: {list(record.keys())[:10]}")
+            print(f"   Champs disponibles: {list(record.keys())}")  # Afficher TOUS les champs
             print(f"   Substitutions possibles: {field_substitutions.get(primary_key, [])}")
             
             # Try substitutions first

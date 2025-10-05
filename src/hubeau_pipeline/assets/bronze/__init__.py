@@ -4,17 +4,17 @@ httpx + tenacity + pydantic pour une ingestion robuste et performante
 """
 
 # Assets Hub'Eau Bronze (ancienne architecture - deprecated)
-from .hubeau_assets import (
-    hubeau_hydrometry_bronze,
-    hubeau_piezometry_bronze,
-    hubeau_water_quality_surface_bronze,
-    hubeau_water_quality_groundwater_bronze,
-    hubeau_temperature_bronze,
-    hubeau_ecoulement_bronze,
-    hubeau_hydrobiology_bronze,
-    hubeau_prelevements_bronze,
-    hubeau_ingestion_summary
-)
+# from .hubeau_assets import (
+#     hubeau_hydrometry_bronze,
+#     hubeau_piezometry_bronze,
+#     hubeau_water_quality_surface_bronze,
+#     hubeau_water_quality_groundwater_bronze,
+#     hubeau_temperature_bronze,
+#     hubeau_ecoulement_bronze,
+#     hubeau_hydrobiology_bronze,
+#     hubeau_prelevements_bronze,
+#     hubeau_ingestion_summary
+# )
 
 # Assets Hub'Eau dlt (nouvelle architecture - recommended)
 from .dlt_assets import (
@@ -42,18 +42,8 @@ from .dlt_assets import (
 from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
 from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 
-# Assets de production Hub'Eau (ancienne architecture - à migrer progressivement)
-hubeau_bronze_assets_old = [
-    hubeau_hydrometry_bronze,
-    hubeau_piezometry_bronze,
-    hubeau_water_quality_surface_bronze,
-    hubeau_water_quality_groundwater_bronze,
-    hubeau_temperature_bronze,
-    hubeau_ecoulement_bronze,
-    hubeau_hydrobiology_bronze,
-    hubeau_prelevements_bronze,
-    hubeau_ingestion_summary
-]
+# Assets de production Hub'Eau (ancienne architecture - supprimés)
+# hubeau_bronze_assets_old = []
 
 # Assets de production Hub'Eau (nouvelle architecture dlt - recommandé)
 hubeau_bronze_assets_dlt = [

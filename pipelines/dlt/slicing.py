@@ -166,37 +166,100 @@ def build_slices(
         for i in range(0, len(dept_list), dept_chunk_size):
             dept_chunk = dept_list[i:i + dept_chunk_size]
             
-            # Chunking temporel
-            for d0, d1 in daterange(start, end_candidate, window_days):
-                params = {
-                    dept_param: ",".join(dept_chunk),
-                    start_param: d0.isoformat(),
-                    end_param: d1.isoformat(),
-                }
-                metadata = {
-                    "mode": "dept_datetime",
-                    "dept_chunk": dept_chunk,
-                    "start": d0.isoformat(),
-                    "end": d1.isoformat(),
-                    "dept_param": dept_param,
-                    "start_param": start_param,
-                    "end_param": end_param,
-                }
-                dept_str = "_".join(dept_chunk)
-                yield Slice(
-                    params=params,
-                    slice_id=f"dept_{dept_str}_{d0.isoformat()}",
-                    scope=f"dept-{dept_str}",
-                    metadata=metadata,
-                )
+            # Chunking temporel - Utiliser month_windows pour des fenêtres mensuelles exactes
+            # Si window_days est spécifié et > 30, utiliser daterange pour des fenêtres personnalisées
+            # Sinon, utiliser month_windows pour des fenêtres mensuelles exactes
+            if window_days and window_days > 30:
+                # Fenêtres personnalisées (ex: trimestrielles avec window_days=90)
+                for d0, d1 in daterange(start, end_candidate, window_days):
+                    params = {
+                        dept_param: ",".join(dept_chunk),
+                        start_param: d0.isoformat(),
+                        end_param: d1.isoformat(),
+                    }
+                    metadata = {
+                        "mode": "dept_datetime",
+                        "dept_chunk": dept_chunk,
+                        "start": d0.isoformat(),
+                        "end": d1.isoformat(),
+                        "dept_param": dept_param,
+                        "start_param": start_param,
+                        "end_param": end_param,
+                        "window_type": "custom"
+                    }
+                    dept_str = "_".join(dept_chunk)
+                    yield Slice(
+                        params=params,
+                        slice_id=f"dept_{dept_str}_{d0.isoformat()}",
+                        scope=f"dept-{dept_str}",
+                        metadata=metadata,
+                    )
+            else:
+                # Fenêtres mensuelles exactes (recommandé pour la plupart des cas)
+                for d0, d1 in month_windows(start, end_candidate):
+                    params = {
+                        dept_param: ",".join(dept_chunk),
+                        start_param: d0.isoformat(),
+                        end_param: d1.isoformat(),
+                    }
+                    metadata = {
+                        "mode": "dept_datetime",
+                        "dept_chunk": dept_chunk,
+                        "start": d0.isoformat(),
+                        "end": d1.isoformat(),
+                        "dept_param": dept_param,
+                        "start_param": start_param,
+                        "end_param": end_param,
+                        "window_type": "monthly"
+                    }
+                    dept_str = "_".join(dept_chunk)
+                    yield Slice(
+                        params=params,
+                        slice_id=f"dept_{dept_str}_{d0.isoformat()}",
+                        scope=f"dept-{dept_str}",
+                        metadata=metadata,
+                    )
     elif mode == "station_month":
         stations = _resolve_reference_values(cfg, "stations")
         if not stations:
             raise ValueError("station_month slicer requires stations/reference")
-        start_date = date.fromisoformat(slicer_cfg.get("start_date"))
+
+        # Autoriser les alias historiques et valeurs dynamiques (ex: stations injectées via Dagster)
+        window_days = slicer_cfg.get("window_days", 30)
+        if not isinstance(window_days, int) or window_days <= 0:
+            window_days = 30
+
+        start_date_raw = slicer_cfg.get("start_date")
+        if start_date_raw:
+            if isinstance(start_date_raw, date):
+                start_date = start_date_raw
+            else:
+                try:
+                    start_date = date.fromisoformat(str(start_date_raw))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "station_month slicer start_date must be ISO formatted (YYYY-MM-DD)"
+                    ) from exc
+        else:
+            # Fallback intelligent : on se limite à la fenêtre récente (ex: API temps réel)
+            start_date = date.today() - timedelta(days=window_days)
+
         end_offset_days = slicer_cfg.get("end_offset_days", 1)
+        if not isinstance(end_offset_days, int) or end_offset_days < 0:
+            end_offset_days = 1
         end_candidate = date.today() - timedelta(days=end_offset_days)
-        station_param = slicer_cfg.get("station_param", "code_station")
+        if start_date > end_candidate:
+            start_date = end_candidate
+
+        # Normaliser la fenêtre calculée pour les logs, les fallbacks et les tests
+        slicer_cfg["start_date"] = start_date.isoformat()
+        slicer_cfg["end_date"] = end_candidate.isoformat()
+
+        station_param = (
+            slicer_cfg.get("station_param")
+            or slicer_cfg.get("param")
+            or "code_station"
+        )
         start_param = slicer_cfg.get("start_param", "date_debut")
         end_param = slicer_cfg.get("end_param", "date_fin")
         for station in stations:

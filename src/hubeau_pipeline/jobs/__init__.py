@@ -2,17 +2,17 @@
 Jobs Dagster - Orchestration des pipelines d'ingestion
 """
 
-# Jobs ancienne architecture (deprecated)
-from .bronze_ingestion import (
-    hubeau_hydrometry_job,
-    hubeau_piezometry_job,
-    hubeau_water_quality_surface_job,
-    hubeau_water_quality_groundwater_job,
-    hubeau_temperature_job,
-    hubeau_ecoulement_job,
-    hubeau_hydrobiology_job,
-    hubeau_prelevements_job
-)
+# Jobs ancienne architecture (deprecated - à supprimer)
+# from .bronze_ingestion import (
+#     hubeau_hydrometry_job,
+#     hubeau_piezometry_job,
+#     hubeau_water_quality_surface_job,
+#     hubeau_water_quality_groundwater_job,
+#     hubeau_temperature_job,
+#     hubeau_ecoulement_job,
+#     hubeau_hydrobiology_job,
+#     hubeau_prelevements_job
+# )
 
 # Jobs nouvelle architecture dlt (recommended)
 from .dlt_jobs import (
@@ -26,20 +26,12 @@ from .dlt_jobs import (
     temperature_job,
     sync_all_stations,
     sync_all_yearly_data,
+    sync_all_daily_data,
     sync_realtime_data,
 )
 
-# Jobs ancienne architecture
-old_jobs = [
-    hubeau_hydrometry_job,
-    hubeau_piezometry_job,
-    hubeau_water_quality_surface_job,
-    hubeau_water_quality_groundwater_job,
-    hubeau_temperature_job,
-    hubeau_ecoulement_job,
-    hubeau_hydrobiology_job,
-    hubeau_prelevements_job
-]
+# Jobs ancienne architecture (supprimés)
+# old_jobs = []
 
 # Jobs nouvelle architecture dlt
 dlt_jobs = [
@@ -53,6 +45,7 @@ dlt_jobs = [
     temperature_job,
     sync_all_stations,
     sync_all_yearly_data,
+    sync_all_daily_data,
     sync_realtime_data,
 ]
 
@@ -72,18 +65,8 @@ __all__ = [
     "temperature_job",
     "sync_all_stations",
     "sync_all_yearly_data",
+    "sync_all_daily_data",
     "sync_realtime_data",
-    
-    # Jobs ancienne architecture (deprecated)
-    "old_jobs",
-    "hubeau_hydrometry_job",
-    "hubeau_piezometry_job",
-    "hubeau_water_quality_surface_job",
-    "hubeau_water_quality_groundwater_job",
-    "hubeau_temperature_job",
-    "hubeau_ecoulement_job",
-    "hubeau_hydrobiology_job",
-    "hubeau_prelevements_job",
     
     # Tous les jobs
     "all_jobs"

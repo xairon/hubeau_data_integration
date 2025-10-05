@@ -1,5 +1,33 @@
 # Architecture Technique
 
+## Vue d'Ensemble
+
+```
+┌─────────────────┐    ┌──────────┐    ┌─────────┐
+│   APIs Hubeau   │───▶│ Dagster  │───▶│  MinIO  │
+│                 │    │          │    │ Bronze  │
+│ • Hydrometrie   │    │          │    │         │
+│ • Piezometrie   │    │          │    │         │
+│ • Qualite       │    │          │    │         │
+│ • Temperature   │    │          │    │         │
+│ • Ecoulement    │    │          │    │         │
+│ • Hydrobiologie │    │          │    │         │
+│ • Prelevements  │    │          │    │         │
+└─────────────────┘    └──────────┘    └─────────┘
+                                              │
+                                              ▼
+                    ┌─────────────┬─────────────┬─────────────┐
+                    │TimescaleDB  │   PostGIS   │    Neo4j    │
+                    │Time Series  │ Geospatial  │    Graph    │
+                    └─────────────┴─────────────┴─────────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────┐
+                                    │   Analytics     │
+                                    │   Gold Layer    │
+                                    └─────────────────┘
+```
+
 ## Choix Architecturaux
 
 ### Orchestration : Dagster
@@ -21,7 +49,7 @@
 #### TimescaleDB (Time Series)
 **Justification :** Optimisé pour données temporelles, compression automatique, requêtes analytiques
 - Hypertables pour partitionnement temporel automatique
-- Compression jusqu'à 90% sur données historiques
+- Compression automatique sur données historiques
 - Fonctions analytiques (LAG, LEAD, window functions)
 - Indexes B-tree et BRIN optimisés
 
@@ -40,6 +68,37 @@
 - Contraintes d'unicité et intégrité
 
 ## Architecture Medallion
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        BRONZE LAYER                             │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    MinIO                                 │   │
+│  │  • Donnees brutes JSON                                  │   │
+│  │  • Metadonnees d'ingestion                              │   │
+│  │  • Partitioning par API et date                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        SILVER LAYER                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │TimescaleDB  │  │   PostGIS   │  │    Neo4j    │             │
+│  │Time Series  │  │ Geospatial  │  │    Graph    │             │
+│  │Compression  │  │   Indexes   │  │ Relations   │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         GOLD LAYER                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ Dashboards  │  │    APIs     │  │   Rapports  │             │
+│  │  Metriques  │  │  Services   │  │  Analytics  │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Bronze Layer (MinIO)
 **Rôle :** Stockage des données brutes Hub'Eau
@@ -62,74 +121,84 @@
 - Dashboards et rapports pré-calculés
 - APIs pour applications consommatrices
 
-## Patterns Techniques
+## Flux de Données avec DLT
 
-### Ingestion Hub'Eau
-```python
-# Pattern : Client avec retry et rate limiting
-async with HubeauClient(config) as client:
-    # Sémaphore global pour limiter concurrence
-    async with GLOBAL_HUBEAU_SEMAPHORE:
-        # Retry avec backoff exponentiel
-        async for attempt in AsyncRetrying(...):
-            response = await client.get(url, params=params)
+```
+1. INGESTION AUTOMATISEE
+   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+   │ APIs Hubeau │───▶│ DLT Pipeline│───▶│ MinIO Bronze│
+   │             │    │             │    │             │
+   │ • Slicing   │    │ • Pagination│    │ • JSON brut │
+   │ • Rate limit│    │ • Fallbacks │    │ • Metadonnees│
+   └─────────────┘    └─────────────┘    └─────────────┘
+                                │
+                                ▼
+2. TRANSFORMATION
+   ┌─────────────┬─────────────┬─────────────┐
+   │TimescaleDB  │   PostGIS   │    Neo4j    │
+   │Time Series  │ Geospatial  │    Graph    │
+   │Compression  │   Indexes   │ Relations   │
+   └─────────────┴─────────────┴─────────────┘
+                                │
+                                ▼
+3. ANALYTICS
+   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+   │ Dashboards  │    │    APIs     │    │   Rapports  │
+   │  Metriques  │    │  Services   │    │  Analytics  │
+   └─────────────┘    └─────────────┘    └─────────────┘
+
+MONITORING DAGSTER
+• Logs et metriques
+• Retry automatique
+• Alertes
 ```
 
-### Partitioning Temporel
-- **Daily :** Hydrométrie, piézométrie, température
-- **Annual :** Qualité eaux, hydrobiologie, ONDE, prélèvements
-- **Hybrid :** Hydrobiologie (campagnes saisonnières)
+## Stack Technologique
 
-### Gestion d'Erreurs
-- Retry automatique avec jitter
-- Fallback local si MinIO indisponible
-- Logging structuré avec métriques
-- Alertes sur échecs critiques
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATION                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    Dagster                              │   │
+│  │  • Pipelines & Monitoring                               │   │
+│  │  • Schedules & Sensors                                  │   │
+│  │  • UI integree                                          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATA LOADING                                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    DLT                                 │   │
+│  │  • Data Load Tool                                      │   │
+│  │  • Slicing & Fallbacks                                 │   │
+│  │  • Retry automatique                                   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      STORAGE                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │    MinIO    │  │TimescaleDB  │  │   PostGIS   │             │
+│  │S3-Compatible│  │Time Series  │  │ Geospatial  │             │
+│  │Bronze Layer │  │Compression  │  │   Indexes   │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+│  ┌─────────────┐                                               │
+│  │    Neo4j    │                                               │
+│  │    Graph    │                                               │
+│  │ Relations   │                                               │
+│  └─────────────┘                                               │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     SERVICES                                   │
+│  ┌─────────────┐  ┌─────────────┐                              │
+│  │ Dagster UI  │  │Analytics APIs│                              │
+│  │ Monitoring  │  │   Services   │                              │
+│  └─────────────┘  └─────────────┘                              │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### Monitoring
-- Métriques d'ingestion (records, erreurs, latence)
-- Health checks des services
-- Alertes sur quotas API
-- Dashboard Dagster intégré
-
-## Scalabilité
-
-### Horizontal
-- Dagster : Multi-process execution
-- MinIO : Clustering possible
-- TimescaleDB : Read replicas
-- PostGIS : Partitioning spatial
-
-### Vertical
-- Compression TimescaleDB (90% réduction)
-- Indexes optimisés par cas d'usage
-- Cache Redis pour requêtes fréquentes
-- Connection pooling
-
-## Sécurité
-
-### Authentification
-- Variables d'environnement pour credentials
-- Secrets management via Docker secrets
-- RBAC sur bases de données
-- HTTPS pour APIs externes
-
-### Isolation
-- Réseaux Docker isolés
-- Volumes persistants chiffrés
-- Backup automatique des données
-- Audit logs des accès
-
-## Performance
-
-### Optimisations
-- Parallélisation des requêtes Hub'Eau
-- Chunking adaptatif selon API
-- Compression automatique TimescaleDB
-- Indexes composites optimisés
-
-### Monitoring
-- Métriques Prometheus/Grafana
-- Profiling des requêtes lentes
-- Alertes sur seuils de performance
-- Capacity planning automatique
