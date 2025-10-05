@@ -2,6 +2,8 @@
 
 Pipeline d'intégration des données Hub'Eau (8 APIs) avec architecture medallion et orchestration Dagster.
 
+> **Dépôt GitLab :** https://scm.univ-tours.fr/ringuet/hubeau_data_integration
+
 ## Architecture
 
 ```
