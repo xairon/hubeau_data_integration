@@ -284,6 +284,58 @@ def build_slices(
                     scope=f"station-{station}",
                     metadata=metadata,
                 )
+    elif mode == "station_month_chunked":
+        # Mode station_month_chunked : chunke les stations + fenêtres mensuelles
+        # Optimisation pour APIs avec peu de stations (ex: température ~50 stations actives)
+        stations = _resolve_reference_values(cfg, "stations")
+        if not stations:
+            raise ValueError("station_month_chunked slicer requires stations")
+
+        station_chunk_size = slicer_cfg.get("station_chunk_size", 10)
+        station_param = slicer_cfg.get("station_param", "code_station")
+
+        # Paramètres temporels
+        start_date = override_start or slicer_cfg.get("start_date")
+        end_offset_days = slicer_cfg.get("end_offset_days", 1)
+        if not start_date:
+            raise ValueError("station_month_chunked slicer requires start_date")
+        start = date.fromisoformat(start_date)
+        today = date.today()
+        end_candidate = today - timedelta(days=end_offset_days)
+        if override_end:
+            end_candidate = min(end_candidate, date.fromisoformat(override_end))
+        start_param = slicer_cfg["start_param"]
+        end_param = slicer_cfg["end_param"]
+
+        # Chunker les stations
+        for i in range(0, len(stations), station_chunk_size):
+            station_chunk = stations[i:i + station_chunk_size]
+
+            # Pour chaque chunk de stations, créer fenêtres mensuelles
+            for d0, d1 in month_windows(start, end_candidate):
+                params = {
+                    station_param: ",".join(station_chunk),  # ✅ Multi-stations!
+                    start_param: d0.isoformat(),
+                    end_param: d1.isoformat(),
+                }
+                metadata = {
+                    "mode": "station_month_chunked",
+                    "station_chunk": station_chunk,
+                    "start": d0.isoformat(),
+                    "end": d1.isoformat(),
+                    "station_param": station_param,
+                    "start_param": start_param,
+                    "end_param": end_param,
+                }
+                station_str = "_".join(station_chunk[:3])  # Limiter taille ID
+                if len(station_chunk) > 3:
+                    station_str += f"_and_{len(station_chunk)-3}_more"
+                yield Slice(
+                    params=params,
+                    slice_id=f"stations_{station_str}_{d0.isoformat()}",
+                    scope=f"stations-{len(station_chunk)}",
+                    metadata=metadata,
+                )
     elif mode == "campaign":
         campaigns = slicer_cfg.get("campaigns")
         if not campaigns:
@@ -386,11 +438,29 @@ def needs_truncation(count: int, cfg: Dict[str, Any]) -> bool:
     return count >= threshold
 
 
+def get_active_departments_for_stations(stations_data: list[str], station_type: str) -> list[str]:
+    """
+    Extrait les départements ayant des stations actives depuis MinIO (plus rapide que l'API).
+
+    Args:
+        stations_data: Liste des codes de stations actives
+        station_type: Type de stations
+
+    Returns:
+        Liste unique et triée des départements ayant des stations
+    """
+    # Import ici pour éviter dépendances circulaires
+    from src.hubeau_pipeline.assets.bronze.dlt_assets import get_active_departments_for_stations as _get_depts
+
+    return _get_depts(stations_data, station_type)
+
+
 __all__ = [
     "Slice",
     "build_slices",
     "daterange",
     "generate_fallback_slices",
+    "get_active_departments_for_stations",
     "month_windows",
     "needs_truncation",
 ]

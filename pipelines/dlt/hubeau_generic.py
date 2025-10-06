@@ -177,12 +177,64 @@ def hubeau_source(
     def stream() -> Iterator[Dict[str, Any]]:
         pagination = resolved_cfg.get("pagination") or {}
         method = resolved_cfg.get("method", "GET").upper()
+        
+        # Définir la fonction de log en premier
+        log = dagster_log.info if dagster_log else print
+        
         # Si des stations sont fournies, les ajouter à la config pour le slicing
-        # (nécessaire pour les fallbacks station_month)
+        # (nécessaire pour les fallbacks station_month ET filtrage départements dynamique)
         if stations_data:
+            log(f"📊 DLT: {len(stations_data)} stations fournies par Dagster")
+            if len(stations_data) <= 10:
+                log(f"📋 DLT: Stations: {', '.join(stations_data)}")
+            else:
+                log(f"📋 DLT: Premières 10 stations: {', '.join(stations_data[:10])}")
             slicer_cfg = resolved_cfg.get("slicer", {})
             slicer_cfg["stations"] = stations_data  # Toujours passer les stations pour les fallbacks
+
+            # ✅ NOUVEAU: Filtrage départements dynamique
+            # Si dept_list_dynamic=true, calculer les départements depuis les stations actives
+            if slicer_cfg.get("dept_list_dynamic") and dagster_log:
+                from .slicing import get_active_departments_for_stations
+
+                # Déterminer le type d'API depuis le nom
+                api_name = resolved_cfg.get("name", "")
+                station_type = None
+
+                if "temperature" in api_name:
+                    station_type = "temperature"
+                elif "hydrobio" in api_name or "hydrobiologie" in api_name:
+                    station_type = "hydrobio"
+                elif "hydrometry" in api_name or "hydrometrie" in api_name:
+                    station_type = "hydrometry"
+                elif "piezometry" in api_name or "piezometrie" in api_name:
+                    station_type = "piezometry"
+                elif "quality_rivers" in api_name or "qualite_rivieres" in api_name:
+                    station_type = "quality_rivers"
+                elif "quality_groundwater" in api_name or "qualite_nappes" in api_name:
+                    station_type = "quality_groundwater"
+                elif "ecoulement" in api_name or "onde" in api_name:
+                    station_type = "ecoulement"
+                elif "prelevement" in api_name:
+                    station_type = "prelevements"
+
+                if station_type:
+                    log(f"🔍 DLT: Calcul départements actifs pour {station_type}...")
+                    active_depts = get_active_departments_for_stations(stations_data, station_type)
+
+                    if active_depts:
+                        original_count = len(slicer_cfg.get("dept_list", []))
+                        slicer_cfg["dept_list"] = active_depts
+                        log(f"✅ DLT: Départements filtrés: {len(active_depts)} actifs sur {original_count} total (-{100*(1-len(active_depts)/original_count):.0f}%)")
+                        if len(active_depts) <= 20:
+                            log(f"📋 DLT: Départements actifs: {', '.join(active_depts)}")
+                    else:
+                        log(f"⚠️ DLT: Impossible de filtrer les départements, utilisation liste complète")
+
             resolved_cfg["slicer"] = slicer_cfg
+            log(f"✅ DLT: Stations ajoutées à la configuration DLT")
+        else:
+            log(f"⚠️ DLT: Aucune station fournie par Dagster, utilisation de la configuration par défaut")
         
         slices: Deque[Slice] = deque(build_slices(resolved_cfg))
         
@@ -191,8 +243,6 @@ def hubeau_source(
         total_records_processed = 0
         total_requests_made = 0
         start_time = time.time()
-        
-        log = dagster_log.info if dagster_log else print
 
         log(f"🚀 DLT: Démarrage ingestion {validated_cfg.name} - {total_slices} slices à traiter")
         log(f"📊 DLT: Configuration: {resolved_cfg.get('base_url', '')}{resolved_cfg.get('path', '')}")

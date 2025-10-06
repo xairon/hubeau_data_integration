@@ -1,15 +1,15 @@
-name: quality_rivers_analyses
+name: quality_rivers_conditions
 source: hubeau
 dataset_name: quality_rivers_api
 base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
-path: /analyse_pc
+path: /condition_environnementale_pc
 method: GET
 params_default:
   format: json
   size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
-primary_keys: [code_station, date_prelevement, code_parametre]
-replication_key: date_prelevement
+primary_keys: [code_station, date_operation, code_parametre_env]
+replication_key: date_operation
 pagination:
   type: page
   page_param: page
@@ -124,8 +124,8 @@ slicer:
     - "976"
 # ✅ Filtre temporel optimisé pour chaque département
 temporal_filter:
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
+  start_param: date_debut_operation
+  end_param: date_fin_operation
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
   end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
 fallbacks:
@@ -136,9 +136,32 @@ rate_limit:
   max_concurrency: 1
 timeout: 60
 comment: |
-  API Qualité des Cours d'Eau - Analyses physico-chimiques
-  - Filtrage départemental obligatoire (1 département à la fois)
-  - ~3,000 stations
-  - ~500,000 analyses par an
-  - 200+ paramètres différents
+  API Qualité des Cours d'Eau - Conditions environnementales
 
+  📊 Données disponibles:
+  - Paramètres environnementaux lors du prélèvement
+  - Conditions hydrologiques et météorologiques
+  - Mesures in-situ (température, pH, conductivité, etc.)
+
+  🎯 Utilisation:
+  - Contextualisation des analyses physico-chimiques
+  - Interprétation des résultats d'analyses
+  - Suivi des conditions environnementales
+
+  📋 Champs clés:
+  - code_station: Identifiant de la station
+  - date_operation: Date de l'opération
+  - code_parametre_env: Code du paramètre environnemental
+  - libelle_parametre_env: Libellé du paramètre
+  - resultat_parametre_env: Valeur mesurée
+  - unite_parametre_env: Unité de mesure
+
+  ℹ️ Exemples de paramètres environnementaux:
+  - Température de l'eau
+  - pH
+  - Conductivité
+  - Oxygène dissous
+  - Débit du cours d'eau
+  - Conditions météorologiques
+
+  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-qualite-cours-deau

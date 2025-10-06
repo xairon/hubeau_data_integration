@@ -1,0 +1,62 @@
+name: hydrometry_obs_elab
+source: hubeau
+dataset_name: hydrometry_api
+base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
+path: /obs_elab
+method: GET
+params_default:
+  format: json
+  size: 20000  # ✅ Optimisation: Pages de 20K records
+records_path: $.data
+primary_keys: [code_station, date_obs_elab, grandeur_hydro_elab]
+replication_key: date_obs_elab
+pagination:
+  type: cursor
+  cursor_param: cursor
+  cursor_path: $.next
+  page_size_param: size
+  page_size: 20000  # ✅ Optimisation: Pages de 20K records
+  until_expr: "len($.data) == 0"
+slicer:
+  mode: dept_datetime  # ✅ Mode département×temps pour données historiques
+  dept_param: code_departement
+  dept_chunk_size: 5  # 5 départements par requête
+  dept_list: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95"]
+  start_param: date_debut_obs_elab
+  end_param: date_fin_obs_elab
+  window_days: 30  # Fenêtre mensuelle
+  start_date: "{{ partition_date }}"  # Utilise la partition Dagster
+  end_offset_days: 0
+fallbacks:
+  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  split_chain: [day]  # Si troncature → découpage par jour
+rate_limit:
+  target_rps: 2.0  # 2 requêtes par seconde max
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Hydrométrie Hub'Eau v2 - Observations élaborées (historiques)
+
+  📊 Données disponibles:
+  - Débits, hauteurs d'eau élaborés (qualifiés)
+  - Historique complet (pas de restriction 30 jours comme observations_tr)
+  - Données validées et qualifiées
+
+  🎯 Stratégie optimale:
+  - Mode dept_datetime: Chunking par département + temps
+  - Pagination cursor pour gestion efficace des volumes
+  - Partitions annuelles Dagster pour l'historique
+
+  📋 Champs clés:
+  - code_station: Identifiant de la station
+  - date_obs_elab: Date/heure d'observation élaborée
+  - grandeur_hydro_elab: Type de grandeur (Q, H, N)
+  - resultat_obs_elab: Valeur observée élaborée
+  - code_qualification: Qualité de la mesure
+
+  ⚠️ Différences vs observations_tr:
+  - Pas de restriction 30 jours
+  - Données élaborées et validées (vs temps réel)
+  - Utilisable pour historique complet
+
+  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-hydrometrie

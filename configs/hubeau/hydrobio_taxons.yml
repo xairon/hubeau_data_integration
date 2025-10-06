@@ -1,25 +1,26 @@
 name: hydrobio_taxons
 source: hubeau
-dataset_name: hubeau
-base_url: https://hubeau.eaufrance.fr/api/v1
-path: /hydrobio/taxons
+dataset_name: hydrobio_api
+base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
+path: /taxons
 method: GET
 params_default:
   format: json
-  size: 20000  # ✅ Optimisation: Pages de 20K records
+  size: 2000  # ✅ Doc officielle: taille max 2000 (non 10k)
 records_path: $.data
-primary_keys: [id_taxon, code_station, date_prelevement]
+primary_keys: [code_station_hydrobio, date_prelevement, code_taxon]
 replication_key: date_prelevement
 pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
+  page_size: 2000  # ✅ Doc officielle: taille max 2000
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept_datetime  # ✅ Chunking par département + temps (comme l'ancien code)
   dept_param: code_departement
   dept_chunk_size: 8  # ✅ Optimisé : 8 départements par requête (101÷8≈13 chunks)
+  dept_list_dynamic: true  # ✅ NOUVEAU: Calculer départements depuis stations actives (-20% requêtes estimé)
   dept_list: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95"]
   start_param: date_debut_prelevement
   end_param: date_fin_prelevement
@@ -27,7 +28,7 @@ slicer:
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
   end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
 fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
+  truncation_threshold: 10000  # ✅ Doc officielle: profondeur max 10k
   split_chain: [day]  # Si troncature → découper par jour
 # Note: Suppression de la dépendance pre_scan car hydrobio_stations n'existe pas
 # Le slicer datetime fonctionne sans référence externe

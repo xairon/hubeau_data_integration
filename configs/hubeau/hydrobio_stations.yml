@@ -1,8 +1,8 @@
 name: hydrobio_stations
 source: hubeau
-dataset_name: hubeau
+dataset_name: hydrobio_api
 base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
-path: /stations
+path: /stations_hydrobio
 method: GET
 params_default:
   format: json

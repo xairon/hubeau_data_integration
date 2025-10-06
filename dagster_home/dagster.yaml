@@ -7,7 +7,7 @@ storage:
       hostname: dagster_postgres
       db_name: dagster
       username: postgres
-      password: dagster_password_123
+      password: BrgmDagster2024!
 
 # Limitation des exécutions concurrentes pour éviter de surcharger Hub'Eau
 run_coordinator:

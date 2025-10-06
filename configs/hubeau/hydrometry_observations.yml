@@ -1,6 +1,6 @@
 name: hydrometry_observations
 source: hubeau
-dataset_name: hubeau
+dataset_name: hydrometry_api
 base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
 path: /observations_tr
 method: GET

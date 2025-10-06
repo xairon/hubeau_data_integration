@@ -1,0 +1,51 @@
+name: hydrometry_sites
+source: hubeau
+dataset_name: hydrometry_api
+base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
+path: /referentiel/sites
+method: GET
+params_default:
+  format: json
+  size: 5000
+records_path: $.data
+primary_keys: [code_site]
+replication_key: date_maj_infos
+pagination:
+  type: page
+  page_param: page
+  page_size_param: size
+  page_size: 5000
+  until_expr: "len($.data) == 0"
+slicer:
+  mode: global  # Pas de filtrage nécessaire - récupération globale
+rate_limit:
+  target_rps: 2.0
+  max_concurrency: 1
+timeout: 60
+comment: |
+  API Hydrométrie Hub'Eau v2 - Référentiel des sites hydrométriques
+
+  📊 Données de référence:
+  - Sites hydrométriques (groupements de stations)
+  - Données de référence (pas de partition temporelle)
+  - Mise à jour occasionnelle des informations de site
+
+  🎯 Utilisation:
+  - Référentiel parent pour les stations hydrométriques
+  - Un site peut contenir plusieurs stations
+  - Informations géographiques et administratives
+
+  📋 Champs clés:
+  - code_site: Identifiant unique du site
+  - libelle_site: Nom du site
+  - coordonnee_x, coordonnee_y: Coordonnées géographiques
+  - code_cours_eau: Code du cours d'eau
+  - libelle_cours_eau: Nom du cours d'eau
+  - en_service: Site en service (true/false)
+
+  ℹ️ Différence site vs station:
+  - Site = entité géographique (ex: "Loire à Tours")
+  - Station = point de mesure spécifique sur le site
+  - 1 site peut avoir plusieurs stations (hauteur, débit, etc.)
+
+  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-hydrometrie

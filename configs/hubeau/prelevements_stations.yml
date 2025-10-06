@@ -1,6 +1,6 @@
 name: prelevements_stations
 source: hubeau
-dataset_name: hubeau
+dataset_name: prelevements_api
 base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
 path: /points_prelevement
 method: GET

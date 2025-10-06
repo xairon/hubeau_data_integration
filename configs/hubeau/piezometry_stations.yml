@@ -1,6 +1,6 @@
 name: piezometry_stations
 source: hubeau
-dataset_name: hubeau
+dataset_name: piezometry_api
 base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
 path: /stations
 method: GET

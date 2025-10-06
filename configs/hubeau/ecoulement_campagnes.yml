@@ -1,24 +1,23 @@
-name: quality_rivers_analyses
+name: ecoulement_campagnes
 source: hubeau
-dataset_name: quality_rivers_api
-base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
-path: /analyse_pc
+dataset_name: ecoulement_api
+base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
+path: /campagnes
 method: GET
 params_default:
   format: json
-  size: 20000  # ✅ Optimisation: Pages de 20K records
+  size: 5000
 records_path: $.data
-primary_keys: [code_station, date_prelevement, code_parametre]
-replication_key: date_prelevement
+primary_keys: [code_departement, date_campagne]
 pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
+  page_size: 5000
   until_expr: "len($.data) == 0"
+# Filtrer par département et par période annuelle (si utilisé avec partitions annuelles)
 slicer:
-  mode: dept  # ✅ Filtrage départemental obligatoire (1 département à la fois)
-  dept_list_dynamic: true  # ✅ NOUVEAU: Calculer départements depuis stations actives (-30% requêtes estimé)
+  mode: dept
   param: code_departement
   values:
     - "01"
@@ -122,23 +121,17 @@ slicer:
     - "973"
     - "974"
     - "976"
-# ✅ Filtre temporel optimisé pour chaque département
 temporal_filter:
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [day]  # Si troncature → découpage par jour
+  start_param: date_campagne_min
+  end_param: date_campagne_max
+  start_date: "{{ partition_date }}"
+  end_offset_days: 0
 rate_limit:
   target_rps: 1.5
   max_concurrency: 1
 timeout: 60
 comment: |
-  API Qualité des Cours d'Eau - Analyses physico-chimiques
-  - Filtrage départemental obligatoire (1 département à la fois)
-  - ~3,000 stations
-  - ~500,000 analyses par an
-  - 200+ paramètres différents
+  API Écoulement - Campagnes d'observations
+  - Sert à caler les fenêtres de requête des observations sur les périodes de campagnes
+  - Utilisable pour produire un fichier de référence (pré-scan)
 

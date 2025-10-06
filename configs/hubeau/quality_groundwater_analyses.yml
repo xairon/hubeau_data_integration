@@ -1,6 +1,6 @@
 name: quality_groundwater_analyses
 source: hubeau
-dataset_name: hubeau
+dataset_name: quality_groundwater_api
 base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
 path: /analyses
 method: GET
@@ -8,7 +8,7 @@ params_default:
   format: json
   size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
-primary_keys: [code_bss, date_prelevement, libelle_parametre, code_unite]
+primary_keys: [code_bss, date_prelevement, code_parametre]
 replication_key: date_prelevement
 pagination:
   type: page
@@ -18,7 +18,8 @@ pagination:
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept  # Filtrage départemental obligatoire
-  param: num_departement  # ⚠️ Différent de code_departement !
+  dept_list_dynamic: true  # ✅ NOUVEAU: Calculer départements depuis stations actives (-25% requêtes estimé)
+  param: num_departement  # ✅ Doc officielle: num_departement (non code_departement)
   values:
     - "01"
     - "02"
@@ -137,7 +138,7 @@ timeout: 60
 comment: |
   API Qualité des Nappes - Analyses eaux souterraines
   - Filtrage départemental obligatoire (1 département à la fois)
-  - ⚠️ Utilise num_departement au lieu de code_departement
+  - ✅ IMPORTANT: Utilise num_departement (non code_departement comme autres APIs)
   - ~8,000 stations
   - ~200,000 analyses par an
   - 150+ paramètres différents

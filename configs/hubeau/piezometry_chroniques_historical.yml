@@ -1,8 +1,8 @@
-name: piezometry_chroniques
+name: piezometry_chroniques_historical
 source: hubeau
 dataset_name: piezometry_api
 base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-path: /chroniques_tr
+path: /chroniques
 method: GET
 params_default:
   format: json
@@ -34,28 +34,36 @@ rate_limit:
   max_concurrency: 1
 timeout: 60
 comment: |
-  API Piézométrie Hub'Eau v1 - Chroniques temps réel
-  
+  API Piézométrie Hub'Eau v1 - Chroniques historiques complètes
+
   📊 Données disponibles:
-  - Niveaux de nappes phréatiques
+  - Niveaux de nappes phréatiques (historique complet)
   - Fréquence: mensuelle à trimestrielle selon les stations
   - Volume: ~5,000 stations, ~200,000 mesures/an
-  
+  - Historique: données depuis ~20+ ans
+
   🎯 Stratégie optimale:
-  - Mode dept_datetime: Chunking par département + temps (5 départements × 30 jours)
+  - Mode dept_datetime: Chunking par département + temps (8 départements × 30 jours)
   - Partitions annuelles Dagster pour l'historique
   - Utilisation des stations de référence pour filtrage
-  
+
   📋 Champs clés:
   - code_bss: Identifiant BSS de la station
   - date_mesure: Date de mesure
+  - timestamp_mesure: Timestamp précis de la mesure
   - niveau_nappe_eau: Niveau de la nappe (m NGF)
   - profondeur_nappe: Profondeur de la nappe (m)
   - code_qualification: Qualité de la mesure
-  
-  ⚠️ Limitations API:
-  - Pas de limite de profondeur spécifique
-  - Données disponibles depuis ~20 ans
-  - Mise à jour mensuelle/trimestrielle
-  
+  - mode_obtention: Mode d'obtention (manuel, automatique)
+
+  ⚠️ Différences vs chroniques_tr:
+  - `/chroniques`: Historique complet (toutes dates)
+  - `/chroniques_tr`: Données temps réel/récentes uniquement
+  - `/chroniques`: Données validées et qualifiées
+  - `/chroniques_tr`: Données brutes temps réel
+
+  💡 Utilisation recommandée:
+  - Utiliser `/chroniques` pour analyses historiques complètes
+  - Utiliser `/chroniques_tr` pour suivi temps réel
+
   🔗 Documentation: https://hubeau.eaufrance.fr/page/api-niveaux-nappes

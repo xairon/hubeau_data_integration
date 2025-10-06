@@ -36,9 +36,17 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
     Returns:
         tuple: (stations_data, log_message)
     """
+    context.log.info(f"🔍 Récupération des stations {station_type} pour la partition {partition_date}")
     stations_data = extract_station_codes_from_result({}, station_type, partition_date)
     log_message = f"📊 Using {len(stations_data)} {station_type} stations for observations"
     context.log.info(log_message)
+    
+    # Log les stations récupérées pour debug
+    if len(stations_data) <= 20:
+        context.log.info(f"📋 Stations filtrées: {', '.join(stations_data)}")
+    else:
+        context.log.info(f"📋 Premières 20 stations: {', '.join(stations_data[:20])}")
+    
     return stations_data, log_message
 
 # ====================================
@@ -47,12 +55,290 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
 
 def extract_station_codes_from_result(result: Dict[str, Any], station_type: str = "temperature", partition_date: str = None) -> list[str]:
     """
-    Extrait les codes de stations depuis le résultat d'un asset upstream.
-    Cette fonction lit les données depuis MinIO et extrait les codes de stations.
+    Extrait les codes de stations actives depuis l'API Hub'Eau pour la période donnée.
     
     Args:
-        result: Résultat de l'asset upstream
+        result: Résultat de l'asset upstream (peut être vide {})
         station_type: Type de stations ("temperature", "hydrometry", "piezometry", etc.)
+        partition_date: Date de partition pour filtrer les stations actives (REQUIS)
+    """
+    import httpx
+    from datetime import datetime, date
+    import calendar
+    
+    if not partition_date:
+        print("⚠️ Pas de partition_date fournie, récupération depuis MinIO (liste potentiellement incomplète)")
+        return _extract_station_codes_from_minio(station_type)
+    
+    # ✅ SOLUTION: Récupérer directement les stations actives depuis l'API Hub'Eau
+    print(f"🔍 Récupération des stations actives depuis l'API Hub'Eau pour {station_type} (partition: {partition_date})")
+    
+    try:
+        # ✅ CORRECTION: Utiliser la même logique que DLT pour la période
+        # DLT utilise month_windows() qui génère des fenêtres mensuelles exactes
+        year = datetime.strptime(partition_date, "%Y-%m-%d").year
+        
+        # ✅ NOUVELLE APPROCHE: Tester chaque mois comme le fait DLT
+        # Au lieu d'une seule requête sur toute l'année, faire une requête par mois
+        print(f"🔍 Test des stations actives mois par mois pour l'année {year} (comme DLT)")
+        
+        # Configuration des endpoints par type
+        api_configs = {
+            "temperature": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/temperature",
+                "path": "/chronique",
+                "start_param": "date_debut_mesure",
+                "end_param": "date_fin_mesure",
+                "station_field": "code_station"
+            },
+            "hydrometry": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/hydrometrie",
+                "path": "/observations_tr",
+                "start_param": "date_debut_obs",
+                "end_param": "date_fin_obs",
+                "station_field": "code_station"
+            },
+            "piezometry": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
+                "path": "/chroniques",
+                "start_param": "date_debut_mesure",
+                "end_param": "date_fin_mesure",
+                "station_field": "code_bss"
+            },
+            "quality_rivers": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_rivieres",
+                "path": "/analyses",
+                "start_param": "date_debut_prelevement",
+                "end_param": "date_fin_prelevement",
+                "station_field": "code_station"
+            },
+            "quality_groundwater": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes",
+                "path": "/analyses",
+                "start_param": "date_debut_prelevement",
+                "end_param": "date_fin_prelevement",
+                "station_field": "code_bss"
+            },
+            "ecoulement": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/ecoulement",
+                "path": "/observations",
+                "start_param": "date_debut_obs",
+                "end_param": "date_fin_obs",
+                "station_field": "code_station"
+            },
+            "hydrobio": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/indicateurs_services",
+                "path": "/indices",
+                "start_param": "date_debut_campagne",
+                "end_param": "date_fin_campagne",
+                "station_field": "code_station_hydrobio"
+            },
+            "prelevements": {
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/prelevements",
+                "path": "/chroniques",
+                "start_param": "date_debut_prelevement",
+                "end_param": "date_fin_prelevement",
+                "station_field": "code_point_prelevement"
+            }
+        }
+        
+        if station_type not in api_configs:
+            print(f"⚠️ Type de station non supporté: {station_type}, fallback sur MinIO")
+            return _extract_station_codes_from_minio(station_type)
+        
+        config = api_configs[station_type]
+        
+        # ✅ NOUVELLE APPROCHE: Tester chaque mois comme le fait DLT
+        # Utiliser month_windows() pour générer les mêmes fenêtres que DLT
+        def month_windows(start: date, end: date):
+            """Génère les mêmes fenêtres mensuelles que DLT"""
+            cursor = date(start.year, start.month, 1)
+            final = date(end.year, end.month, calendar.monthrange(end.year, end.month)[1])
+            while cursor <= final:
+                last_day = calendar.monthrange(cursor.year, cursor.month)[1]
+                period_end = date(cursor.year, cursor.month, last_day)
+                yield cursor, min(period_end, final)
+                if cursor.month == 12:
+                    cursor = date(cursor.year + 1, 1, 1)
+                else:
+                    cursor = date(cursor.year, cursor.month + 1, 1)
+        
+        # Générer les fenêtres mensuelles pour l'année
+        start_date_obj = date(year, 1, 1)
+        end_date_obj = date(year, 12, 31)
+        
+        active_stations = set()
+        total_requests = 0
+        
+        # Tester chaque mois comme le fait DLT
+        for month_start, month_end in month_windows(start_date_obj, end_date_obj):
+            print(f"🔍 Test du mois {month_start.strftime('%Y-%m')} ({month_start} à {month_end})")
+            
+            # Requête pour ce mois spécifique
+            params = {
+                "format": "json",
+                "size": 20000,
+                "page": 1,
+                config["start_param"]: month_start.isoformat(),
+                config["end_param"]: month_end.isoformat()
+            }
+            
+            try:
+                response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=60)
+                total_requests += 1
+                
+                if response.status_code not in [200, 206]:
+                    print(f"⚠️ Erreur API pour le mois {month_start.strftime('%Y-%m')}: {response.status_code}")
+                    continue
+                
+                data = response.json()
+                records = data.get("data", [])
+                
+                # Extraire les stations qui ont des données pour ce mois
+                station_field = config["station_field"]
+                month_stations = set()
+                for record in records:
+                    if station_field in record:
+                        station_code = record[station_field]
+                        active_stations.add(station_code)
+                        month_stations.add(station_code)
+                
+                print(f"  📊 {len(records)} records, {len(month_stations)} stations actives pour ce mois")
+                
+            except Exception as e:
+                print(f"⚠️ Erreur lors du test du mois {month_start.strftime('%Y-%m')}: {e}")
+                continue
+        
+        active_stations_list = sorted(list(active_stations))
+        print(f"✅ {len(active_stations_list)} stations actives trouvées pour {station_type} (année {year})")
+        print(f"📊 Total requêtes: {total_requests} (une par mois)")
+        
+        return active_stations_list
+        
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la récupération des stations depuis l'API: {e}")
+        import traceback
+        traceback.print_exc()
+        print("⚠️ Fallback sur la liste MinIO (potentiellement incomplète)")
+        return _extract_station_codes_from_minio(station_type)
+
+
+def get_active_departments_for_stations(stations_data: list[str], station_type: str) -> list[str]:
+    """
+    Extrait les départements ayant des stations actives.
+
+    Args:
+        stations_data: Liste des codes de stations actives
+        station_type: Type de stations
+
+    Returns:
+        Liste unique et triée des départements ayant des stations
+    """
+    import httpx
+
+    if not stations_data:
+        return []
+
+    # Configuration des endpoints pour récupérer les métadonnées des stations
+    api_configs = {
+        "temperature": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/temperature/station",
+            "station_field": "code_station",
+            "dept_field": "code_departement"
+        },
+        "hydrometry": {
+            "url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations",
+            "station_field": "code_station",
+            "dept_field": "code_departement"
+        },
+        "piezometry": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
+            "station_field": "code_bss",
+            "dept_field": "code_departement"
+        },
+        "quality_rivers": {
+            "url": "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/station_pc",
+            "station_field": "code_station",
+            "dept_field": "code_departement"
+        },
+        "quality_groundwater": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/stations",
+            "station_field": "code_bss",
+            "dept_field": "code_departement"
+        },
+        "hydrobio": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/hydrobio/stations_hydrobio",
+            "station_field": "code_station_hydrobio",
+            "dept_field": "code_departement"
+        },
+        "ecoulement": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/ecoulement/stations",
+            "station_field": "code_station",
+            "dept_field": "code_departement"
+        },
+        "prelevements": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/prelevements/points_prelevement",
+            "station_field": "code_point_prelevement",
+            "dept_field": "code_departement"
+        }
+    }
+
+    if station_type not in api_configs:
+        print(f"⚠️ Type de station non supporté pour filtrage départements: {station_type}")
+        return []
+
+    config = api_configs[station_type]
+    departments = set()
+
+    try:
+        # Stratégie: Récupérer en une seule fois toutes les stations
+        # (plus efficace que requête par station)
+        print(f"🔍 Récupération départements pour {len(stations_data)} stations {station_type}")
+
+        # Construire requête avec toutes les stations (si API supporte multi-stations)
+        # Sinon, faire par batches
+        station_field = config["station_field"]
+        dept_field = config["dept_field"]
+
+        # Stratégie batch : récupérer toutes les stations en plusieurs requêtes
+        batch_size = 100  # Limiter par sécurité
+        for i in range(0, len(stations_data), batch_size):
+            batch = stations_data[i:i + batch_size]
+
+            # Requête pour ce batch
+            params = {
+                "format": "json",
+                "size": 1000,
+                station_field: ",".join(batch)
+            }
+
+            try:
+                response = httpx.get(config["url"], params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    for record in data.get("data", []):
+                        dept = record.get(dept_field)
+                        if dept:
+                            departments.add(dept)
+            except Exception as e:
+                print(f"⚠️ Erreur lors de la requête batch {i//batch_size + 1}: {e}")
+                continue
+
+        departments_list = sorted(list(departments))
+        print(f"✅ {len(departments_list)} départements avec stations actives trouvés")
+        return departments_list
+
+    except Exception as e:
+        print(f"⚠️ Erreur lors du filtrage départements: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def _extract_station_codes_from_minio(station_type: str = "temperature") -> list[str]:
+    """
+    Extrait les codes de stations depuis MinIO (liste potentiellement incomplète).
+    Cette fonction est un fallback si l'API Hub'Eau n'est pas disponible.
     """
     import boto3
     import json
@@ -178,22 +464,14 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
                 pass
         
         print(f"✅ Extracted {len(stations)} {station_type} station codes from MinIO")
-        
-        # Si une partition_date est fournie, filtrer les stations qui ont des données pour cette période
-        if partition_date and station_type in ["temperature", "hydrometry", "piezometry", "quality_rivers", "quality_groundwater", "ecoulement", "hydrobio", "prelevements"]:
-            print(f"🔍 Filtrage des stations pour la période {partition_date}")
-            active_stations = _filter_active_stations_for_period(stations, partition_date, station_type)
-            print(f"✅ Stations actives pour {partition_date}: {len(active_stations)} sur {len(stations)}")
-            return active_stations
-        
         return stations
         
     except Exception as e:
-        # En cas d'erreur, retourner une liste vide pour éviter de bloquer le pipeline
         print(f"⚠️ Erreur lors de la lecture des {station_type} stations depuis MinIO: {e}")
         import traceback
         traceback.print_exc()
         return []
+
 
 def _filter_active_stations_for_period(stations: list[str], partition_date: str, station_type: str) -> list[str]:
     """
@@ -281,34 +559,51 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
         
         config = api_configs[station_type]
         
-        # Faire une requête test pour identifier les stations actives
-        params = {
-            "format": "json",
-            "size": 1000,  # Récupérer un échantillon
-            config["start_param"]: start_date,
-            config["end_param"]: end_date
-        }
-        
-        response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=30)
-        
-        if response.status_code not in [200, 206]:
-            print(f"⚠️ Erreur API lors du filtrage: {response.status_code}")
-            return stations
-        
-        data = response.json()
-        records = data.get("data", [])
-        
-        # Extraire les stations qui ont des données
+        # ✅ CORRECTIF: Récupérer TOUTES les stations actives avec pagination
         active_stations = set()
-        station_field = config["station_field"]
-        for record in records:
-            if station_field in record:
-                active_stations.add(record[station_field])
+        page = 1
+        max_pages = 50  # Limite de sécurité
+        
+        while page <= max_pages:
+            params = {
+                "format": "json",
+                "size": 20000,  # Taille maximale pour récupérer plus de stations
+                "page": page,
+                config["start_param"]: start_date,
+                config["end_param"]: end_date
+            }
+            
+            response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=30)
+            
+            if response.status_code not in [200, 206]:
+                print(f"⚠️ Erreur API lors du filtrage (page {page}): {response.status_code}")
+                break
+            
+            data = response.json()
+            records = data.get("data", [])
+            
+            if not records:
+                break  # Plus de données
+            
+            # Extraire les stations qui ont des données
+            station_field = config["station_field"]
+            for record in records:
+                if station_field in record:
+                    active_stations.add(record[station_field])
+            
+            print(f"🔍 Page {page}: {len(records)} records, {len(active_stations)} stations uniques trouvées")
+            
+            # Si on a moins de records que la taille de page, on a atteint la fin
+            if len(records) < 20000:
+                break
+                
+            page += 1
         
         # Filtrer la liste originale pour ne garder que les stations actives
         filtered_stations = [station for station in stations if station in active_stations]
         
         print(f"📊 Résultat du filtrage: {len(filtered_stations)} stations actives sur {len(stations)} total")
+        print(f"📊 Stations actives trouvées dans l'API: {len(active_stations)}")
         
         return filtered_stations
         
@@ -591,6 +886,10 @@ def ecoulement_stations_reference(context: AssetExecutionContext) -> Dict[str, A
     """Ingests ecoulement stations reference data using dlt (pas de partition)."""
     return ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
 
+@asset(group_name="hubeau_ecoulement")
+def ecoulement_campagnes_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests ecoulement campaigns reference (utilisé pour caler les fenêtres d'observations)."""
+    return ingest_dlt(context, "configs/hubeau/ecoulement_campagnes.yml")
 @asset(group_name="hubeau_hydrobio")
 def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology stations reference data using dlt (pas de partition)."""
@@ -605,6 +904,43 @@ def prelevements_stations_reference(context: AssetExecutionContext) -> Dict[str,
 def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature stations reference data using dlt (pas de partition)."""
     return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
+
+# ====================================
+# NOUVEAUX ASSETS POUR ENDPOINTS MANQUANTS
+# ====================================
+
+@asset(group_name="hubeau_hydrometry")
+def hydrometry_sites_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrometry sites reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/hydrometry_sites.yml")
+
+@asset(group_name="hubeau_hydrometry", partitions_def=YEARLY_PARTITIONS, deps=[hydrometry_stations_reference])
+def hydrometry_obs_elab(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrometry elaborated observations (historical data)."""
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "hydrometry", partition_date)
+    return ingest_dlt(context, "configs/hubeau/hydrometry_obs_elab.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
+def quality_rivers_operations(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests quality rivers sampling operations."""
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "quality_rivers", partition_date)
+    return ingest_dlt(context, "configs/hubeau/quality_rivers_operations.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
+def quality_rivers_conditions(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests quality rivers environmental conditions."""
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "quality_rivers", partition_date)
+    return ingest_dlt(context, "configs/hubeau/quality_rivers_conditions.yml", stations_data=stations_data, partition_date=partition_date)
+
+@asset(group_name="hubeau_piezometry", partitions_def=YEARLY_PARTITIONS, deps=[piezometry_stations_reference])
+def piezometry_chroniques_historical(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests piezometry historical chroniques (complete historical data)."""
+    partition_date = _get_partition_date_yearly(context)
+    stations_data, _ = _setup_observation_asset(context, "piezometry", partition_date)
+    return ingest_dlt(context, "configs/hubeau/piezometry_chroniques_historical.yml", stations_data=stations_data, partition_date=partition_date)
 
 # ====================================
 # ASSETS D'OBSERVATIONS/ANALYSES (dépendent des stations)
@@ -652,7 +988,7 @@ def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, An
     stations_data, _ = _setup_observation_asset(context, "quality_groundwater", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_ecoulement", partitions_def=DAILY_PARTITIONS, deps=[ecoulement_stations_reference])
+@asset(group_name="hubeau_ecoulement", partitions_def=DAILY_PARTITIONS, deps=[ecoulement_stations_reference, ecoulement_campagnes_reference])
 def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement observations data using dlt (30 derniers jours)."""
     partition_date = _get_partition_date_daily(context)

@@ -1,6 +1,6 @@
 name: prelevements_chroniques
 source: hubeau
-dataset_name: hubeau
+dataset_name: prelevements_api
 base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
 path: /chroniques
 method: GET
@@ -18,6 +18,7 @@ pagination:
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept  # ✅ Filtrage départemental obligatoire (1 département à la fois)
+  dept_list_dynamic: true  # ✅ NOUVEAU: Calculer départements depuis stations actives
   param: code_departement
   values:
     - "01"
