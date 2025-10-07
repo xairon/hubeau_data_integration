@@ -5,6 +5,7 @@ Bronze → Silver → Gold avec optimisations
 
 # Import des assets par couche - VERSION RÉELLE (Bronze seulement)
 from .bronze import all_bronze_assets
+from .monitoring import minio_data_quality_report, minio_data_quality_checks
 
 # Silver et Gold temporairement désactivés (imports cassés)
 # from .silver import (
@@ -20,13 +21,17 @@ from .bronze import all_bronze_assets
 production_assets = [
     # Bronze - Assets réels avec vraies connexions
     *all_bronze_assets,
-    
+
+    # Monitoring - Suivi de la qualité des données
+    minio_data_quality_report,
+    minio_data_quality_checks,
+
     # Silver - À réimplémenter avec vraies transformations
     # piezo_timescale_optimized,
     # quality_timescale_optimized,
     # bdlisa_postgis_silver,
     # sandre_neo4j_silver,
-    
+
     # Gold - Production future
     # sosa_ontology_production,
     # integrated_analytics_production

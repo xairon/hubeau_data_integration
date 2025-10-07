@@ -34,10 +34,13 @@ class SlicerConfig(BaseModel):
     dept_param: str | None = None
     dept_chunk_size: int | None = Field(default=None, ge=1)
     dept_list: list[str] | None = None
+    # Paramètres pour le mode station_month_chunked
+    station_param: str | None = None
+    station_chunk_size: int | None = Field(default=None, ge=1)
 
     @field_validator("mode")
     def validate_mode(cls, value: str) -> str:
-        allowed = {"datetime", "dept", "dept_datetime", "station_month", "campaign", "global"}
+        allowed = {"datetime", "dept", "dept_datetime", "station_month", "station_month_chunked", "campaign", "global"}
         if value not in allowed:
             raise ValueError(f"Unsupported slicer mode: {value}")
         return value

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import time
 
@@ -29,38 +29,72 @@ def _get_partition_date_daily(context: AssetExecutionContext) -> str:
     """Retourne directement la partition quotidienne (ex: '2024-01-01')."""
     return context.partition_key
 
-def _setup_observation_asset(context: AssetExecutionContext, station_type: str, partition_date: str) -> tuple[list[str], str]:
+def _setup_observation_asset(context: AssetExecutionContext, station_type: str, partition_date: str) -> tuple[Dict[str, List[str]], str]:
     """
     Configuration commune pour les assets d'observations.
-    
+
     Returns:
-        tuple: (stations_data, log_message)
+        tuple: (stations_data: Dict[station_code, List[months]], log_message)
     """
     context.log.info(f"🔍 Récupération des stations {station_type} pour la partition {partition_date}")
-    stations_data = extract_station_codes_from_result({}, station_type, partition_date)
-    log_message = f"📊 Using {len(stations_data)} {station_type} stations for observations"
+
+    # ✅ STRATÉGIE OPTIMISÉE AVEC FALLBACK AUTOMATIQUE:
+    # 1. Récupérer TOUTES les stations depuis MinIO (référentiel complet)
+    all_stations = _extract_station_codes_from_minio(station_type)
+    context.log.info(f"📂 {len(all_stations)} stations total dans référentiel MinIO")
+
+    stations_data: Dict[str, List[str]] = {}
+
+    if all_stations:
+        # 2. Filtrer pour ne garder que les stations actives dans la partition
+        filtered_stations = _filter_active_stations_for_period(all_stations, partition_date, station_type)
+        context.log.info(f"✅ {len(filtered_stations)} stations actives pour partition {partition_date}")
+
+        # 3. Convertir en dict avec tous les mois de l'année
+        from datetime import datetime
+        year = datetime.strptime(partition_date, "%Y-%m-%d").year
+        all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
+        stations_data = {station: all_months for station in filtered_stations}
+
+    # 4. Fallback: si aucune station n'est trouvée via MinIO (ou filtrage vide),
+    #    basculer sur la découverte des stations actives via l'API Hub'Eau
+    if not stations_data:
+        context.log.warning("⚠️ Aucune station disponible depuis MinIO après filtrage. Fallback API activé pour découvrir les stations actives/mois.")
+        try:
+            stations_data = extract_station_codes_from_result({}, station_type=station_type, partition_date=partition_date)
+            context.log.info(f"✅ Fallback API: {len(stations_data)} stations actives détectées pour {station_type}")
+        except Exception as e:
+            context.log.error(f"❌ Fallback API échoué pour {station_type}: {e}")
+            stations_data = {}
+
+    total_station_months = sum(len(months) for months in stations_data.values())
+    log_message = f"📊 Using {len(stations_data)} {station_type} stations ({total_station_months} station-mois)"
     context.log.info(log_message)
-    
+
     # Log les stations récupérées pour debug
-    if len(stations_data) <= 20:
-        context.log.info(f"📋 Stations filtrées: {', '.join(stations_data)}")
+    station_codes = list(stations_data.keys())
+    if len(station_codes) <= 20:
+        context.log.info(f"📋 Stations filtrées: {', '.join(station_codes)}")
     else:
-        context.log.info(f"📋 Premières 20 stations: {', '.join(stations_data[:20])}")
-    
+        context.log.info(f"📋 Premières 20 stations: {', '.join(station_codes[:20])}")
+
     return stations_data, log_message
 
 # ====================================
 # Generic dlt Ingestion Asset
 # ====================================
 
-def extract_station_codes_from_result(result: Dict[str, Any], station_type: str = "temperature", partition_date: str = None) -> list[str]:
+def extract_station_codes_from_result(result: Dict[str, Any], station_type: str = "temperature", partition_date: str = None) -> Dict[str, List[str]]:
     """
-    Extrait les codes de stations actives depuis l'API Hub'Eau pour la période donnée.
-    
+    Extrait les codes de stations actives avec leurs mois de données depuis l'API Hub'Eau.
+
     Args:
         result: Résultat de l'asset upstream (peut être vide {})
         station_type: Type de stations ("temperature", "hydrometry", "piezometry", etc.)
         partition_date: Date de partition pour filtrer les stations actives (REQUIS)
+
+    Returns:
+        Dict[str, List[str]]: Dictionnaire {code_station: [liste des mois "YYYY-MM" avec données]}
     """
     import httpx
     from datetime import datetime, date
@@ -68,7 +102,11 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
     
     if not partition_date:
         print("⚠️ Pas de partition_date fournie, récupération depuis MinIO (liste potentiellement incomplète)")
-        return _extract_station_codes_from_minio(station_type)
+        # Convertir la liste en dict avec tous les mois de l'année courante
+        stations_list = _extract_station_codes_from_minio(station_type)
+        year = datetime.now().year
+        all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
+        return {station: all_months for station in stations_list}
     
     # ✅ SOLUTION: Récupérer directement les stations actives depuis l'API Hub'Eau
     print(f"🔍 Récupération des stations actives depuis l'API Hub'Eau pour {station_type} (partition: {partition_date})")
@@ -80,65 +118,67 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
         
         # ✅ NOUVELLE APPROCHE: Tester chaque mois comme le fait DLT
         # Au lieu d'une seule requête sur toute l'année, faire une requête par mois
-        print(f"🔍 Test des stations actives mois par mois pour l'année {year} (comme DLT)")
-        
+        print(f"🔍 Test des stations actives pour l'année {year}")
+
         # Configuration des endpoints par type
+        # ✅ STRATÉGIE: Utiliser l'endpoint de STATIONS si filtrage temporel supporté
+        # ❌ SINON: Utiliser l'endpoint de DONNÉES avec approche hybride (mois + département si limite 20K)
         api_configs = {
             "temperature": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/temperature",
-                "path": "/chronique",
+                "path": "/station",  # ✅ Endpoint stations supporte filtrage temporel
                 "start_param": "date_debut_mesure",
                 "end_param": "date_fin_mesure",
                 "station_field": "code_station"
             },
             "hydrometry": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/hydrometrie",
-                "path": "/observations_tr",
+                "path": "/observations_tr",  # ❌ Pas d'endpoint stations avec filtrage, utiliser données
                 "start_param": "date_debut_obs",
                 "end_param": "date_fin_obs",
                 "station_field": "code_station"
             },
             "piezometry": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
-                "path": "/chroniques",
+                "path": "/chroniques",  # ❌ /stations ne supporte pas filtrage, utiliser données
                 "start_param": "date_debut_mesure",
                 "end_param": "date_fin_mesure",
                 "station_field": "code_bss"
             },
             "quality_rivers": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_rivieres",
-                "path": "/analyses",
+                "base_url": "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres",
+                "path": "/station_pc",  # ✅ Endpoint stations supporte filtrage temporel (4431 vs 24324)
                 "start_param": "date_debut_prelevement",
                 "end_param": "date_fin_prelevement",
                 "station_field": "code_station"
             },
             "quality_groundwater": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes",
-                "path": "/analyses",
+                "path": "/analyses",  # ❌ /stations ne supporte pas filtrage, utiliser données
                 "start_param": "date_debut_prelevement",
                 "end_param": "date_fin_prelevement",
                 "station_field": "code_bss"
             },
             "ecoulement": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/ecoulement",
-                "path": "/observations",
-                "start_param": "date_debut_obs",
-                "end_param": "date_fin_obs",
+                "path": "/observations",  # ❌ /stations ne supporte pas filtrage, utiliser données
+                "start_param": "date_observation_min",  # ✅ Corrigé selon API
+                "end_param": "date_observation_max",    # ✅ Corrigé selon API
                 "station_field": "code_station"
             },
             "hydrobio": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/indicateurs_services",
-                "path": "/indices",
-                "start_param": "date_debut_campagne",
-                "end_param": "date_fin_campagne",
+                "base_url": "https://hubeau.eaufrance.fr/api/v1/hydrobio",
+                "path": "/indices",  # ❌ Pas d'endpoint stations avec filtrage, utiliser données
+                "start_param": "date_debut_prelevement",  # ✅ Corrigé selon API
+                "end_param": "date_fin_prelevement",      # ✅ Corrigé selon API
                 "station_field": "code_station_hydrobio"
             },
             "prelevements": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/prelevements",
-                "path": "/chroniques",
-                "start_param": "date_debut_prelevement",
-                "end_param": "date_fin_prelevement",
-                "station_field": "code_point_prelevement"
+                "path": "/chroniques",  # ❌ Pas d'endpoint stations avec filtrage, utiliser données
+                "start_param": "annee",  # ⚠️ Chroniques: filtrage par année uniquement (pas de dates précises)
+                "end_param": "annee",    # ⚠️ Utiliser la même année pour start/end
+                "station_field": "code_ouvrage"
             }
         }
         
@@ -166,69 +206,100 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
         # Générer les fenêtres mensuelles pour l'année
         start_date_obj = date(year, 1, 1)
         end_date_obj = date(year, 12, 31)
-        
-        active_stations = set()
+
+        # ✅ NOUVELLE STRUCTURE: Dict[station_code, List[month_str]]
+        stations_months: Dict[str, set] = {}  # Utiliser set temporairement pour éviter doublons
         total_requests = 0
-        
-        # Tester chaque mois comme le fait DLT
+
+        # ✅ NOUVELLE APPROCHE: Toujours utiliser découpage mensuel pour tracker les mois actifs
+        print(f"🔍 Interrogation API par mois pour {station_type} ({year})...")
+
+        station_field = config["station_field"]
+
+        # Découpage mensuel pour tous les types : permet de tracker les mois actifs par station
         for month_start, month_end in month_windows(start_date_obj, end_date_obj):
-            print(f"🔍 Test du mois {month_start.strftime('%Y-%m')} ({month_start} à {month_end})")
-            
-            # Requête pour ce mois spécifique
-            params = {
-                "format": "json",
-                "size": 20000,
-                "page": 1,
-                config["start_param"]: month_start.isoformat(),
-                config["end_param"]: month_end.isoformat()
-            }
-            
-            try:
-                response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=60)
-                total_requests += 1
-                
-                if response.status_code not in [200, 206]:
-                    print(f"⚠️ Erreur API pour le mois {month_start.strftime('%Y-%m')}: {response.status_code}")
-                    continue
-                
-                data = response.json()
-                records = data.get("data", [])
-                
-                # Extraire les stations qui ont des données pour ce mois
-                station_field = config["station_field"]
-                month_stations = set()
-                for record in records:
-                    if station_field in record:
-                        station_code = record[station_field]
-                        active_stations.add(station_code)
-                        month_stations.add(station_code)
-                
-                print(f"  📊 {len(records)} records, {len(month_stations)} stations actives pour ce mois")
-                
-            except Exception as e:
-                print(f"⚠️ Erreur lors du test du mois {month_start.strftime('%Y-%m')}: {e}")
-                continue
-        
-        active_stations_list = sorted(list(active_stations))
-        print(f"✅ {len(active_stations_list)} stations actives trouvées pour {station_type} (année {year})")
-        print(f"📊 Total requêtes: {total_requests} (une par mois)")
-        
-        return active_stations_list
+            month_str = month_start.strftime('%Y-%m')
+            page = 1
+            month_stations = set()
+
+            # ✅ PAGINATION: Continue jusqu'à ce qu'on ait toutes les stations du mois
+            while True:
+                params = {
+                    "format": "json",
+                    "size": 20000,
+                    "page": page,
+                    config["start_param"]: month_start.isoformat(),
+                    config["end_param"]: month_end.isoformat()
+                }
+
+                try:
+                    response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=60)
+                    total_requests += 1
+
+                    if response.status_code not in [200, 206]:
+                        break
+
+                    data = response.json()
+                    records = data.get("data", [])
+
+                    if len(records) == 0:
+                        break
+
+                    # Extraire les stations du mois
+                    for record in records:
+                        if station_field in record:
+                            station_code = record[station_field]
+                            month_stations.add(station_code)
+
+                    # Si moins de 20K records, c'est la dernière page
+                    if len(records) < 20000:
+                        break
+
+                    page += 1
+
+                except Exception as e:
+                    break
+
+            # Ajouter ce mois à chaque station trouvée
+            for station_code in month_stations:
+                if station_code not in stations_months:
+                    stations_months[station_code] = set()
+                stations_months[station_code].add(month_str)
+
+            if len(month_stations) > 0:
+                print(f"  Mois {month_str}: {len(month_stations)} stations ({page} page(s))")
+
+        # Convertir les sets en listes triées
+        stations_months_dict = {
+            station: sorted(list(months))
+            for station, months in stations_months.items()
+        }
+
+        total_stations = len(stations_months_dict)
+        total_station_months = sum(len(months) for months in stations_months_dict.values())
+        print(f"✅ {total_stations} stations actives trouvées pour {station_type} (année {year})")
+        print(f"📊 Total station-mois: {total_station_months} ({total_requests} requêtes)")
+
+        return stations_months_dict
         
     except Exception as e:
         print(f"⚠️ Erreur lors de la récupération des stations depuis l'API: {e}")
         import traceback
         traceback.print_exc()
         print("⚠️ Fallback sur la liste MinIO (potentiellement incomplète)")
-        return _extract_station_codes_from_minio(station_type)
+        # Convertir la liste en dict avec tous les mois de l'année
+        stations_list = _extract_station_codes_from_minio(station_type)
+        year = datetime.strptime(partition_date, "%Y-%m-%d").year if partition_date else datetime.now().year
+        all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
+        return {station: all_months for station in stations_list}
 
 
-def get_active_departments_for_stations(stations_data: list[str], station_type: str) -> list[str]:
+def get_active_departments_for_stations(stations_data: Dict[str, List[str]], station_type: str) -> list[str]:
     """
     Extrait les départements ayant des stations actives.
 
     Args:
-        stations_data: Liste des codes de stations actives
+        stations_data: Dict des stations actives {code_station: [mois]}
         station_type: Type de stations
 
     Returns:
@@ -238,6 +309,9 @@ def get_active_departments_for_stations(stations_data: list[str], station_type: 
 
     if not stations_data:
         return []
+
+    # Convertir le dict en liste de codes stations
+    station_codes = list(stations_data.keys())
 
     # Configuration des endpoints pour récupérer les métadonnées des stations
     api_configs = {
@@ -293,7 +367,7 @@ def get_active_departments_for_stations(stations_data: list[str], station_type: 
     try:
         # Stratégie: Récupérer en une seule fois toutes les stations
         # (plus efficace que requête par station)
-        print(f"🔍 Récupération départements pour {len(stations_data)} stations {station_type}")
+        print(f"🔍 Récupération départements pour {len(station_codes)} stations {station_type}")
 
         # Construire requête avec toutes les stations (si API supporte multi-stations)
         # Sinon, faire par batches
@@ -302,8 +376,8 @@ def get_active_departments_for_stations(stations_data: list[str], station_type: 
 
         # Stratégie batch : récupérer toutes les stations en plusieurs requêtes
         batch_size = 100  # Limiter par sécurité
-        for i in range(0, len(stations_data), batch_size):
-            batch = stations_data[i:i + batch_size]
+        for i in range(0, len(station_codes), batch_size):
+            batch = station_codes[i:i + batch_size]
 
             # Requête pour ce batch
             params = {
@@ -375,22 +449,48 @@ def _extract_station_codes_from_minio(station_type: str = "temperature") -> list
         
         prefix = station_prefixes.get(station_type, f"hubeau/{station_type}_stations/")
         
-        # Chercher les fichiers de stations les plus récents
+        # Chercher les fichiers de stations les plus récents (préfixe standard)
         response = s3_client.list_objects_v2(
             Bucket=bucket_name,
             Prefix=prefix
         )
-        
-        if 'Contents' not in response:
+
+        # Si rien trouvé, essayer des variantes possibles (avec dataset en préfixe)
+        if 'Contents' not in response or not response.get('Contents'):
             print(f"⚠️ No files found in {prefix}, trying alternative paths...")
-            # Essayer d'autres chemins possibles
-            for alt_prefix in [f"{station_type}_stations/", f"bronze/{station_type}_stations/"]:
+            alt_prefixes = [
+                f"{station_type}_stations/",
+                f"bronze/{station_type}_stations/",
+                # Variantes avec datasets (ex: quality_groundwater_api/quality_groundwater_stations/)
+                f"quality_groundwater_api/{station_type}_stations/",
+                f"quality_rivers_api/{station_type}_stations/",
+                f"temperature_api/{station_type}_stations/",
+                f"hydrometry_api/{station_type}_stations/",
+                f"piezometry_api/{station_type}_stations/",
+                f"ecoulement_api/{station_type}_stations/",
+                f"hydrobio_api/{station_type}_stations/",
+                f"prelevements_api/{station_type}_stations/",
+            ]
+            for alt_prefix in alt_prefixes:
                 response = s3_client.list_objects_v2(
                     Bucket=bucket_name,
                     Prefix=alt_prefix
                 )
-                if 'Contents' in response:
+                if response.get('Contents'):
                     break
+
+        # Si toujours rien, dernier recours: lister et filtrer par motif "/{folder}/"
+        if 'Contents' not in response or not response.get('Contents'):
+            try:
+                print("⚠️ Broad scan of bucket to locate station files (may be slow)...")
+                all_objs = s3_client.list_objects_v2(Bucket=bucket_name)
+                if 'Contents' in all_objs:
+                    folder = station_prefixes.get(station_type, f"{station_type}_stations/").rstrip('/')
+                    filtered = [o for o in all_objs['Contents'] if f"/{folder}/" in o['Key'] or o['Key'].startswith(folder + "/")]
+                    if filtered:
+                        response = {'Contents': filtered}
+            except Exception:
+                pass
         
         if 'Contents' not in response:
             raise ValueError(f"No {station_type} stations data found in MinIO")
@@ -497,7 +597,8 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
         api_configs = {
             "temperature": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/temperature",
-                "path": "/chronique",
+                # Utiliser l'endpoint stations pour détecter l'activité sans risque de troncature sur les données
+                "path": "/station",
                 "start_param": "date_debut_mesure",
                 "end_param": "date_fin_mesure",
                 "station_field": "code_station"
@@ -517,8 +618,8 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
                 "station_field": "code_bss"
             },
             "quality_rivers": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_rivieres",
-                "path": "/analyses",
+                "base_url": "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres",
+                "path": "/station_pc",  # ✅ Utiliser /station_pc au lieu de /analyse_pc (pas de limite 20K)
                 "start_param": "date_debut_prelevement",
                 "end_param": "date_fin_prelevement",
                 "station_field": "code_station"
@@ -547,9 +648,9 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
             "prelevements": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/prelevements",
                 "path": "/chroniques",
-                "start_param": "date_debut_prelevement",
-                "end_param": "date_fin_prelevement",
-                "station_field": "code_point_prelevement"
+                "start_param": "annee_min",
+                "end_param": "annee_max",
+                "station_field": "code_ouvrage"  # ⚠️ Chroniques utilisent code_ouvrage, pas code_point_prelevement
             }
         }
         
@@ -562,7 +663,7 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
         # ✅ CORRECTIF: Récupérer TOUTES les stations actives avec pagination
         active_stations = set()
         page = 1
-        max_pages = 50  # Limite de sécurité
+        max_pages = 500  # Limite augmentée (quality_groundwater: 8.5M÷20K=425 pages)
         
         while page <= max_pages:
             params = {
@@ -583,7 +684,8 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
             records = data.get("data", [])
             
             if not records:
-                break  # Plus de données
+                # Plus de données
+                break
             
             # Extraire les stations qui ont des données
             station_field = config["station_field"]
@@ -592,11 +694,13 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
                     active_stations.add(record[station_field])
             
             print(f"🔍 Page {page}: {len(records)} records, {len(active_stations)} stations uniques trouvées")
-            
-            # Si on a moins de records que la taille de page, on a atteint la fin
-            if len(records) < 20000:
+
+            # ✅ Continuer tant que l'API fournit un lien next
+            next_link = data.get("next")
+            if next_link is None:
+                print(f"✅ Dernière page atteinte (next=None)")
                 break
-                
+
             page += 1
         
         # Filtrer la liste originale pour ne garder que les stations actives
@@ -611,10 +715,16 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
         print(f"⚠️ Erreur lors du filtrage des stations: {e}")
         return stations  # En cas d'erreur, retourner toutes les stations
 
-def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[list[str]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
+def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[Dict[str, List[str]]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
     """
     Generic function to run a dlt pipeline based on a YAML configuration file.
     This is used internally by the dlt assets.
+
+    Args:
+        context: Dagster execution context
+        config_path: Path to YAML config file
+        stations_data: Dict {station_code: [months]} for temporal filtering
+        partition_date: Partition date string
     """
     import os
     import yaml

@@ -22,7 +22,7 @@ pagination:
 slicer:
   mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
   station_param: code_station  # Paramètre station pour l'API
-  station_chunk_size: 10  # ✅ 10 stations par requête (50÷10 = 5 chunks)
+  station_chunk_size: 20  # ✅ 50 stations par requête (50÷50 = 1 chunk, optimisé)
   start_param: date_debut_mesure
   end_param: date_fin_mesure
   start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")

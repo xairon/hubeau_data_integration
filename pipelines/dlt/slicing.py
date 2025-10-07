@@ -5,7 +5,7 @@ import calendar
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import yaml
 
@@ -66,17 +66,24 @@ def load_reference_list(ref_cfg: Dict[str, Any]) -> list[str]:
     return values
 
 
-def _resolve_reference_values(cfg: Dict[str, Any], key: str) -> list[str]:
+def _resolve_reference_values(cfg: Dict[str, Any], key: str):
+    """
+    Résout les valeurs de référence depuis la config.
+
+    Returns:
+        Union[list[str], Dict[str, List[str]]]: Liste simple ou dict {code: [mois]}
+    """
     slicer_cfg = cfg.get("slicer", {})
     if key in slicer_cfg:
         values = slicer_cfg[key]
-        if isinstance(values, list):
+        # Supporter à la fois list et dict
+        if isinstance(values, (list, dict)):
             return values
 
     pre_scan_cfg = (cfg.get("pre_scan") or {}).get(key.rstrip("s") + "s", {})
     if pre_scan_cfg.get("enabled") and "values" in pre_scan_cfg:
         values = pre_scan_cfg["values"]
-        if isinstance(values, list):
+        if isinstance(values, (list, dict)):
             return values
     if pre_scan_cfg.get("enabled") and "path" in pre_scan_cfg:
         file_path = Path(pre_scan_cfg["path"])
@@ -86,8 +93,8 @@ def _resolve_reference_values(cfg: Dict[str, Any], key: str) -> list[str]:
             with file_path.open("r", encoding="utf-8") as fp:
                 loaded = yaml.safe_load(fp)
             values = loaded if isinstance(loaded, list) else loaded.get(pre_scan_cfg.get("key", "values"), [])
-            if not isinstance(values, list):
-                raise ValueError("Pre-scan YAML must contain a list of values")
+            if not isinstance(values, (list, dict)):
+                raise ValueError("Pre-scan YAML must contain a list or dict of values")
             return values
         # Fallback: assume text file with one value per line
         return [line.strip() for line in file_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -110,6 +117,14 @@ def build_slices(
         start = date.fromisoformat(start_date)
         today = date.today()
         end_candidate = today - timedelta(days=end_offset_days)
+
+        # ✅ CORRECTION: Pour partitions annuelles, limiter à la fin de l'année de partition
+        # Si start_date est "2024-01-01", on limite à "2024-12-31" (pas au-delà)
+        if start.month == 1 and start.day == 1:
+            # Partition annuelle détectée (ex: "2024-01-01")
+            end_of_year = date(start.year, 12, 31)
+            end_candidate = min(end_candidate, end_of_year)
+
         if override_end:
             end_candidate = min(end_candidate, date.fromisoformat(override_end))
         window_days = slicer_cfg.get("window_days", 1)
@@ -135,9 +150,40 @@ def build_slices(
         if not departments:
             raise ValueError("dept slicer requires either values or reference")
         param_name = slicer_cfg.get("param", "code_departement")
+
+        # Vérifier si un temporal_filter est configuré pour ajouter les métadonnées temporelles
+        temporal_filter = cfg.get("temporal_filter")
+        start_date_str = None
+        end_date_str = None
+        start_param = None
+        end_param = None
+
+        if temporal_filter:
+            start_param = temporal_filter.get("start_param")
+            end_param = temporal_filter.get("end_param")
+            start_date_str = temporal_filter.get("start_date")
+            end_offset_days = temporal_filter.get("end_offset_days", 1)
+
+            if start_date_str:
+                # La date peut déjà être une date ou une string
+                if isinstance(start_date_str, date):
+                    start_date_str = start_date_str.isoformat()
+                # Calculer la date de fin
+                today = date.today()
+                end_date = today - timedelta(days=end_offset_days)
+                end_date_str = end_date.isoformat()
+
         for dept in departments:
             params = {param_name: dept}
             metadata = {"mode": "dept", "dept": dept, "param": param_name}
+
+            # Ajouter les métadonnées temporelles si disponibles (pour permettre les fallbacks temporels)
+            if start_date_str and end_date_str and start_param and end_param:
+                metadata["start"] = start_date_str
+                metadata["end"] = end_date_str
+                metadata["start_param"] = start_param
+                metadata["end_param"] = end_param
+
             yield Slice(params=params, slice_id=f"dept_{dept}", scope=f"dept-{dept}", metadata=metadata)
     elif mode == "dept_datetime":
         # Mode dept_datetime : chunking par département + temps
@@ -156,6 +202,14 @@ def build_slices(
         start = date.fromisoformat(start_date)
         today = date.today()
         end_candidate = today - timedelta(days=end_offset_days)
+
+        # ✅ CORRECTION: Pour partitions annuelles, limiter à la fin de l'année de partition
+        # Si start_date est "2024-01-01", on limite à "2024-12-31" (pas au-delà)
+        if start.month == 1 and start.day == 1:
+            # Partition annuelle détectée (ex: "2024-01-01")
+            end_of_year = date(start.year, 12, 31)
+            end_candidate = min(end_candidate, end_of_year)
+
         if override_end:
             end_candidate = min(end_candidate, date.fromisoformat(override_end))
         window_days = slicer_cfg.get("window_days", 30)
@@ -248,6 +302,14 @@ def build_slices(
         if not isinstance(end_offset_days, int) or end_offset_days < 0:
             end_offset_days = 1
         end_candidate = date.today() - timedelta(days=end_offset_days)
+
+        # ✅ CORRECTION: Pour partitions annuelles, limiter à la fin de l'année de partition
+        # Si start_date est "2024-01-01", on limite à "2024-12-31" (pas au-delà)
+        if start_date.month == 1 and start_date.day == 1:
+            # Partition annuelle détectée (ex: "2024-01-01")
+            end_of_year = date(start_date.year, 12, 31)
+            end_candidate = min(end_candidate, end_of_year)
+
         if start_date > end_candidate:
             start_date = end_candidate
 
@@ -262,8 +324,35 @@ def build_slices(
         )
         start_param = slicer_cfg.get("start_param", "date_debut")
         end_param = slicer_cfg.get("end_param", "date_fin")
-        for station in stations:
+
+        # ✅ Support dict ou list pour rétro-compatibilité
+        if isinstance(stations, dict):
+            stations_months = stations
+            station_codes = list(stations.keys())
+        else:
+            station_codes = stations
+            # Mode legacy : générer tous les mois
+            all_months = []
             for d0, d1 in month_windows(start_date, end_candidate):
+                all_months.append(d0.strftime('%Y-%m'))
+            stations_months = {s: all_months for s in stations}
+
+        for station in station_codes:
+            # Obtenir les mois actifs pour cette station
+            active_months = stations_months.get(station, [])
+
+            for month_str in active_months:
+                # Convertir "YYYY-MM" en dates
+                year, month = map(int, month_str.split('-'))
+                d0 = date(year, month, 1)
+                last_day = calendar.monthrange(year, month)[1]
+                d1 = date(year, month, last_day)
+
+                # ✅ CORRECTION CRITIQUE: Vérifier que le mois est dans la plage de partition
+                # Skip les mois au-delà de end_candidate (ex: 2025 pour partition 2024)
+                if d0 > end_candidate or d1 < start_date:
+                    continue
+
                 params = {
                     station_param: station,
                     start_param: d0.isoformat(),
@@ -285,8 +374,8 @@ def build_slices(
                     metadata=metadata,
                 )
     elif mode == "station_month_chunked":
-        # Mode station_month_chunked : chunke les stations + fenêtres mensuelles
-        # Optimisation pour APIs avec peu de stations (ex: température ~50 stations actives)
+        # Mode station_month_chunked : chunke les stations + fenêtres mensuelles INTELLIGENTES
+        # ✅ OPTIMISATION: Ne génère que les slices pour les mois où les stations ont réellement des données
         stations = _resolve_reference_values(cfg, "stations")
         if not stations:
             raise ValueError("station_month_chunked slicer requires stations")
@@ -302,40 +391,82 @@ def build_slices(
         start = date.fromisoformat(start_date)
         today = date.today()
         end_candidate = today - timedelta(days=end_offset_days)
+
+        # ✅ CORRECTION: Pour partitions annuelles, limiter à la fin de l'année de partition
+        if start.month == 1 and start.day == 1:
+            end_of_year = date(start.year, 12, 31)
+            end_candidate = min(end_candidate, end_of_year)
+
         if override_end:
             end_candidate = min(end_candidate, date.fromisoformat(override_end))
         start_param = slicer_cfg["start_param"]
         end_param = slicer_cfg["end_param"]
 
-        # Chunker les stations
-        for i in range(0, len(stations), station_chunk_size):
-            station_chunk = stations[i:i + station_chunk_size]
-
-            # Pour chaque chunk de stations, créer fenêtres mensuelles
+        # ✅ Détecter si stations est un dict {station: [mois]} ou une liste simple
+        if isinstance(stations, dict):
+            # Mode intelligent : filtrage temporel par station
+            stations_months = stations
+            station_codes = list(stations.keys())
+        else:
+            # Mode legacy : liste simple (générer tous les mois)
+            station_codes = stations
+            # Générer tous les mois possibles pour rétro-compatibilité
+            all_months = []
             for d0, d1 in month_windows(start, end_candidate):
-                params = {
-                    station_param: ",".join(station_chunk),  # ✅ Multi-stations!
-                    start_param: d0.isoformat(),
-                    end_param: d1.isoformat(),
-                }
-                metadata = {
-                    "mode": "station_month_chunked",
-                    "station_chunk": station_chunk,
-                    "start": d0.isoformat(),
-                    "end": d1.isoformat(),
-                    "station_param": station_param,
-                    "start_param": start_param,
-                    "end_param": end_param,
-                }
-                station_str = "_".join(station_chunk[:3])  # Limiter taille ID
-                if len(station_chunk) > 3:
-                    station_str += f"_and_{len(station_chunk)-3}_more"
-                yield Slice(
-                    params=params,
-                    slice_id=f"stations_{station_str}_{d0.isoformat()}",
-                    scope=f"stations-{len(station_chunk)}",
-                    metadata=metadata,
-                )
+                all_months.append(d0.strftime('%Y-%m'))
+            stations_months = {s: all_months for s in stations}
+
+        # Chunker les stations
+        for i in range(0, len(station_codes), station_chunk_size):
+            station_chunk = station_codes[i:i + station_chunk_size]
+
+            # ✅ OPTIMISATION: Calculer l'union des mois disponibles pour ce chunk
+            chunk_months = set()
+            for station in station_chunk:
+                chunk_months.update(stations_months.get(station, []))
+
+            # Pour chaque mois où au moins une station du chunk a des données
+            for month_str in sorted(chunk_months):
+                # Convertir "YYYY-MM" en dates
+                year, month = map(int, month_str.split('-'))
+                d0 = date(year, month, 1)
+                last_day = calendar.monthrange(year, month)[1]
+                d1 = date(year, month, last_day)
+
+                # ✅ CORRECTION CRITIQUE: Vérifier que le mois est dans la plage de partition
+                # Skip les mois au-delà de end_candidate (ex: 2025 pour partition 2024)
+                if d0 > end_candidate or d1 < start:
+                    continue
+
+                # Filtrer les stations du chunk qui ont des données ce mois-ci
+                stations_for_month = [s for s in station_chunk if month_str in stations_months.get(s, [])]
+
+                # Ne créer la slice que si au moins une station du chunk a des données ce mois
+                if stations_for_month:
+                    params = {
+                        station_param: ",".join(station_chunk),  # Garder tout le chunk pour requête API
+                        start_param: d0.isoformat(),
+                        end_param: d1.isoformat(),
+                    }
+                    metadata = {
+                        "mode": "station_month_chunked",
+                        "station_chunk": station_chunk,
+                        "stations_with_data": stations_for_month,  # Pour debug
+                        "start": d0.isoformat(),
+                        "end": d1.isoformat(),
+                        "station_param": station_param,
+                        "start_param": start_param,
+                        "end_param": end_param,
+                    }
+                    station_str = "_".join(station_chunk[:3])  # Limiter taille ID
+                    if len(station_chunk) > 3:
+                        station_str += f"_and_{len(station_chunk)-3}_more"
+                    yield Slice(
+                        params=params,
+                        slice_id=f"stations_{station_str}_{d0.isoformat()}",
+                        scope=f"stations-{len(station_chunk)}",
+                        metadata=metadata,
+                    )
     elif mode == "campaign":
         campaigns = slicer_cfg.get("campaigns")
         if not campaigns:
@@ -378,6 +509,34 @@ def _split_slice_day(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> 
     return result
 
 
+def _split_slice_month(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> list[Slice]:
+    """Split a slice into monthly sub-slices."""
+    meta = slice_obj.metadata
+    if not meta or "start" not in meta or "end" not in meta:
+        return []
+    start = date.fromisoformat(meta["start"])
+    end = date.fromisoformat(meta["end"])
+    start_param = meta.get("start_param") or cfg["slicer"].get("start_param", "date_debut")
+    end_param = meta.get("end_param") or cfg["slicer"].get("end_param", "date_fin")
+    result: list[Slice] = []
+    for d0, d1 in month_windows(start, end):
+        params = dict(slice_obj.params)
+        params[start_param] = d0.isoformat()
+        params[end_param] = d1.isoformat()
+        metadata = dict(meta)
+        metadata.update({"start": d0.isoformat(), "end": d1.isoformat()})
+        result.append(
+            Slice(
+                params=params,
+                slice_id=f"{slice_obj.slice_id}__month_{d0.isoformat()[:7]}",  # YYYY-MM
+                scope=slice_obj.scope,
+                metadata=metadata,
+                level=next_level,
+            )
+        )
+    return result
+
+
 def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level: int) -> list[Slice]:
     meta = slice_obj.metadata
     if not meta or "start" not in meta or "end" not in meta:
@@ -385,13 +544,20 @@ def _split_slice_station_month(slice_obj: Slice, cfg: Dict[str, Any], next_level
     stations = _resolve_reference_values(cfg, "stations")
     if not stations:
         raise ValueError("station_month fallback requires station list from pre_scan or slicer config")
+
+    # ✅ Support dict ou list
+    if isinstance(stations, dict):
+        station_codes = list(stations.keys())
+    else:
+        station_codes = stations
+
     start = date.fromisoformat(meta["start"])
     end = date.fromisoformat(meta["end"])
     start_param = meta.get("start_param") or cfg["slicer"].get("start_param", "date_debut")
     end_param = meta.get("end_param") or cfg["slicer"].get("end_param", "date_fin")
     station_param = cfg["slicer"].get("station_param", "code_station")
     result: list[Slice] = []
-    for station in stations:
+    for station in station_codes:
         for d0, d1 in month_windows(start, end):
             params = dict(slice_obj.params)
             params[station_param] = station
@@ -427,6 +593,8 @@ def generate_fallback_slices(slice_obj: Slice, cfg: Dict[str, Any], current_leve
     strategy = chain[current_level]
     if strategy == "day":
         return _split_slice_day(slice_obj, cfg, current_level + 1)
+    if strategy == "month":
+        return _split_slice_month(slice_obj, cfg, current_level + 1)
     if strategy == "station_month":
         return _split_slice_station_month(slice_obj, cfg, current_level + 1)
     raise ValueError(f"Unsupported fallback strategy: {strategy}")

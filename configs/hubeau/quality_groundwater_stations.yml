@@ -17,7 +17,11 @@ pagination:
   page_size: 5000
   until_expr: "len($.data) == 0"
 slicer:
-  mode: global  # Pas de filtrage nécessaire - récupération globale
+  mode: dept  # ✅ Récupération par département pour contourner limite pagination 20K
+  param: num_departement
+  reference:
+    path: configs/hubeau/reference_departments.yml
+    key: departments
 rate_limit:
   target_rps: 2.0
   max_concurrency: 1
@@ -26,9 +30,14 @@ comment: |
   API Qualité Nappes Hub'Eau - Référentiel des stations de surveillance
   
   📊 Données de référence:
-  - ~2,000 stations de surveillance (BSS)
+  - >20,000 stations de surveillance (BSS) (limite API pagination: 20K)
   - Données de référence (pas de partition temporelle)
   - Mise à jour occasionnelle des informations de station
+  
+  🎯 Stratégie:
+  - Mode dept: Récupération département par département
+  - Contourne la limite de pagination de l'API (20K records max)
+  - 102 départements × ~200 stations/dept en moyenne
   
   🎯 Utilisation:
   - Référentiel pour les analyses physico-chimiques des nappes

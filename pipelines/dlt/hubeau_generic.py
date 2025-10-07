@@ -13,6 +13,7 @@ import dlt
 from jsonpath_ng import parse
 from dlt.destinations import filesystem
 from dlt.sources import incremental
+import httpx
 
 from .http_client import HttpClient
 from .schema import validate_config
@@ -53,8 +54,10 @@ def _build_params(cfg: Dict[str, Any], slice_obj: Slice, page: int | None = None
     params = dict(cfg.get("params_default", {}))
     params.update(slice_obj.params)
     pagination = cfg.get("pagination") or {}
-    
+
     # Ajouter les filtres temporels si configurés (en plus du slicer)
+    # IMPORTANT: Ne pas écraser les paramètres temporels si le slice les a déjà définis
+    # (ex: slices de fallback mensuels/quotidiens)
     temporal_filter = cfg.get("temporal_filter")
     if temporal_filter:
         from datetime import date, timedelta
@@ -62,10 +65,11 @@ def _build_params(cfg: Dict[str, Any], slice_obj: Slice, page: int | None = None
         end_param = temporal_filter.get("end_param")
         start_date = temporal_filter.get("start_date")
         end_offset_days = temporal_filter.get("end_offset_days", 1)
-        
-        if start_param and start_date:
+
+        # Seulement ajouter si le slice n'a pas déjà défini ces paramètres
+        if start_param and start_date and start_param not in params:
             params[start_param] = start_date
-        if end_param:
+        if end_param and end_param not in params:
             # Calculer la date de fin
             today = date.today()
             end_date = today - timedelta(days=end_offset_days)
@@ -148,7 +152,7 @@ def hubeau_source(
     cfg: Dict[str, Any],
     client: Optional[HttpClient] = None,
     dagster_log: Optional[logging.Logger] = None,
-    stations_data: Optional[list[str]] = None
+    stations_data: Optional[Dict[str, List[str]]] = None
 ) -> dlt.sources:
     """dlt source for the Hub'Eau APIs."""
     validated_cfg = validate_config(cfg)
@@ -159,38 +163,40 @@ def hubeau_source(
 
     # Utiliser merge pour chargement incrémental si replication_key est définie
     write_disposition = "merge" if validated_cfg.replication_key else "append"
-    
+
     # Configuration du chargement incrémental natif DLT
     resource_kwargs = {
         "name": validated_cfg.name,
         "write_disposition": write_disposition,
         "primary_key": validated_cfg.primary_keys,
     }
-    
+
     # Ajouter le chargement incrémental si replication_key est définie
     if validated_cfg.replication_key:
         # DLT gère automatiquement l'état incrémental
         # On ne charge que les données plus récentes que la dernière exécution
         resource_kwargs["merge_key"] = validated_cfg.primary_keys
-    
+
     @dlt.resource(**resource_kwargs)
     def stream() -> Iterator[Dict[str, Any]]:
         pagination = resolved_cfg.get("pagination") or {}
         method = resolved_cfg.get("method", "GET").upper()
-        
+
         # Définir la fonction de log en premier
         log = dagster_log.info if dagster_log else print
-        
+
         # Si des stations sont fournies, les ajouter à la config pour le slicing
         # (nécessaire pour les fallbacks station_month ET filtrage départements dynamique)
         if stations_data:
-            log(f"📊 DLT: {len(stations_data)} stations fournies par Dagster")
-            if len(stations_data) <= 10:
-                log(f"📋 DLT: Stations: {', '.join(stations_data)}")
+            total_station_months = sum(len(months) for months in stations_data.values())
+            log(f"📊 DLT: {len(stations_data)} stations fournies par Dagster ({total_station_months} station-mois)")
+            station_codes = list(stations_data.keys())
+            if len(station_codes) <= 10:
+                log(f"📋 DLT: Stations: {', '.join(station_codes)}")
             else:
-                log(f"📋 DLT: Premières 10 stations: {', '.join(stations_data[:10])}")
+                log(f"📋 DLT: Premières 10 stations: {', '.join(station_codes[:10])}")
             slicer_cfg = resolved_cfg.get("slicer", {})
-            slicer_cfg["stations"] = stations_data  # Toujours passer les stations pour les fallbacks
+            slicer_cfg["stations"] = stations_data  # Passer le dict complet avec les mois
 
             # ✅ NOUVEAU: Filtrage départements dynamique
             # Si dept_list_dynamic=true, calculer les départements depuis les stations actives
@@ -287,13 +293,24 @@ def hubeau_source(
                     
                     # Log de la requête
                     log(f"🌐 Requête {slice_requests + 1}: {method} {resolved_cfg['path']} avec params: {params}")
-                    
+
                     request_start = time.time()
-                    payload = http_client.request(method, resolved_cfg["path"], **request_kwargs)
+                    try:
+                        payload = http_client.request(method, resolved_cfg["path"], **request_kwargs)
+                    except httpx.HTTPStatusError as e:
+                        # Certaines APIs Hubeau retournent 400 quand on dépasse la limite de pagination
+                        # au lieu de retourner une liste vide
+                        if e.response.status_code == 400 and slice_requests > 0:
+                            request_duration = time.time() - request_start
+                            log(f"🛑 Arrêt pagination: API retourne 400 (limite atteinte après {slice_requests} requêtes)")
+                            break
+                        # Pour toute autre erreur 400 ou si c'est la première requête, on relance l'erreur
+                        raise
+
                     request_duration = time.time() - request_start
                     slice_requests += 1
                     total_requests_made += 1
-                    
+
                     batch = list(http_client.extract_records(payload, resolved_cfg.get("records_path")))
 
                     # Nettoyer immédiatement les champs critiques pour éviter toute valeur NULL
@@ -303,7 +320,7 @@ def hubeau_source(
 
                     buffered_batches.append(batch)
                     slice_records += len(batch)
-                    
+
                     req_msg = f"✅ Requête {slice_requests} réussie: {len(batch)} records en {request_duration:.2f}s"
                     log(f"✅ DLT: {req_msg}")
 
@@ -351,9 +368,11 @@ def hubeau_source(
                                 yield record
                         continue
                     
-                    log(f"🔄 Génération de {len(fallback_slices)} slices de fallback")
+                    log(f"🔄 Génération de {len(fallback_slices)} slices de fallback (niveau {slice_obj.level + 1})")
                     for new_slice in reversed(fallback_slices):
                         slices.appendleft(new_slice)
+                    # ✅ CORRECTION: Ne pas compter cette slice dans total_slices (elle sera remplacée par les fallbacks)
+                    slice_count -= 1
                     continue
 
                 # Traitement des records
@@ -364,16 +383,18 @@ def hubeau_source(
                         yield record
                 
                 total_records_processed += slice_records
-                log(f"✅ Slice {slice_count}/{total_slices} terminé: {slice_records} records en {slice_requests} requêtes")
+                # ✅ CORRECTION: Afficher le nombre réel de slices (initial + fallbacks générés)
+                current_total = slice_count + len(slices)
+                log(f"✅ Slice {slice_count}/{current_total} terminé: {slice_records} records en {slice_requests} requêtes")
                 
                 # Log de progression toutes les 5 slices
                 if slice_count % 5 == 0:
                     elapsed = time.time() - start_time
                     avg_time_per_slice = elapsed / slice_count
-                    remaining_slices = total_slices - slice_count
+                    remaining_slices = len(slices)
                     estimated_remaining = remaining_slices * avg_time_per_slice
-                    log(f"📈 Progression: {slice_count}/{total_slices} slices ({slice_count/total_slices*100:.1f}%) - "
-                              f"Temps écoulé: {elapsed:.1f}s - Temps restant estimé: {estimated_remaining:.1f}s")
+                    log(f"📈 Progression: {slice_count}/{current_total} slices ({slice_count/current_total*100:.1f}%) - "
+                              f"Temps écoulé: {elapsed:.1f}s - {remaining_slices} slices restantes - Temps restant estimé: {estimated_remaining:.1f}s")
 
         finally:
             if owns_client:
@@ -383,7 +404,9 @@ def hubeau_source(
             total_time = time.time() - start_time
             log(f"🎉 Ingestion {validated_cfg.name} terminée!")
             log(f"📊 Statistiques finales:")
-            log(f"   • Slices traités: {slice_count}/{total_slices}")
+            log(f"   • Slices initiaux: {total_slices}")
+            log(f"   • Slices traités (avec fallbacks): {slice_count}")
+            log(f"   • Fallbacks générés: {slice_count - total_slices}")
             log(f"   • Total records: {total_records_processed}")
             log(f"   • Total requêtes: {total_requests_made}")
             log(f"   • Temps total: {total_time:.2f}s")
@@ -404,7 +427,7 @@ def run_pipeline(
     layout: Optional[str] = None,
     state_fs_options: Optional[Dict[str, Any]] = None,
     dagster_log: Optional[logging.Logger] = None,
-    stations_data: Optional[list[str]] = None,
+    stations_data: Optional[Dict[str, List[str]]] = None,
     partition_date: Optional[str] = None,
 ) -> dlt.LoadInfo:
     validated_cfg = validate_config(cfg)

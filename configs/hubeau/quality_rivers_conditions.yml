@@ -16,112 +16,18 @@ pagination:
   page_size_param: size
   page_size: 20000  # ✅ Optimisation: Pages de 20K records
   until_expr: "len($.data) == 0"
+# ✅ STRATÉGIE ULTRA-OPTIMISÉE QUALITY RIVERS CONDITIONS: Mode station_month_chunked
+# Utilise UNIQUEMENT les stations actives (fournies par Dagster)
+# Évite de requêter les départements vides (~60% des départements!)
 slicer:
-  mode: dept  # ✅ Filtrage départemental obligatoire (1 département à la fois)
-  dept_list_dynamic: true  # ✅ NOUVEAU: Calculer départements depuis stations actives (-30% requêtes estimé)
-  param: code_departement
-  values:
-    - "01"
-    - "02"
-    - "03"
-    - "04"
-    - "05"
-    - "06"
-    - "07"
-    - "08"
-    - "09"
-    - "10"
-    - "11"
-    - "12"
-    - "13"
-    - "14"
-    - "15"
-    - "16"
-    - "17"
-    - "18"
-    - "19"
-    - "2A"
-    - "2B"
-    - "21"
-    - "22"
-    - "23"
-    - "24"
-    - "25"
-    - "26"
-    - "27"
-    - "28"
-    - "29"
-    - "30"
-    - "31"
-    - "32"
-    - "33"
-    - "34"
-    - "35"
-    - "36"
-    - "37"
-    - "38"
-    - "39"
-    - "40"
-    - "41"
-    - "42"
-    - "43"
-    - "44"
-    - "45"
-    - "46"
-    - "47"
-    - "48"
-    - "49"
-    - "50"
-    - "51"
-    - "52"
-    - "53"
-    - "54"
-    - "55"
-    - "56"
-    - "57"
-    - "58"
-    - "59"
-    - "60"
-    - "61"
-    - "62"
-    - "63"
-    - "64"
-    - "65"
-    - "66"
-    - "67"
-    - "68"
-    - "69"
-    - "70"
-    - "71"
-    - "72"
-    - "73"
-    - "74"
-    - "75"
-    - "76"
-    - "77"
-    - "78"
-    - "79"
-    - "80"
-    - "81"
-    - "82"
-    - "83"
-    - "84"
-    - "85"
-    - "86"
-    - "87"
-    - "88"
-    - "89"
-    - "90"
-    - "91"
-    - "92"
-    - "93"
-    - "94"
-    - "95"
-    - "971"
-    - "972"
-    - "973"
-    - "974"
-    - "976"
+  mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
+  station_param: code_station  # Paramètre station pour l'API
+  station_chunk_size: 20  # ✅ 10 stations par requête (évite troncature à 20K records)
+  start_param: date_debut_operation
+  end_param: date_fin_operation
+  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
+  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
+  # Les stations seront injectées dynamiquement par Dagster via stations_data
 # ✅ Filtre temporel optimisé pour chaque département
 temporal_filter:
   start_param: date_debut_operation
@@ -130,7 +36,7 @@ temporal_filter:
   end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
 fallbacks:
   truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [day]  # Si troncature → découpage par jour
+  split_chain: [station_month]  # Si troncature → découpage station×mois (dernier recours)
 rate_limit:
   target_rps: 1.5
   max_concurrency: 1
