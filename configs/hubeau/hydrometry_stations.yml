@@ -1,6 +1,8 @@
 name: hydrometry_stations
 source: hubeau
 dataset_name: hydrometry_api
+file_format: parquet
+layout: "{table_name}/{load_id}.{file_id}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
 path: /referentiel/stations
 method: GET

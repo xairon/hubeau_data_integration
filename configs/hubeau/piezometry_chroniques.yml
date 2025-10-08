@@ -1,6 +1,8 @@
 name: piezometry_chroniques
 source: hubeau
 dataset_name: piezometry_api
+file_format: parquet
+layout: "{table_name}/{load_id}.{file_id}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
 path: /chroniques_tr
 method: GET

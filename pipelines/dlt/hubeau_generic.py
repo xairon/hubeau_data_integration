@@ -423,7 +423,7 @@ def run_pipeline(
     bucket_url: Optional[str] = None,
     credentials: Optional[Dict[str, Any]] = None,
     dataset_name: Optional[str] = None,
-    file_format: str = "json",
+    file_format: str = "parquet",
     layout: Optional[str] = None,
     state_fs_options: Optional[Dict[str, Any]] = None,
     dagster_log: Optional[logging.Logger] = None,
@@ -465,7 +465,7 @@ def run_pipeline(
     destination_kwargs = {k: v for k, v in destination_kwargs.items() if v}
 
     target_dataset = dataset_name or resolved_cfg.get("dataset_name") or "bronze"
-    destination_kwargs.setdefault("layout", "{table_name}/{curr_date}/data.json")
+    destination_kwargs.setdefault("layout", "{table_name}/{load_id}.{file_id}.parquet")
 
     destination = filesystem(**destination_kwargs) if destination_kwargs else filesystem()
 

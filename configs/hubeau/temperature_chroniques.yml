@@ -1,6 +1,8 @@
 name: temperature_chroniques
 source: hubeau
 dataset_name: temperature_api
+file_format: parquet
+layout: "{table_name}/{load_id}.{file_id}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/temperature
 path: /chronique
 method: GET
@@ -34,7 +36,7 @@ fallbacks:
 # Note: Les stations sont maintenant fournies par l'asset temperature_stations_reference
 rate_limit:
   target_rps: 0.7  # Rate limit très respectueux (API très sensible)
-  max_concurrency: 1
+  max_concurrency: 5
 timeout: 60
 backoff_initial: 2.0  # Backoff plus long
 backoff_max: 120.0

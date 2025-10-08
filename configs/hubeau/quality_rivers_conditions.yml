@@ -1,6 +1,8 @@
 name: quality_rivers_conditions
 source: hubeau
 dataset_name: quality_rivers_api
+file_format: parquet
+layout: "{table_name}/{load_id}.{file_id}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
 path: /condition_environnementale_pc
 method: GET

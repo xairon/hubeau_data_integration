@@ -1,10 +1,14 @@
 from typing import Any, Dict, List, Optional
 
 import time
+import io
 
 import dlt
 from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
 from dlt.common.typing import TSecretValue
+import pyarrow.parquet as pq
+import pyarrow.fs as pafs
+import pandas as pd
 
 from pipelines.dlt.hubeau_generic import run_pipeline
 
@@ -435,19 +439,19 @@ def _extract_station_codes_from_minio(station_type: str = "temperature") -> list
             region_name='us-east-1'
         )
         
-        # Déterminer le préfixe selon le type de stations
+        # Déterminer le préfixe selon le type de stations (correspondant aux dataset_name dans les configs YAML)
         station_prefixes = {
-            "temperature": "hubeau/temperature_stations/",
-            "hydrometry": "hubeau/hydrometry_stations/",
-            "piezometry": "hubeau/piezometry_stations/",
-            "quality_rivers": "hubeau/quality_rivers_stations/",
-            "quality_groundwater": "hubeau/quality_groundwater_stations/",
-            "ecoulement": "hubeau/ecoulement_stations/",
-            "hydrobio": "hubeau/hydrobio_stations/",
-            "prelevements": "hubeau/prelevements_stations/"
+            "temperature": "temperature_api/temperature_stations/",
+            "hydrometry": "hydrometry_api/hydrometry_stations/",
+            "piezometry": "piezometry_api/piezometry_stations/",
+            "quality_rivers": "quality_rivers_api/quality_rivers_stations/",
+            "quality_groundwater": "quality_groundwater_api/quality_groundwater_stations/",
+            "ecoulement": "ecoulement_api/ecoulement_stations/",
+            "hydrobio": "hydrobio_api/hydrobio_stations/",
+            "prelevements": "prelevements_api/prelevements_stations/"
         }
-        
-        prefix = station_prefixes.get(station_type, f"hubeau/{station_type}_stations/")
+
+        prefix = station_prefixes.get(station_type, f"{station_type}_api/{station_type}_stations/")
         
         # Chercher les fichiers de stations les plus récents (préfixe standard)
         response = s3_client.list_objects_v2(
@@ -495,37 +499,22 @@ def _extract_station_codes_from_minio(station_type: str = "temperature") -> list
         if 'Contents' not in response:
             raise ValueError(f"No {station_type} stations data found in MinIO")
         
-        # Filtrer pour ne prendre que les fichiers JSON (pas les dossiers)
-        json_files = [f for f in response['Contents'] if f['Key'].endswith('.json')]
-        
-        if not json_files:
-            raise ValueError(f"No JSON files found in {station_type}_stations folder")
-        
+        # Filtrer pour ne prendre que les fichiers Parquet (pas les dossiers)
+        parquet_files = [f for f in response['Contents'] if f['Key'].endswith('.parquet')]
+
+        if not parquet_files:
+            raise ValueError(f"No Parquet files found in {station_type}_stations folder")
+
         # Prendre le fichier le plus récent
-        latest_file = max(json_files, key=lambda x: x['LastModified'])
+        latest_file = max(parquet_files, key=lambda x: x['LastModified'])
         file_key = latest_file['Key']
-        
-        print(f"📂 Reading {station_type} stations from: {file_key}")
-        
-        # Lire le fichier JSON (DLT stocke les données compressées)
-        obj = s3_client.get_object(Bucket=bucket_name, Key=file_key)
-        
-        # Essayer de décompresser d'abord
-        try:
-            compressed_data = obj['Body'].read()
-            decompressed_data = gzip.decompress(compressed_data)
-            content = decompressed_data.decode('utf-8')
-        except (gzip.BadGzipFile, UnicodeDecodeError):
-            # Si ce n'est pas compressé, lire directement
-            content = obj['Body'].read().decode('utf-8')
-        
-        # DLT stocke les données en JSONL (une ligne par record)
-        stations = []
-        
+
+        print(f"📂 Reading {station_type} stations from Parquet: {file_key}")
+
         # Déterminer le champ de clé selon le type de stations
         station_key_fields = {
             "temperature": "code_station",
-            "hydrometry": "code_station", 
+            "hydrometry": "code_station",
             "piezometry": "code_bss",
             "quality_rivers": "code_station",
             "quality_groundwater": "code_bss",
@@ -533,37 +522,53 @@ def _extract_station_codes_from_minio(station_type: str = "temperature") -> list
             "hydrobio": "code_station_hydrobio",
             "prelevements": "code_point_prelevement"
         }
-        
+
         key_field = station_key_fields.get(station_type, "code_station")
-        
-        # Parser comme JSONL (format dlt par défaut)
-        for line in content.strip().split('\n'):
-            if line.strip():
-                try:
-                    record = json.loads(line)
-                    if key_field in record:
-                        # Filtrer seulement les stations encore actives
-                        # (avec une date de fin de service récente ou nulle)
-                        date_fin_service = record.get('date_fin_service')
-                        if not date_fin_service or date_fin_service >= "2024-01-01":
-                            stations.append(record[key_field])
-                except json.JSONDecodeError:
-                    pass
-        
-        # Si JSONL n'a pas fonctionné, essayer comme JSON normal
-        if not stations:
-            try:
-                data = json.loads(content)
-                if isinstance(data, list):
-                    # Format direct : liste de stations
-                    stations = [station.get(key_field) for station in data if isinstance(station, dict) and key_field in station]
-                elif isinstance(data, dict) and 'data' in data:
-                    # Format API Hub'Eau : {"data": [...]}
-                    stations = [station.get(key_field) for station in data['data'] if station.get(key_field)]
-            except json.JSONDecodeError:
-                pass
-        
-        print(f"✅ Extracted {len(stations)} {station_type} station codes from MinIO")
+
+        try:
+            # Créer un filesystem S3 pour pyarrow (compatible MinIO)
+            endpoint_host = minio_endpoint.replace('http://', '').replace('https://', '')
+            scheme = 'http' if minio_endpoint.startswith('http://') else 'https'
+
+            s3_fs = pafs.S3FileSystem(
+                access_key=minio_user,
+                secret_key=minio_pass,
+                endpoint_override=endpoint_host,
+                scheme=scheme
+            )
+
+            # Construire le chemin S3 complet : bucket/key
+            s3_path = f"{bucket_name}/{file_key}"
+
+            # Lire le Parquet directement via le filesystem S3
+            table = pq.read_table(s3_path, filesystem=s3_fs)
+            df = table.to_pandas()
+
+            # Extraire les codes de stations
+            if key_field in df.columns:
+                # Filtrer seulement les stations encore actives
+                # (avec une date de fin de service récente ou nulle)
+                if 'date_fin_service' in df.columns:
+                    # Filtrer stations actives (date_fin_service nulle ou >= 2024-01-01)
+                    df_active = df[
+                        (df['date_fin_service'].isna()) |
+                        (df['date_fin_service'] >= "2024-01-01")
+                    ]
+                    stations = df_active[key_field].dropna().unique().tolist()
+                else:
+                    # Pas de colonne date_fin_service, prendre toutes les stations
+                    stations = df[key_field].dropna().unique().tolist()
+            else:
+                print(f"⚠️ Colonne {key_field} non trouvée dans le Parquet. Colonnes disponibles: {df.columns.tolist()}")
+                stations = []
+
+        except Exception as e:
+            print(f"⚠️ Erreur lors de la lecture du fichier Parquet: {e}")
+            import traceback
+            traceback.print_exc()
+            stations = []
+
+        print(f"✅ Extracted {len(stations)} {station_type} station codes from MinIO Parquet")
         return stations
         
     except Exception as e:
@@ -865,8 +870,8 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             bucket_url=f"s3://bronze",
             credentials=credentials,
             dataset_name=cfg.get("dataset_name", "bronze"),
-            file_format=cfg.get("file_format", "json"),
-            layout=cfg.get("layout", "{table_name}/{curr_date}/data.json"),
+            file_format=cfg.get("file_format", "parquet"),
+            layout=cfg.get("layout", "{table_name}/{load_id}.{file_id}.parquet"),
             state_fs_options={
                 "aws_access_key_id": TSecretValue(minio_user),
                 "aws_secret_access_key": TSecretValue(minio_pass),

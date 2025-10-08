@@ -1,6 +1,8 @@
 name: ecoulement_observations
 source: hubeau
 dataset_name: ecoulement_api
+file_format: parquet
+layout: "{table_name}/{load_id}.{file_id}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
 path: /observations
 method: GET

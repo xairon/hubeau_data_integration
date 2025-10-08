@@ -1,6 +1,8 @@
 name: prelevements_chroniques
 source: hubeau
 dataset_name: prelevements_api
+file_format: parquet
+layout: "{table_name}/{load_id}.{file_id}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
 path: /chroniques
 method: GET
