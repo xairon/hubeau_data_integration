@@ -40,10 +40,27 @@ deploy:production:
   script:
     - echo "🔄 Déploiement automatique sur production..."
     - cd /srv/brgm
+    - echo "🔐 Génération du fichier .env.production depuis les secrets GitLab..."
+    - |
+      cat > .env.production << EOF
+      # Fichier généré automatiquement par le pipeline GitLab CI/CD
+      # NE PAS ÉDITER MANUELLEMENT - Les changements seront écrasés
+      
+      # Dagster PostgreSQL
+      DAGSTER_PG_PASSWORD=${DAGSTER_PG_PASSWORD}
+      
+      # MinIO
+      MINIO_USER=${MINIO_USER}
+      MINIO_PASS=${MINIO_PASS}
+      MINIO_REGION=us-east-1
+      MINIO_BRONZE_BUCKET=bronze
+      MINIO_ENDPOINT=http://minio:9000
+      EOF
+    - echo "✅ Fichier .env.production créé"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down
     - echo "🚀 Démarrage avec la nouvelle image..."
-    - docker compose -f docker-compose.production.yml up -d
+    - docker compose -f docker-compose.production.yml --env-file .env.production up -d
     - echo "⏳ Attente des services (60s)..."
     - sleep 60
     - echo "✅ Vérification des conteneurs..."
