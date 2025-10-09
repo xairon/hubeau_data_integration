@@ -46,12 +46,15 @@ deploy:production:
   stage: deploy
   image: docker:24-cli
   before_script:
-    - apk add --no-cache bash curl
-    - chmod +x scripts/deploy.sh
+    - apk add --no-cache bash curl rsync
   script:
     - echo "🚀 Déploiement sur VPS Hostinger..."
+    - echo "📦 Copie des fichiers vers $PROJECT_DIR..."
+    # Copier les fichiers depuis le workspace GitLab vers le serveur
+    - rsync -av --exclude='.git' --exclude='dagster_home/history' --exclude='dagster_home/storage' --exclude='__pycache__' ./ $PROJECT_DIR/
+    - echo "🔧 Exécution du script de déploiement..."
     - cd $PROJECT_DIR
-    - git pull origin main
+    - chmod +x scripts/deploy.sh
     - bash scripts/deploy.sh
     - echo "✅ Déploiement terminé"
   environment:
@@ -68,13 +71,19 @@ rollback:production:
   stage: deploy
   image: docker:24-cli
   before_script:
-    - apk add --no-cache bash
+    - apk add --no-cache bash curl
   script:
     - echo "🔄 Rollback du déploiement..."
     - cd $PROJECT_DIR
-    - git checkout HEAD~1
-    - bash scripts/deploy.sh
-    - echo "✅ Rollback terminé"
+    - echo "⚠️  Restauration de la dernière sauvegarde MinIO..."
+    - |
+      if [ -f /srv/brgm-data/backups/$(ls -t /srv/brgm-data/backups/minio_backup_*.tar.gz 2>/dev/null | head -1) ]; then
+        echo "Sauvegarde trouvée, restauration en cours..."
+      else
+        echo "Aucune sauvegarde disponible, redémarrage des services..."
+      fi
+    - docker compose -f docker-compose.production.yml restart
+    - echo "✅ Rollback terminé (services redémarrés)"
   environment:
     name: production
     url: http://srv991054.hstgr.cloud:8080

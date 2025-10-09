@@ -47,7 +47,7 @@ fi
 # 3. Arrêter les conteneurs existants (sans supprimer les données)
 log_info "Arrêt des conteneurs existants..."
 cd $PROJECT_DIR
-docker-compose -f docker-compose.production.yml down --remove-orphans || log_warn "Aucun conteneur à arrêter"
+docker compose -f docker-compose.production.yml down --remove-orphans || log_warn "Aucun conteneur à arrêter"
 
 # 4. Supprimer les anciennes images pour forcer le rebuild
 log_info "Nettoyage des anciennes images..."
@@ -55,11 +55,11 @@ docker rmi hubeau-dagster:latest 2>/dev/null || log_warn "Pas d'image à supprim
 
 # 5. Build de la nouvelle image
 log_info "Build de la nouvelle image..."
-docker-compose -f docker-compose.production.yml build --no-cache
+docker compose -f docker-compose.production.yml build --no-cache
 
 # 6. Démarrer les services
 log_info "Démarrage des services..."
-docker-compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.production.yml up -d
 
 # 7. Attendre que les services soient prêts
 log_info "Attente de la disponibilité des services..."
@@ -91,11 +91,11 @@ log_info "Dagster opérationnel"
 
 # 8. Vérifier l'état des conteneurs
 log_info "État des conteneurs:"
-docker-compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml ps
 
 # 9. Afficher les logs des dernières 20 lignes
 log_info "Derniers logs:"
-docker-compose -f docker-compose.production.yml logs --tail=20
+docker compose -f docker-compose.production.yml logs --tail=20
 
 # 10. Afficher les informations de connexion
 echo ""
@@ -112,6 +112,6 @@ log_info "Les données MinIO sont persistées dans: $DATA_DIR/minio"
 log_info "Sauvegardes disponibles dans: $DATA_DIR/backups"
 echo ""
 echo "Pour voir les logs:"
-echo "  docker-compose -f docker-compose.production.yml logs -f"
+echo "  docker compose -f docker-compose.production.yml logs -f"
 echo ""
 log_info "============================================================="
