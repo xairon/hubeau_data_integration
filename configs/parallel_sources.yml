@@ -1,0 +1,34 @@
+# Configuration des sources à extraire en parallèle
+# Pour les sources avec beaucoup de stations et de données
+
+parallel_extraction:
+  # Sources volumineuses qui bénéficient de l'extraction parallèle
+  enabled_sources:
+    # Chroniques temporelles (gros volumes)
+    - temperature_chroniques      # ~1000 stations
+    - piezometry_chroniques       # ~3000 stations  
+    - hydrometry_observations     # ~2000 stations
+    - quality_rivers_analyses     # ~5000 stations
+    - quality_groundwater_analyses # ~2000 stations
+    - prelevements_chroniques     # ~1500 stations
+    
+  # Configuration par défaut
+  default_config:
+    max_workers: 10              # Workers parallèles
+    max_concurrent_api_calls: 5  # Limite API simultanées
+    batch_size: 10000           # Taille des batches
+    min_stations_for_parallel: 50 # Minimum de stations pour activer
+    
+  # Configuration spécifique par source
+  source_configs:
+    quality_rivers_analyses:
+      max_workers: 15  # Plus de workers car beaucoup de stations
+      max_concurrent_api_calls: 7
+      
+    piezometry_chroniques:
+      max_workers: 12
+      batch_size: 20000  # Plus gros batches car données simples
+      
+    temperature_chroniques:
+      max_workers: 8
+      batch_size: 15000

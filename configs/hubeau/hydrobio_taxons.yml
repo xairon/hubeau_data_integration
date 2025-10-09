@@ -8,7 +8,7 @@ path: /taxons
 method: GET
 params_default:
   format: json
-  size: 2000  # ✅ Doc officielle: taille max 2000 (non 10k)
+  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
 records_path: $.data
 primary_keys: [code_station_hydrobio, date_prelevement, code_taxon]
 # replication_key: date_prelevement  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x

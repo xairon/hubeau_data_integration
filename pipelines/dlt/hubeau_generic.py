@@ -19,6 +19,7 @@ from .http_client import HttpClient
 from .schema import validate_config
 from .slicing import Slice, build_slices, generate_fallback_slices, needs_truncation
 from .state import save_state_copy
+from .parallel_extractor import create_parallel_source
 
 # Configuration du logging
 logger = logging.getLogger(__name__)

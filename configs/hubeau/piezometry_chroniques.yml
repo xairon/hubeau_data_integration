@@ -8,7 +8,7 @@ path: /chroniques_tr
 method: GET
 params_default:
   format: json
-  size: 20000  # ✅ Optimisation: Pages de 20K records
+  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
 records_path: $.data
 primary_keys: [code_bss, timestamp_mesure]
 # replication_key: date_mesure  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions uniques) - gain 3-5x

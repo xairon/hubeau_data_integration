@@ -1,0 +1,74 @@
+# Configuration DLT optimisée pour performances
+# Documentation: https://dlthub.com/docs/reference/performance
+
+# ====================================
+# NORMALIZE - Parallélisation de la normalisation
+# ====================================
+[normalize]
+workers = 4  # 4 workers parallèles pour normaliser les données
+pool_type = "process"  # Utiliser multiprocessing pour vrai parallélisme
+
+# ====================================
+# LOAD - Parallélisation du chargement
+# ====================================
+[load]
+workers = 4  # 4 workers parallèles pour charger vers MinIO
+pool_type = "process"
+
+# ====================================
+# DATA WRITER - Buffering optimisé
+# ====================================
+[data_writer]
+buffer_max_items = 50000  # Buffer 50K items avant flush
+file_max_items = 100000   # Max 100K items par fichier Parquet
+file_max_bytes = 104857600  # Max 100MB par fichier (éviter fichiers trop gros)
+disable_compression = false
+
+# ====================================
+# RUNTIME - Configuration générale
+# ====================================
+[runtime]
+dlthub_telemetry = false  # Désactiver télémétrie pour privacy
+log_level = "INFO"
+sentry_dsn = ""  # Pas de Sentry
+
+# ====================================
+# DESTINATION FILESYSTEM - Configuration Parquet
+# ====================================
+[destination.filesystem]
+layout = "{table_name}/{load_id}.{file_id}.parquet"
+
+# Configuration Parquet spécifique
+[destination.filesystem.parquet_writer]
+# PyArrow Parquet writer options
+row_group_size = 100000  # Row groups de 100K lignes (optimal pour analytics)
+compression = "snappy"   # Compression rapide
+compression_level = null  # Snappy n'a pas de level
+version = "2.6"  # Version Parquet moderne
+use_dictionary = true  # Dictionnaires pour colonnes répétitives
+write_statistics = true  # Stats pour query optimization
+
+# ====================================
+# EXTRACT - Configuration extraction
+# ====================================
+[extract]
+# Pas de limite sur la taille des batches
+max_table_nesting = 1000
+
+# ====================================
+# EXTRACTION - Optimisations API
+# ====================================
+[extract.http]
+retry_status_codes = [429, 500, 502, 503, 504]  # Retry sur ces codes
+max_retries = 5  # Plus de retries
+retry_backoff_factor = 1.5  # Backoff exponentiel
+timeout = 60  # Timeout plus long pour grosses requêtes
+
+# ====================================
+# SOURCES - Configuration par défaut
+# ====================================
+[sources]
+# Taille de page par défaut plus grande
+default_page_size = 5000
+max_parallel_items = 10  # Parallélisation des items
+
