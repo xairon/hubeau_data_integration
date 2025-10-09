@@ -4,10 +4,14 @@
 storage:
   postgres:
     postgres_db:
-      hostname: dagster_postgres
-      db_name: dagster
-      username: postgres
-      password: BrgmDagster2024!
+      hostname:
+        env: DAGSTER_PG_HOST
+      db_name:
+        env: DAGSTER_PG_DB
+      username:
+        env: DAGSTER_PG_USER
+      password:
+        env: DAGSTER_PG_PASSWORD
 
 # Limitation des exécutions concurrentes pour éviter de surcharger Hub'Eau
 run_coordinator:
