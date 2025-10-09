@@ -37,18 +37,75 @@ def _replace_templates(config: Dict[str, Any], partition_date: str) -> Dict[str,
     """Remplace les templates {{ partition_date }} dans la configuration."""
     import copy
     import json
-    
+
     # Créer une copie profonde pour éviter de modifier l'original
     config_copy = copy.deepcopy(config)
-    
+
     # Convertir en JSON string pour remplacer facilement
     config_str = json.dumps(config_copy)
-    
+
     # Remplacer {{ partition_date }} par la vraie date
     config_str = config_str.replace('"{{ partition_date }}"', f'"{partition_date}"')
-    
+
     # Reconvertir en dict
     return json.loads(config_str)
+
+
+def _replace_layout_templates(layout: str, partition_key: str) -> str:
+    """
+    Remplace les templates de partition dans le layout.
+
+    Supporte les templates :
+    - {{ partition_year }} : Année extraite de partition_key
+    - {{ partition_month }} : Mois extrait de partition_key (format 2 chiffres)
+    - {{ partition_day }} : Jour extrait de partition_key (format 2 chiffres)
+
+    Args:
+        layout: Layout avec templates (ex: "{table_name}/year={{ partition_year }}/{table_name}.parquet")
+        partition_key: Clé de partition ("2024" ou "2024-01-15")
+
+    Returns:
+        Layout résolu (ex: "{table_name}/year=2024/{table_name}.parquet")
+
+    Examples:
+        >>> _replace_layout_templates("{table_name}/year={{ partition_year }}/{table_name}.parquet", "2024")
+        "{table_name}/year=2024/{table_name}.parquet"
+
+        >>> _replace_layout_templates("{table_name}/year={{ partition_year }}/month={{ partition_month }}/{table_name}.parquet", "2024-01-15")
+        "{table_name}/year=2024/month=01/{table_name}.parquet"
+    """
+    from datetime import datetime
+
+    if not layout or "{{" not in layout:
+        return layout
+
+    # Déterminer le format de partition_key
+    if len(partition_key) == 4 and partition_key.isdigit():
+        # Partition annuelle (ex: "2024")
+        year = partition_key
+        month = None
+        day = None
+    else:
+        # Partition date complète (ex: "2024-01-15")
+        try:
+            dt = datetime.strptime(partition_key, "%Y-%m-%d")
+            year = str(dt.year)
+            month = f"{dt.month:02d}"
+            day = f"{dt.day:02d}"
+        except ValueError:
+            # Format invalide : retourner layout original sans modification
+            logger.warning(f"Format de partition_key invalide : {partition_key}. Layout non modifié.")
+            return layout
+
+    # Remplacer les templates
+    resolved_layout = layout
+    resolved_layout = resolved_layout.replace("{{ partition_year }}", year)
+    if month:
+        resolved_layout = resolved_layout.replace("{{ partition_month }}", month)
+    if day:
+        resolved_layout = resolved_layout.replace("{{ partition_day }}", day)
+
+    return resolved_layout
 
 
 def _build_params(cfg: Dict[str, Any], slice_obj: Slice, page: int | None = None, cursor_value: str | None = None) -> Dict[str, Any]:
@@ -466,7 +523,8 @@ def run_pipeline(
     destination_kwargs = {k: v for k, v in destination_kwargs.items() if v}
 
     target_dataset = dataset_name or resolved_cfg.get("dataset_name") or "bronze"
-    destination_kwargs.setdefault("layout", "{table_name}/{load_id}.{file_id}.parquet")
+    # Layout doit être défini dans les fichiers YAML - pas de défaut pour éviter doublons
+    # Si aucun layout n'est fourni, DLT utilisera son propre défaut
 
     destination = filesystem(**destination_kwargs) if destination_kwargs else filesystem()
 
@@ -483,11 +541,21 @@ def run_pipeline(
         dagster_log.info(f"📁 Dataset: {target_dataset}")
     
     pipeline_start_time = time.time()
-    
+
     # Remplacer les templates dans la configuration
     if partition_date:
         resolved_cfg = _replace_templates(resolved_cfg, partition_date)
-    
+
+    # Résoudre également les templates dans le layout si une partition_key est fournie
+    partition_key = resolved_cfg.get("partition_key")
+    if partition_key and "layout" in destination_kwargs:
+        original_layout = destination_kwargs["layout"]
+        resolved_layout = _replace_layout_templates(original_layout, partition_key)
+        destination_kwargs["layout"] = resolved_layout
+
+        if dagster_log:
+            dagster_log.info(f"📐 Layout résolu : {original_layout} → {resolved_layout}")
+
     extraction_start_time = time.time()
     with HttpClient(resolved_cfg) as http_client:
         source_data = hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log, stations_data=stations_data)

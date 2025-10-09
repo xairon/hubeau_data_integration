@@ -746,7 +746,10 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     partition_key = context.partition_key if context.has_partition_key else None
     if partition_key:
         context.log.info(f"📅 Partition: {partition_key}")
-        
+
+        # Ajouter partition_key dans la config pour résolution du layout
+        cfg["partition_key"] = partition_key
+
         # Update slicer dates based on partition
         if cfg.get("slicer", {}).get("mode") == "datetime":
             # Determine if it's a year or a date

@@ -2,7 +2,7 @@ name: temperature_chroniques
 source: hubeau
 dataset_name: temperature_api
 file_format: parquet
-layout: "{table_name}/{load_id}.{file_id}.parquet"
+layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/temperature
 path: /chronique
 method: GET
