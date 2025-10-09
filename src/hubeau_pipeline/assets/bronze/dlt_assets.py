@@ -1106,12 +1106,12 @@ def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, An
     stations_data, _ = _setup_observation_asset(context, "quality_groundwater", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_ecoulement", partitions_def=DAILY_PARTITIONS, deps=[ecoulement_stations_reference, ecoulement_campagnes_reference])
+@asset(group_name="hubeau_ecoulement", partitions_def=YEARLY_PARTITIONS, deps=[ecoulement_stations_reference, ecoulement_campagnes_reference])
 def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests ecoulement observations data using dlt (30 derniers jours)."""
-    partition_date = _get_partition_date_daily(context)
+    """Ingests ecoulement observations data using dlt (données annuelles)."""
+    partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "ecoulement", partition_date)
-    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data)
+    return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data, partition_date=partition_date)
 
 @asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS, deps=[prelevements_stations_reference])
 def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:

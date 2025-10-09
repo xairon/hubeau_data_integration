@@ -2,7 +2,7 @@ name: ecoulement_observations
 source: hubeau
 dataset_name: ecoulement_api
 file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/month={{ partition_month }}/{table_name}.parquet"
+layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
 path: /observations
 method: GET
@@ -11,7 +11,7 @@ params_default:
   size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
 records_path: $.data
 primary_keys: [code_station, date_observation]
-# replication_key: date_observation  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions quotidiennes) - gain 3-5x
+# replication_key: date_observation  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x
 pagination:
   type: page
   page_param: page
