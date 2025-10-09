@@ -41,8 +41,7 @@ build:docker:
   only:
     - main
   tags:
-    - vps
-    - production
+    - hubeau
 
 # Stage 3: Déploiement sur VPS
 deploy:production:
@@ -63,8 +62,7 @@ deploy:production:
   only:
     - main
   tags:
-    - vps
-    - production
+    - hubeau
   when: manual  # Nécessite confirmation manuelle pour éviter déploiements accidentels
 
 # Job de rollback en cas de problème
@@ -85,6 +83,5 @@ rollback:production:
   only:
     - main
   tags:
-    - vps
-    - production
+    - hubeau
   when: manual
