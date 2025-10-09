@@ -1,0 +1,132 @@
+# Docker Compose PRODUCTION pour VPS Hostinger (Bronze uniquement)
+# Usage: docker-compose -f docker-compose.production.yml up -d
+
+services:
+  dagster_postgres:
+    image: postgres:16-alpine
+    container_name: brgm-dagster-postgres
+    environment:
+      POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      POSTGRES_DB: dagster
+    volumes:
+      - /srv/brgm-data/dagster_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d dagster"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.2
+
+  dagster_webserver:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+    image: hubeau-dagster:latest
+    container_name: brgm-dagster-webserver
+    depends_on:
+      dagster_postgres:
+        condition: service_healthy
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_PG_HOST: dagster_postgres
+      DAGSTER_PG_DB: dagster
+      DAGSTER_PG_USER: postgres
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      PYTHONPATH: /app/src:/app
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_BRONZE_BUCKET: bronze
+      MINIO_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./dagster:/app/dagster
+      - ./src:/app/src
+      - ./pipelines:/app/pipelines
+      - ./configs:/app/configs:ro
+      - ./scripts:/app/scripts:ro
+    command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
+    ports:
+      - "8080:3000"
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 0.3
+
+  dagster_daemon:
+    image: hubeau-dagster:latest
+    container_name: brgm-dagster-daemon
+    depends_on:
+      dagster_postgres:
+        condition: service_healthy
+      dagster_webserver:
+        condition: service_started
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_PG_HOST: dagster_postgres
+      DAGSTER_PG_DB: dagster
+      DAGSTER_PG_USER: postgres
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      PYTHONPATH: /app/src:/app
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_BRONZE_BUCKET: bronze
+      MINIO_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./dagster:/app/dagster
+      - ./src:/app/src
+      - ./pipelines:/app/pipelines
+      - ./configs:/app/configs:ro
+      - ./scripts:/app/scripts:ro
+    command: ["dagster-daemon","run","-m","hubeau_pipeline"]
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 0.7
+
+  minio:
+    image: minio/minio:latest
+    container_name: brgm-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      # VOLUME PERSISTANT: Les données MinIO survivent aux redémarrages
+      - /srv/brgm-data/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.2
+
+  minio_init:
+    image: hubeau-dagster:latest
+    container_name: brgm-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: http://minio:9000
+    volumes:
+      - ./scripts:/app/scripts:ro
+    command: ["python", "/app/scripts/init_minio.py"]
+    restart: "no"
+
+# Pas de volumes nommés : tout est dans /srv/brgm-data/ pour faciliter les backups

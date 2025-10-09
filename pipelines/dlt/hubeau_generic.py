@@ -488,7 +488,10 @@ def run_pipeline(
         resolved_cfg = _replace_templates(resolved_cfg, partition_date)
     
     with HttpClient(resolved_cfg) as http_client:
-        load_info = pipeline.run(hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log, stations_data=stations_data))
+        load_info = pipeline.run(
+            hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log, stations_data=stations_data),
+            loader_file_format=explicit_file_format
+        )
 
     pipeline_duration = time.time() - pipeline_start_time
     

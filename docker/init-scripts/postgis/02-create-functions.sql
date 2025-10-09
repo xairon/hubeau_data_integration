@@ -231,7 +231,16 @@ $$;
 GRANT CONNECT ON DATABASE water_geo TO geo_analytics_user;
 GRANT USAGE ON SCHEMA public TO geo_analytics_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO geo_analytics_user;
-GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA public TO geo_analytics_user;
+-- Grant sur les vues matérialisées (syntaxe compatible PostgreSQL 16)
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (SELECT schemaname, matviewname FROM pg_matviews WHERE schemaname = 'public') LOOP
+        EXECUTE 'GRANT SELECT ON ' || quote_ident(r.schemaname) || '.' || quote_ident(r.matviewname) || ' TO geo_analytics_user';
+    END LOOP;
+END
+$$;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO geo_analytics_user;
 
 SELECT 'PostGIS: Fonctions spatiales et vues matérialisées créées' as status;
