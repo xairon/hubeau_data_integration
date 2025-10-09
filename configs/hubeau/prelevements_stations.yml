@@ -2,7 +2,7 @@ name: prelevements_stations
 source: hubeau
 dataset_name: prelevements_api
 file_format: parquet
-layout: "{table_name}.parquet"
+layout: "{table_name}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
 path: /referentiel/ouvrages  # ⚠️ Utiliser /ouvrages au lieu de /points_prelevement (chroniques = ouvrages)
 method: GET

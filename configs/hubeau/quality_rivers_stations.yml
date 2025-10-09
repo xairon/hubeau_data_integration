@@ -2,7 +2,7 @@ name: quality_rivers_stations
 source: hubeau
 dataset_name: quality_rivers_api
 file_format: parquet
-layout: "{table_name}.parquet"
+layout: "{table_name}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
 path: /station_pc
 method: GET

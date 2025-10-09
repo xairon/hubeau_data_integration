@@ -2,7 +2,7 @@ name: temperature_stations
 source: hubeau
 dataset_name: temperature_api
 file_format: parquet
-layout: "{table_name}.parquet"
+layout: "{table_name}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/temperature
 path: /station
 method: GET

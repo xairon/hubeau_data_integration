@@ -2,7 +2,7 @@ name: hydrobio_stations
 source: hubeau
 dataset_name: hydrobio_api
 file_format: parquet
-layout: "{table_name}.parquet"
+layout: "{table_name}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
 path: /stations_hydrobio
 method: GET
