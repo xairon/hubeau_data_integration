@@ -30,7 +30,7 @@ fallbacks:
   truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
   split_chain: [dept_datetime]  # Si troncature → découpage par département×temps
 rate_limit:
-  target_rps: 2.0  # 2 requêtes par seconde max
+  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 2.5x
   max_concurrency: 1
 timeout: 60
 comment: |

@@ -40,7 +40,7 @@ fallbacks:
   truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
   split_chain: [station_month, day]  # Niveau 1: station×mois, Niveau 2: station×jour
 rate_limit:
-  target_rps: 1.5
+  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 3.3x
   max_concurrency: 1
 timeout: 60
 comment: |

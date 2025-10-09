@@ -35,7 +35,7 @@ fallbacks:
   split_chain: [station_month]  # Si troncature → découpage station×mois (dernier recours)
 # Note: Les stations sont maintenant fournies par l'asset temperature_stations_reference
 rate_limit:
-  target_rps: 0.7  # Rate limit très respectueux (API très sensible)
+  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 7x
   max_concurrency: 5
 timeout: 60
 backoff_initial: 2.0  # Backoff plus long

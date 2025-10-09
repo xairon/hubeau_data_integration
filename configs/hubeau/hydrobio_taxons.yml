@@ -35,7 +35,7 @@ fallbacks:
 # Note: Suppression de la dépendance pre_scan car hydrobio_stations n'existe pas
 # Le slicer datetime fonctionne sans référence externe
 rate_limit:
-  target_rps: 0.6
+  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 8.3x
   max_concurrency: 1
   backoff: exponential_jitter
   rps_decrease_on_429: true
