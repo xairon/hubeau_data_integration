@@ -51,33 +51,34 @@ git commit -m "feat: nouvelle fonctionnalité"
 git push origin main
 ```
 
-### 2. Pipeline automatique
+### 2. Pipeline automatique (tout seul !)
 
-GitLab déclenche automatiquement le pipeline qui :
+GitLab déclenche **automatiquement** le pipeline qui :
 
-1. ✅ **Clone le code** sur le runner (dans `/builds/...`)
-2. ⏸️ **Attend votre confirmation** pour déployer (bouton "Play")
+**Stage 1: Build (automatique)**
+1. ✅ Clone le code sur le runner (dans `/builds/...`)
+2. ✅ Copie les fichiers vers `/srv/brgm`
+3. ✅ Build de l'image Docker `hubeau-dagster:latest`
 
-### 3. Déploiement manuel
+**Stage 2: Deploy (automatique)**
+1. ✅ Arrêt des anciens conteneurs
+2. ✅ Démarrage avec la nouvelle image
+3. ✅ Vérification que tout fonctionne
 
-Dans GitLab UI :
+**Durée totale : ~3-4 minutes**
+
+### 3. Vérification
+
+Suivre le pipeline en temps réel :
 ```
-CI/CD > Pipelines > Cliquer sur ▶️ "Play" à côté de "deploy:production"
+https://scm.univ-tours.fr/ringuet/hubeau_data_integration/-/pipelines
 ```
 
-Le pipeline va :
-1. 📦 Copier les fichiers vers `/srv/brgm`
-2. 🏗️ Builder la nouvelle image Docker
-3. 🔄 Redémarrer les services avec `docker compose`
-4. ✅ Vérifier que tout fonctionne
-
-**Durée totale : ~2-3 minutes**
-
-### 4. Vérification
-
-Accéder aux services :
-- Dagster : http://srv991054.hstgr.cloud:8080
-- MinIO : http://srv991054.hstgr.cloud:9001
+Ou regarder les logs :
+```bash
+ssh root@srv991054.hstgr.cloud
+docker logs -f brgm-dagster-webserver
+```
 
 ## Rollback
 
@@ -86,7 +87,7 @@ Si un déploiement casse quelque chose :
 1. Dans GitLab : `CI/CD > Pipelines`
 2. Cliquer sur ▶️ **"rollback:production"**
 
-Ça redémarre simplement les services avec le code actuel.
+Ça redémarre les services (utile si un conteneur crashe).
 
 ## Avantages de ce setup
 

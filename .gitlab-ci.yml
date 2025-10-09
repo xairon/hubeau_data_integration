@@ -2,7 +2,6 @@
 # Trigger: Push sur branche main
 
 stages:
-  - test
   - build
   - deploy
 
@@ -11,40 +10,46 @@ variables:
   DOCKER_TLS_CERTDIR: ""
   PROJECT_DIR: /srv/brgm
 
-# Stage 1: Tests (optionnel, à activer plus tard)
-test:code:
-  stage: test
-  image: python:3.11-slim
-  before_script:
-    - pip install pytest ruff
-  script:
-    - echo "✓ Tests désactivés pour l'instant"
-    # - ruff check src/
-    # - pytest tests/ -v
-  only:
-    - main
-  when: manual  # Déclencher manuellement pour l'instant
-
-# Stage 2: Déploiement sur VPS (le runner tourne SUR le serveur)
-deploy:production:
-  stage: deploy
+# Stage 1: Build de l'image Docker (automatique sur chaque push)
+build:image:
+  stage: build
   image: docker:24-cli
   before_script:
     - apk add --no-cache bash rsync
   script:
-    - echo "🚀 Déploiement automatique (runner local sur VPS)..."
+    - echo "🚀 Build automatique déclenché par push sur main"
     - echo "📦 Synchronisation des fichiers vers /srv/brgm..."
     # Le runner GitLab clone dans /builds/, on copie vers /srv/brgm
     - rsync -av --delete --exclude='.git' --exclude='dagster_home/history' --exclude='dagster_home/storage' --exclude='__pycache__' ./ /srv/brgm/
-    - echo "🏗️ Build et déploiement..."
+    - echo "🏗️ Build de l'image Docker..."
     - cd /srv/brgm
-    - docker build -f docker/dagster/Dockerfile -t hubeau-dagster:latest .
-    - echo "🔄 Redémarrage des services..."
-    - docker compose -f docker-compose.production.yml up -d --build
-    - echo "⏳ Attente des services..."
-    - sleep 30
+    - docker build -f docker/dagster/Dockerfile -t hubeau-dagster:$CI_COMMIT_SHORT_SHA .
+    - docker tag hubeau-dagster:$CI_COMMIT_SHORT_SHA hubeau-dagster:latest
+    - echo "✅ Image buildée: hubeau-dagster:latest (tag: $CI_COMMIT_SHORT_SHA)"
+  only:
+    - main
+  tags:
+    - hubeau
+
+# Stage 2: Déploiement sur VPS (automatique après le build)
+deploy:production:
+  stage: deploy
+  image: docker:24-cli
+  before_script:
+    - apk add --no-cache bash
+  script:
+    - echo "🔄 Déploiement automatique sur production..."
+    - cd /srv/brgm
+    - echo "🛑 Arrêt des anciens conteneurs..."
+    - docker compose -f docker-compose.production.yml down
+    - echo "🚀 Démarrage avec la nouvelle image..."
+    - docker compose -f docker-compose.production.yml up -d
+    - echo "⏳ Attente des services (60s)..."
+    - sleep 60
     - echo "✅ Vérification des conteneurs..."
     - docker compose -f docker-compose.production.yml ps
+    - echo "📊 Logs Dagster (dernières 20 lignes):"
+    - docker logs brgm-dagster-webserver --tail 20
     - echo "✅ Déploiement terminé!"
   environment:
     name: production
@@ -53,7 +58,8 @@ deploy:production:
     - main
   tags:
     - hubeau
-  when: manual  # Nécessite confirmation manuelle
+  dependencies:
+    - build:image
 
 # Job de rollback en cas de problème
 rollback:production:
