@@ -43,7 +43,7 @@ layout = "{table_name}/{load_id}.{file_id}.parquet"
 # PyArrow Parquet writer options
 row_group_size = 100000  # Row groups de 100K lignes (optimal pour analytics)
 compression = "snappy"   # Compression rapide
-compression_level = null  # Snappy n'a pas de level
+# compression_level = null  # Snappy n'a pas de level (commenté car null invalide en TOML)
 version = "2.6"  # Version Parquet moderne
 use_dictionary = true  # Dictionnaires pour colonnes répétitives
 write_statistics = true  # Stats pour query optimization
