@@ -28,11 +28,9 @@ test:code:
 # Stage 2: Build de l'image Docker
 build:docker:
   stage: build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
+  image: docker:24-cli
   before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - echo "Skipping registry login for local build"
   script:
     - echo "🏗️ Build de l'image Docker..."
     - docker build -f docker/dagster/Dockerfile -t hubeau-dagster:$CI_COMMIT_SHORT_SHA .
@@ -46,7 +44,7 @@ build:docker:
 # Stage 3: Déploiement sur VPS
 deploy:production:
   stage: deploy
-  image: docker:24-dind
+  image: docker:24-cli
   before_script:
     - apk add --no-cache bash curl
     - chmod +x scripts/deploy.sh
@@ -68,7 +66,7 @@ deploy:production:
 # Job de rollback en cas de problème
 rollback:production:
   stage: deploy
-  image: docker:24-dind
+  image: docker:24-cli
   before_script:
     - apk add --no-cache bash
   script:
