@@ -12,8 +12,8 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-PROJECT_DIR="/srv/brgm"
-DATA_DIR="/srv/brgm-data"
+PROJECT_DIR="/hubeau_data_integration"
+DATA_DIR="/hubeau_data_integration/brgm-data"
 
 # Fonction de log
 log_info() {
