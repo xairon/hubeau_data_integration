@@ -11,7 +11,7 @@ params_default:
   size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_bss, date_debut_prelevement, code_param]
-replication_key: date_debut_prelevement
+# replication_key: date_debut_prelevement  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x
 pagination:
   type: page
   page_param: page

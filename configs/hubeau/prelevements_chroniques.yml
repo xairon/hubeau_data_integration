@@ -11,7 +11,7 @@ params_default:
   size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_ouvrage, annee, mois]
-replication_key: annee
+# replication_key: annee  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x
 pagination:
   type: page
   page_param: page

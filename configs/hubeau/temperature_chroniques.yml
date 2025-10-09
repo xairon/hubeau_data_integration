@@ -11,7 +11,7 @@ params_default:
   size: 20000  # ✅ Test avec taille de page maximale (20K)
 records_path: $.data
 primary_keys: [code_station, date_mesure_temp]
-replication_key: date_mesure_temp
+# replication_key: date_mesure_temp  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions uniques) - gain 3-5x
 pagination:
   type: page
   page_param: page

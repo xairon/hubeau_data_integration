@@ -474,12 +474,15 @@ def run_pipeline(
         pipeline_name=pipeline_name,
         destination=destination,
         dataset_name=target_dataset,
+        # ✅ OPTIMISATION PERFORMANCE: Parallélisation de l'écriture Parquet
+        loader_parallelism=4,  # 4 workers parallèles pour écrire les Parquet
     )
 
     if dagster_log:
         dagster_log.info(f"🏃 Démarrage pipeline DLT: {pipeline_name}")
         dagster_log.info(f"🎯 Destination: {destination}")
         dagster_log.info(f"📁 Dataset: {target_dataset}")
+        dagster_log.info(f"⚡ Optimisations: loader_parallelism=4, buffer_max_items=50000, compression=snappy")
     
     pipeline_start_time = time.time()
     
@@ -487,13 +490,37 @@ def run_pipeline(
     if partition_date:
         resolved_cfg = _replace_templates(resolved_cfg, partition_date)
     
+    # ✅ OPTIMISATION PERFORMANCE: Configuration Parquet optimisée
+    parquet_config = {
+        "buffer_max_items": 50000,       # Buffer 50K records avant flush (réduire I/O)
+        "row_group_size": 100000,        # Row groups de 100K (optimal pour analytics)
+        "compression": "snappy",         # Compression rapide (balance vitesse/taille)
+        "compression_level": None,       # Snappy n'a pas de level
+    }
+    
+    extraction_start_time = time.time()
     with HttpClient(resolved_cfg) as http_client:
+        source_data = hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log, stations_data=stations_data)
+        extraction_duration = time.time() - extraction_start_time
+        
+        # Séparer le temps d'écriture du temps d'extraction
+        write_start_time = time.time()
         load_info = pipeline.run(
-            hubeau_source(resolved_cfg, client=http_client, dagster_log=dagster_log, stations_data=stations_data),
-            loader_file_format=explicit_file_format
+            source_data,
+            loader_file_format=explicit_file_format,
+            # ✅ OPTIMISATION: Passer la config Parquet optimisée
+            **parquet_config
         )
+        write_duration = time.time() - write_start_time
 
     pipeline_duration = time.time() - pipeline_start_time
+    
+    # ✅ MONITORING DÉTAILLÉ: Temps d'extraction vs écriture
+    if dagster_log:
+        dagster_log.info(f"⏱️ Performance breakdown:")
+        dagster_log.info(f"   • Extraction API: {extraction_duration:.2f}s ({extraction_duration/pipeline_duration*100:.1f}%)")
+        dagster_log.info(f"   • Écriture Parquet: {write_duration:.2f}s ({write_duration/pipeline_duration*100:.1f}%)")
+        dagster_log.info(f"   • Temps total: {pipeline_duration:.2f}s")
     
     # Extraction des statistiques détaillées
     total_rows = 0

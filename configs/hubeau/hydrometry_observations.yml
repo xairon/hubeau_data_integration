@@ -11,7 +11,7 @@ params_default:
   size: 20000  # ✅ Optimisation: Pages de 20K records
 records_path: $.data
 primary_keys: [code_station, date_obs, grandeur_hydro]
-replication_key: date_obs
+# replication_key: date_obs  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions quotidiennes) - gain 3-5x
 pagination:
   type: cursor
   cursor_param: cursor
