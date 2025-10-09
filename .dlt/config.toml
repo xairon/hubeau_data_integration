@@ -5,23 +5,23 @@
 # NORMALIZE - Parallélisation de la normalisation
 # ====================================
 [normalize]
-workers = 4  # 4 workers parallèles pour normaliser les données
+workers = 2  # ↓ Réduit à 2 workers (moins de RAM, évite OOM)
 pool_type = "process"  # Utiliser multiprocessing pour vrai parallélisme
 
 # ====================================
 # LOAD - Parallélisation du chargement
 # ====================================
 [load]
-workers = 4  # 4 workers parallèles pour charger vers MinIO
+workers = 2  # ↓ Réduit à 2 workers (moins de RAM, évite OOM)
 pool_type = "process"
 
 # ====================================
 # DATA WRITER - Buffering optimisé
 # ====================================
 [data_writer]
-buffer_max_items = 50000  # Buffer 50K items avant flush
-file_max_items = 100000   # Max 100K items par fichier Parquet
-file_max_bytes = 104857600  # Max 100MB par fichier (éviter fichiers trop gros)
+buffer_max_items = 10000  # ↓ Réduit à 10K (5x moins de RAM, flush plus fréquent)
+file_max_items = 50000    # ↓ Réduit à 50K (fichiers plus petits, moins de RAM)
+file_max_bytes = 52428800  # ↓ Réduit à 50MB (flush plus agressif, évite OOM)
 disable_compression = false
 
 # ====================================
@@ -41,7 +41,7 @@ layout = "{table_name}/{load_id}.{file_id}.parquet"
 # Configuration Parquet spécifique
 [destination.filesystem.parquet_writer]
 # PyArrow Parquet writer options
-row_group_size = 100000  # Row groups de 100K lignes (optimal pour analytics)
+row_group_size = 50000  # ↓ Réduit à 50K lignes (moins de RAM pendant écriture)
 compression = "snappy"   # Compression rapide
 # compression_level = null  # Snappy n'a pas de level (commenté car null invalide en TOML)
 version = "2.6"  # Version Parquet moderne
