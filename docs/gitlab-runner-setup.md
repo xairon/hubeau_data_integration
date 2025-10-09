@@ -55,6 +55,7 @@ concurrent = 1  # Limiter à 1 job à la fois (VPS 1 vCPU)
     disable_cache = false
     volumes = [
       "/var/run/docker.sock:/var/run/docker.sock",
+      "/srv/brgm:/srv/brgm",
       "/srv/brgm-data:/srv/brgm-data"
     ]
     shm_size = 0

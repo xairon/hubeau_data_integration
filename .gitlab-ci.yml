@@ -25,38 +25,27 @@ test:code:
     - main
   when: manual  # Déclencher manuellement pour l'instant
 
-# Stage 2: Build de l'image Docker
-build:docker:
-  stage: build
-  image: docker:24-cli
-  before_script:
-    - echo "Skipping registry login for local build"
-  script:
-    - echo "🏗️ Build de l'image Docker..."
-    - docker build -f docker/dagster/Dockerfile -t hubeau-dagster:$CI_COMMIT_SHORT_SHA .
-    - docker tag hubeau-dagster:$CI_COMMIT_SHORT_SHA hubeau-dagster:latest
-    - echo "✅ Image buildée avec succès"
-  only:
-    - main
-  tags:
-    - hubeau
-
-# Stage 3: Déploiement sur VPS
+# Stage 2: Déploiement sur VPS (le runner tourne SUR le serveur)
 deploy:production:
   stage: deploy
   image: docker:24-cli
   before_script:
-    - apk add --no-cache bash curl rsync
+    - apk add --no-cache bash rsync
   script:
-    - echo "🚀 Déploiement sur VPS Hostinger..."
-    - echo "📦 Copie des fichiers vers $PROJECT_DIR..."
-    # Copier les fichiers depuis le workspace GitLab vers le serveur
-    - rsync -av --exclude='.git' --exclude='dagster_home/history' --exclude='dagster_home/storage' --exclude='__pycache__' ./ $PROJECT_DIR/
-    - echo "🔧 Exécution du script de déploiement..."
-    - cd $PROJECT_DIR
-    - chmod +x scripts/deploy.sh
-    - bash scripts/deploy.sh
-    - echo "✅ Déploiement terminé"
+    - echo "🚀 Déploiement automatique (runner local sur VPS)..."
+    - echo "📦 Synchronisation des fichiers vers /srv/brgm..."
+    # Le runner GitLab clone dans /builds/, on copie vers /srv/brgm
+    - rsync -av --delete --exclude='.git' --exclude='dagster_home/history' --exclude='dagster_home/storage' --exclude='__pycache__' ./ /srv/brgm/
+    - echo "🏗️ Build et déploiement..."
+    - cd /srv/brgm
+    - docker build -f docker/dagster/Dockerfile -t hubeau-dagster:latest .
+    - echo "🔄 Redémarrage des services..."
+    - docker compose -f docker-compose.production.yml up -d --build
+    - echo "⏳ Attente des services..."
+    - sleep 30
+    - echo "✅ Vérification des conteneurs..."
+    - docker compose -f docker-compose.production.yml ps
+    - echo "✅ Déploiement terminé!"
   environment:
     name: production
     url: http://srv991054.hstgr.cloud:8080
@@ -64,26 +53,21 @@ deploy:production:
     - main
   tags:
     - hubeau
-  when: manual  # Nécessite confirmation manuelle pour éviter déploiements accidentels
+  when: manual  # Nécessite confirmation manuelle
 
 # Job de rollback en cas de problème
 rollback:production:
   stage: deploy
   image: docker:24-cli
   before_script:
-    - apk add --no-cache bash curl
+    - apk add --no-cache bash
   script:
-    - echo "🔄 Rollback du déploiement..."
-    - cd $PROJECT_DIR
-    - echo "⚠️  Restauration de la dernière sauvegarde MinIO..."
-    - |
-      if [ -f /srv/brgm-data/backups/$(ls -t /srv/brgm-data/backups/minio_backup_*.tar.gz 2>/dev/null | head -1) ]; then
-        echo "Sauvegarde trouvée, restauration en cours..."
-      else
-        echo "Aucune sauvegarde disponible, redémarrage des services..."
-      fi
+    - echo "🔄 Rollback - Redémarrage des services..."
+    - cd /srv/brgm
     - docker compose -f docker-compose.production.yml restart
-    - echo "✅ Rollback terminé (services redémarrés)"
+    - sleep 20
+    - docker compose -f docker-compose.production.yml ps
+    - echo "✅ Services redémarrés"
   environment:
     name: production
     url: http://srv991054.hstgr.cloud:8080
