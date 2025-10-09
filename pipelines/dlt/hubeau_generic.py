@@ -516,8 +516,19 @@ def run_pipeline(
     explicit_file_format = resolved_cfg.get("file_format") or file_format
     if explicit_file_format:
         destination_kwargs["file_format"] = explicit_file_format
-    if layout or resolved_cfg.get("layout"):
-        destination_kwargs["layout"] = resolved_cfg.get("layout") or layout
+
+    # Résoudre le layout AVANT de créer la destination
+    layout_to_use = resolved_cfg.get("layout") or layout
+    if layout_to_use:
+        # Résoudre les templates de partition si partition_key existe
+        partition_key = resolved_cfg.get("partition_key")
+        if partition_key:
+            original_layout = layout_to_use
+            layout_to_use = _replace_layout_templates(layout_to_use, partition_key)
+            if dagster_log:
+                dagster_log.info(f"📐 Layout résolu : {original_layout} → {layout_to_use}")
+
+        destination_kwargs["layout"] = layout_to_use
 
     # Remove empty values to let dlt rely on defaults when not provided
     destination_kwargs = {k: v for k, v in destination_kwargs.items() if v}
@@ -545,16 +556,6 @@ def run_pipeline(
     # Remplacer les templates dans la configuration
     if partition_date:
         resolved_cfg = _replace_templates(resolved_cfg, partition_date)
-
-    # Résoudre également les templates dans le layout si une partition_key est fournie
-    partition_key = resolved_cfg.get("partition_key")
-    if partition_key and "layout" in destination_kwargs:
-        original_layout = destination_kwargs["layout"]
-        resolved_layout = _replace_layout_templates(original_layout, partition_key)
-        destination_kwargs["layout"] = resolved_layout
-
-        if dagster_log:
-            dagster_log.info(f"📐 Layout résolu : {original_layout} → {resolved_layout}")
 
     extraction_start_time = time.time()
     with HttpClient(resolved_cfg) as http_client:
