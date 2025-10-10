@@ -1,4 +1,5 @@
-from dagster import define_asset_job, AssetSelection
+from dagster import define_asset_job, AssetSelection, in_process_executor
+
 from ..assets.bronze.dlt_assets import (
     # Assets de stations de référence (pas de partition)
     hydrometry_stations_reference,
@@ -34,6 +35,7 @@ hydrometry_job = define_asset_job(
         hydrometry_observations         # 2. Récupérer les observations (dépend de stations)
     ),
     description="Job Hydrométrie : Stations → Observations temps réel (30j max)",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 🏔️ PIÉZOMÉTRIE : Stations → Chroniques
@@ -44,6 +46,7 @@ piezometry_job = define_asset_job(
         piezometry_chroniques          # 2. Récupérer les chroniques (dépend de stations)
     ),
     description="Job Piézométrie : Stations → Chroniques avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 🧪 QUALITÉ COURS D'EAU : Stations → Analyses
@@ -54,6 +57,7 @@ quality_rivers_job = define_asset_job(
         quality_rivers_analyses            # 2. Récupérer les analyses (dépend de stations)
     ),
     description="Job Qualité Cours d'Eau : Stations → Analyses avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 🧪 QUALITÉ NAPPES : Stations → Analyses
@@ -64,6 +68,7 @@ quality_groundwater_job = define_asset_job(
         quality_groundwater_analyses            # 2. Récupérer les analyses (dépend de stations)
     ),
     description="Job Qualité Nappes : Stations → Analyses avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 🌊 ÉCOULEMENT : Stations → Observations
@@ -74,6 +79,7 @@ ecoulement_job = define_asset_job(
         ecoulement_observations        # 2. Récupérer les observations (dépend de stations)
     ),
     description="Job Écoulement : Stations → Observations avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 🐟 HYDROBIOLOGIE : Stations → Taxons + Indices
@@ -85,6 +91,7 @@ hydrobio_job = define_asset_job(
         hydrobio_indices             # 3. Récupérer les indices (dépend de stations)
     ),
     description="Job Hydrobiologie : Stations → Taxons + Indices avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 💧 PRÉLÈVEMENTS : Stations → Chroniques
@@ -95,6 +102,7 @@ prelevements_job = define_asset_job(
         prelevements_chroniques          # 2. Récupérer les chroniques (dépend de stations)
     ),
     description="Job Prélèvements : Stations → Chroniques avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # 🌡️ TEMPÉRATURE : Stations → Chroniques
@@ -105,6 +113,7 @@ temperature_job = define_asset_job(
         temperature_chroniques          # 2. Récupérer les chroniques (dépend de stations)
     ),
     description="Job Température : Stations → Chroniques avec partitions annuelles",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # ====================================
@@ -125,6 +134,7 @@ sync_all_stations = define_asset_job(
         temperature_stations_reference,
     ),
     description="Job global : Tous les référentiels de stations (pas de partition)",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # Job pour les données avec partitions ANNUELLES uniquement (7 APIs)
@@ -150,6 +160,7 @@ sync_all_yearly_data = define_asset_job(
         temperature_chroniques,
     ),
     description="Job global : 7 APIs avec partitions annuelles (piézo, qualité cours d'eau, qualité nappes, écoulement, hydrobio, prélèvements, température)",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # Job pour les données avec partitions QUOTIDIENNES uniquement
@@ -162,6 +173,7 @@ sync_all_daily_data = define_asset_job(
         hydrometry_observations,
     ),
     description="Job global : Données avec fenêtre glissante quotidienne uniquement (hydrométrie temps réel 30j)",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
 # Job pour les données temps réel uniquement
@@ -172,4 +184,5 @@ sync_realtime_data = define_asset_job(
         hydrometry_observations        # Observations temps réel (30j max)
     ),
     description="Job temps réel : Hydrométrie uniquement (30 derniers jours)",
+    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )

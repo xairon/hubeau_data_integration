@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import gc
 import logging
 from collections import deque
 from pathlib import Path
@@ -424,11 +425,19 @@ def hubeau_source(
                                 record["_slice_id"] = slice_obj.slice_id
                                 record["_scope"] = slice_obj.scope
                                 yield record
+                        # ✅ OPTIMISATION MÉMOIRE: Libérer les batches après fallback sans nouvelles slices
+                        buffered_batches.clear()
+                        del buffered_batches
+                        gc.collect()
                         continue
                     
                     log(f"🔄 Génération de {len(fallback_slices)} slices de fallback (niveau {slice_obj.level + 1})")
                     for new_slice in reversed(fallback_slices):
                         slices.appendleft(new_slice)
+                    # ✅ OPTIMISATION MÉMOIRE: Libérer les batches avant de générer les fallbacks
+                    buffered_batches.clear()
+                    del buffered_batches
+                    gc.collect()
                     # ✅ CORRECTION: Ne pas compter cette slice dans total_slices (elle sera remplacée par les fallbacks)
                     slice_count -= 1
                     continue
@@ -440,10 +449,17 @@ def hubeau_source(
                         record["_scope"] = slice_obj.scope
                         yield record
                 
+                # ✅ OPTIMISATION MÉMOIRE: Libérer explicitement les batches
+                buffered_batches.clear()
+                del buffered_batches
+                
                 total_records_processed += slice_records
                 # ✅ CORRECTION: Afficher le nombre réel de slices (initial + fallbacks générés)
                 current_total = slice_count + len(slices)
                 log(f"✅ Slice {slice_count}/{current_total} terminé: {slice_records} records en {slice_requests} requêtes")
+                
+                # ✅ OPTIMISATION MÉMOIRE: Garbage collection après chaque slice
+                gc.collect()
                 
                 # Log de progression toutes les 5 slices
                 if slice_count % 5 == 0:
