@@ -8,7 +8,8 @@ from ..assets.bronze.dlt_assets import (
     quality_groundwater_stations_reference,
     ecoulement_stations_reference,
     hydrobio_stations_reference,
-    prelevements_stations_reference,
+    prelevements_ouvrages_reference,
+    prelevements_points_reference,
     temperature_stations_reference,
     
     # Assets d'observations/analyses (avec partitions)
@@ -94,14 +95,15 @@ hydrobio_job = define_asset_job(
     executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
-# 💧 PRÉLÈVEMENTS : Stations → Chroniques
+# 💧 PRÉLÈVEMENTS : Ouvrages + Points → Chroniques
 prelevements_job = define_asset_job(
     name="hubeau_prelevements_job",
     selection=AssetSelection.assets(
-        prelevements_stations_reference,  # 1. Récupérer les points de prélèvement
-        prelevements_chroniques          # 2. Récupérer les chroniques (dépend de stations)
+        prelevements_ouvrages_reference,  # 1. Récupérer les ouvrages de prélèvement
+        prelevements_points_reference,    # 2. Récupérer les points de prélèvement
+        prelevements_chroniques          # 3. Récupérer les chroniques (dépend des ouvrages)
     ),
-    description="Job Prélèvements : Stations → Chroniques avec partitions annuelles",
+    description="Job Prélèvements : Ouvrages + Points → Chroniques avec partitions annuelles",
     executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
@@ -130,7 +132,8 @@ sync_all_stations = define_asset_job(
         quality_groundwater_stations_reference,
         ecoulement_stations_reference,
         hydrobio_stations_reference,
-        prelevements_stations_reference,
+        prelevements_ouvrages_reference,
+        prelevements_points_reference,
         temperature_stations_reference,
     ),
     description="Job global : Tous les référentiels de stations (pas de partition)",
@@ -147,7 +150,8 @@ sync_all_yearly_data = define_asset_job(
         quality_groundwater_stations_reference,
         ecoulement_stations_reference,
         hydrobio_stations_reference,
-        prelevements_stations_reference,
+        prelevements_ouvrages_reference,
+        prelevements_points_reference,
         temperature_stations_reference,
         # Puis observations/analyses avec partitions annuelles
         hydrobio_taxons,
