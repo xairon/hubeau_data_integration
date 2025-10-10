@@ -567,6 +567,11 @@ def run_pipeline(
     destination = filesystem(**destination_kwargs) if destination_kwargs else filesystem()
 
     pipeline_name = f"hubeau_{resolved_cfg['name']}"
+    # 🔄 DÉDUPLICATION: État séparé par partition (année) pour éviter conflits
+    if partition_date:
+        year = partition_date[:4]
+        pipeline_name = f"{pipeline_name}_{year}"
+
     pipeline = dlt.pipeline(
         pipeline_name=pipeline_name,
         destination=destination,
@@ -591,6 +596,20 @@ def run_pipeline(
         
         # Séparer le temps d'écriture du temps d'extraction
         write_start_time = time.time()
+
+        # 🔄 DÉDUPLICATION: Logging du mode merge et des paramètres incrémentaux
+        if dagster_log:
+            replication_key = resolved_cfg.get("replication_key")
+            if replication_key:
+                dagster_log.info(f"🔄 Mode MERGE activé avec replication_key: {replication_key}")
+                lookback = resolved_cfg.get("lookback_days", 0)
+                if lookback:
+                    dagster_log.info(f"⏪ Lookback configuré: {lookback} jours")
+                dagster_log.info(f"📊 Partition: {partition_date or 'N/A'}")
+                dagster_log.info(f"🗂️ State pipeline: {pipeline_name}")
+            else:
+                dagster_log.info(f"➕ Mode APPEND (pas de replication_key)")
+
         load_info = pipeline.run(
             source_data,
             loader_file_format=explicit_file_format

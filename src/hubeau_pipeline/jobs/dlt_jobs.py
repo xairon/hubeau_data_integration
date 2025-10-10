@@ -3,6 +3,7 @@ from dagster import define_asset_job, AssetSelection, in_process_executor
 from ..assets.bronze.dlt_assets import (
     # Assets de stations de référence (pas de partition)
     hydrometry_stations_reference,
+    hydrometry_sites_reference,
     piezometry_stations_reference,
     quality_rivers_stations_reference,
     quality_groundwater_stations_reference,
@@ -12,13 +13,16 @@ from ..assets.bronze.dlt_assets import (
     prelevements_points_reference,
     temperature_stations_reference,
     
-    # Assets d'observations/analyses (avec partitions)
+    # Assets d'observations/analyses (avec partitions annuelles)
     hydrobio_taxons,
     hydrobio_indices,
-    hydrometry_observations,
+    hydrometry_obs_elab,
     piezometry_chroniques,
     quality_rivers_analyses,
     quality_groundwater_analyses,
+    quality_rivers_operations,
+    quality_rivers_conditions,
+    piezometry_chroniques_historical,
     ecoulement_observations,
     prelevements_chroniques,
     temperature_chroniques,
@@ -28,14 +32,15 @@ from ..assets.bronze.dlt_assets import (
 # JOBS PAR API - CHAÎNAGE LOGIQUE
 # ====================================
 
-# 🌊 HYDROMÉTRIE : Stations → Observations
+# 🌊 HYDROMÉTRIE : Stations + Sites → Observations Élaborées
 hydrometry_job = define_asset_job(
     name="hubeau_hydrometry_job",
     selection=AssetSelection.assets(
         hydrometry_stations_reference,  # 1. Récupérer les stations
-        hydrometry_observations         # 2. Récupérer les observations (dépend de stations)
+        hydrometry_sites_reference,     # 2. Récupérer les sites
+        hydrometry_obs_elab            # 3. Récupérer observations élaborées (historique complet)
     ),
-    description="Job Hydrométrie : Stations → Observations temps réel (30j max)",
+    description="Job Hydrométrie : Stations + Sites → Observations élaborées avec partitions annuelles",
     executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
@@ -127,6 +132,7 @@ sync_all_stations = define_asset_job(
     name="sync_all_stations",
     selection=AssetSelection.assets(
         hydrometry_stations_reference,
+        hydrometry_sites_reference,
         piezometry_stations_reference,
         quality_rivers_stations_reference,
         quality_groundwater_stations_reference,
@@ -136,15 +142,17 @@ sync_all_stations = define_asset_job(
         prelevements_points_reference,
         temperature_stations_reference,
     ),
-    description="Job global : Tous les référentiels de stations (pas de partition)",
+    description="Job global : Tous les référentiels de stations/sites (pas de partition)",
     executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
-# Job pour les données avec partitions ANNUELLES uniquement (7 APIs)
+# Job pour les données avec partitions ANNUELLES uniquement (TOUTES les APIs)
 sync_all_yearly_data = define_asset_job(
     name="sync_all_yearly_data",
     selection=AssetSelection.assets(
-        # Stations d'abord
+        # Stations/Sites de référence d'abord
+        hydrometry_stations_reference,
+        hydrometry_sites_reference,
         piezometry_stations_reference,
         quality_rivers_stations_reference,
         quality_groundwater_stations_reference,
@@ -154,39 +162,22 @@ sync_all_yearly_data = define_asset_job(
         prelevements_points_reference,
         temperature_stations_reference,
         # Puis observations/analyses avec partitions annuelles
+        hydrometry_obs_elab,
         hydrobio_taxons,
         hydrobio_indices,
         piezometry_chroniques,
+        piezometry_chroniques_historical,
         quality_rivers_analyses,
+        quality_rivers_operations,
+        quality_rivers_conditions,
         quality_groundwater_analyses,
         ecoulement_observations,
         prelevements_chroniques,
         temperature_chroniques,
     ),
-    description="Job global : 7 APIs avec partitions annuelles (piézo, qualité cours d'eau, qualité nappes, écoulement, hydrobio, prélèvements, température)",
+    description="Job global : TOUTES les 8 APIs avec partitions annuelles (hydrométrie, piézo, qualité cours d'eau, qualité nappes, écoulement, hydrobio, prélèvements, température)",
     executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
-# Job pour les données avec partitions QUOTIDIENNES uniquement
-sync_all_daily_data = define_asset_job(
-    name="sync_all_daily_data",
-    selection=AssetSelection.assets(
-        # Stations d'abord
-        hydrometry_stations_reference,
-        # Puis observations avec partitions quotidiennes
-        hydrometry_observations,
-    ),
-    description="Job global : Données avec fenêtre glissante quotidienne uniquement (hydrométrie temps réel 30j)",
-    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
-)
-
-# Job pour les données temps réel uniquement
-sync_realtime_data = define_asset_job(
-    name="sync_realtime_data",
-    selection=AssetSelection.assets(
-        hydrometry_stations_reference,  # Stations hydrométrie
-        hydrometry_observations        # Observations temps réel (30j max)
-    ),
-    description="Job temps réel : Hydrométrie uniquement (30 derniers jours)",
-    executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
-)
+# ✅ SIMPLIFIÉ: Tous les jobs utilisent maintenant des partitions annuelles
+# sync_all_daily_data et sync_realtime_data supprimés car observations_tr retiré

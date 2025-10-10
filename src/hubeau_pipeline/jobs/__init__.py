@@ -26,8 +26,6 @@ from .dlt_jobs import (
     temperature_job,
     sync_all_stations,
     sync_all_yearly_data,
-    sync_all_daily_data,
-    sync_realtime_data,
 )
 
 # Jobs ancienne architecture (supprimés)
@@ -45,8 +43,6 @@ dlt_jobs = [
     temperature_job,
     sync_all_stations,
     sync_all_yearly_data,
-    sync_all_daily_data,
-    sync_realtime_data,
 ]
 
 # ✅ NOUVELLE ARCHITECTURE: Utiliser les jobs dlt par défaut
@@ -65,8 +61,6 @@ __all__ = [
     "temperature_job",
     "sync_all_stations",
     "sync_all_yearly_data",
-    "sync_all_daily_data",
-    "sync_realtime_data",
     
     # Tous les jobs
     "all_jobs"

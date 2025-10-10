@@ -75,6 +75,8 @@ dataset_name: hubeau                  # Dataset MinIO
 ```
 **Rôle :** Identifie le pipeline dans Dagster et MinIO.
 
+**📝 Note** : Le nom du fichier YAML doit correspondre exactement au nom de l'asset Dagster défini dans `dlt_assets.py`.
+
 ### 2. Endpoint API
 ```yaml
 base_url: https://hubeau.eaufrance.fr/api/v1/temperature
@@ -164,20 +166,24 @@ slicer:
   start_date: "{{ partition_date }}"
   end_offset_days: 0
 ```
-**Usage :** Données temps réel (hydrométrie, écoulement)
-**Avantage :** Récupération quotidienne optimisée
+**Usage :** Données chronologiques (hydrométrie observations élaborées, écoulement)
+**Avantage :** Récupération par période optimisée
 
-### 3. `station_month` - Station × Mois
+**📝 Note Architecture** : L'API Hydrométrie utilise maintenant **uniquement** `/obs_elab` (observations élaborées) avec historique complet au lieu de `/observations_tr` (temps réel limité à 30 jours).
+
+### 3. `station_month_chunked` - Station × Mois avec Chunks
 ```yaml
 slicer:
-  mode: station_month
+  mode: station_month_chunked
   start_param: date_debut_mesure
   end_param: date_fin_mesure
   window_days: 30
-  stations_source: dagster_asset      # Utilise les stations filtrées
+  station_chunk_size: 20              # 20 stations par requête
 ```
-**Usage :** Données historiques par station
-**Avantage :** Évite les limites API par station
+**Usage :** Données historiques volumineuses par station
+**Avantage :** Évite les limites API tout en optimisant le nombre de requêtes
+
+**📝 Note** : Ce mode récupère automatiquement les stations depuis MinIO (asset de référence) et filtre celles actives pour la période.
 
 ### 4. `dept_datetime` - Département × Temps (Optimisé)
 ```yaml
@@ -225,10 +231,11 @@ fallbacks:
 
 | API | Mode Principal | Fallback | Raison |
 |-----|----------------|----------|--------|
-| **Température** | `dept_datetime` | `station_month` | Optimisation vs garantie |
-| **Hydrométrie** | `datetime` | `dept_datetime` | Temps réel vs historique |
-| **Piézométrie** | `station_month` | `day` | Station vs temps |
-| **Qualité** | `day` | `station_month` | Temps vs station |
+| **Température** | `dept_datetime` | `station_month_chunked` | Optimisation vs garantie |
+| **Hydrométrie obs_elab** | `station_month_chunked` | - | Historique complet par station |
+| **Piézométrie** | `station_month_chunked` | - | Chroniques par station |
+| **Qualité analyses** | `station_month_chunked` | - | Analyses par station |
+| **Écoulement** | `datetime` | - | Observations par jour |
 
 ## 🛠️ Comment Modifier une Configuration
 
@@ -323,11 +330,13 @@ pagination:
   page_size: 20000
 ```
 **Avantage :** 4x moins de pagination qu'avec 5K
+**Limite API** : Maximum 20 000 records par page (Hub'Eau)
 
 ### 2. Filtrage Intelligent des Stations
-Le système filtre automatiquement les stations actives :
-- **Test API** : Requête test pour identifier les stations avec données
-- **Filtrage** : Seules les stations actives sont traitées
+Le système filtre automatiquement les stations actives pour la période :
+- **Source** : Récupération depuis MinIO (asset de référence)
+- **Test période** : Requête API test pour identifier stations actives
+- **Filtrage** : Seules les stations avec données dans la période sont traitées
 - **Optimisation** : Évite les requêtes inutiles (0 records)
 
 ### 3. Rate Limiting Adaptatif
@@ -340,6 +349,18 @@ rate_limit:
 rate_limit:
   target_rps: 2.0
 ```
+
+### 4. Optimisations Mémoire (In-Process Executor)
+Tous les jobs Hub'Eau utilisent `in_process_executor` pour optimiser la mémoire :
+```python
+# src/hubeau_pipeline/jobs/dlt_jobs.py
+hydrometry_job = define_asset_job(
+    name="hubeau_hydrometry_job",
+    selection=AssetSelection.assets(...),
+    executor_def=in_process_executor,  # ✅ Exécution in-process (évite overhead multiprocess)
+)
+```
+**Avantage** : Réduit significativement la consommation mémoire (évite les OOM)
 
 ## 🔍 Debugging et Monitoring
 
@@ -365,9 +386,32 @@ from pipelines.dlt.hubeau_generic import test_config
 test_config('configs/hubeau/temperature_chroniques.yml')
 ```
 
+## 🏗️ Architecture Actuelle
+
+### Couche Bronze (Implémentée)
+- **Stockage** : MinIO (S3-compatible)
+- **Format** : JSON brut + métadonnées d'ingestion
+- **Partitionnement** : Par API et année (`api_name/year=YYYY/`)
+- **Orchestration** : Dagster avec assets DLT
+- **Scheduler** : Partitions annuelles uniquement
+
+### Endpoints Intégrés (24 au total)
+```
+📊 Référentiels (9) : stations, sites, ouvrages, points
+📈 Chroniques/Observations (11) : obs_elab, chroniques, analyses, indices, taxons
+🌡️ Conditions (3) : conditions environnementales, opérations, campagnes  
+📍 Référence (1) : départements
+```
+
+### Stratégie de Partitionnement
+- **Stations/Référence** : Pas de partition (données statiques)
+- **Observations/Chroniques** : Partitions annuelles (`YEARLY_PARTITIONS`: 2020-2025)
+- **Schedule** : Exécution annuelle (1er janvier à 3h)
+
 ## 📚 Ressources
 
-- **[Schémas d'Architecture](ARCHITECTURE_SCHEMAS.md)** : Diagrammes Mermaid
-- **[APIs Hub'Eau](APIS_HUBEAU_COMPLETE.md)** : Documentation des APIs
+- **[APIs Hub'Eau Complètes](APIS_HUBEAU_REFERENCE_COMPLETE.md)** : Documentation exhaustive des 8 APIs intégrées
+- **[Autres Référentiels](AUTRES_REFERENTIELS.md)** : Guide d'intégration SANDRE, BDLISA, COG, etc.
+- **[Architecture Technique](ARCHITECTURE_MODERNE.md)** : Architecture système et choix techniques
 - **[Documentation Hub'Eau](https://hubeau.eaufrance.fr/page/api)** : Documentation officielle
-- **[Configuration Examples](../configs/hubeau/)** : Exemples concrets
+- **[Configurations DLT](../configs/hubeau/)** : Exemples concrets YAML

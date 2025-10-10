@@ -11,7 +11,8 @@ params_default:
   size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
 records_path: $.data
 primary_keys: [code_ouvrage, annee, code_usage]  # ✅ CORRECTION: mois n'existe pas dans l'API, utiliser code_usage pour unicité
-# replication_key: annee  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x
+replication_key: annee  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
+lookback_days: 365  # ⏪ Fenêtre de lookback pour corrections retroactives (365j pour données annuelles)
 pagination:
   type: page
   page_param: page

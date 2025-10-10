@@ -11,7 +11,8 @@ params_default:
   size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
 records_path: $.data
 primary_keys: [code_station, date_obs_elab, grandeur_hydro_elab]
-# replication_key: date_obs_elab  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x
+replication_key: date_obs_elab  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
+lookback_days: 30  # ⏪ Fenêtre de lookback pour corrections retroactives (30j pour données hydro)
 pagination:
   type: cursor
   cursor_param: cursor

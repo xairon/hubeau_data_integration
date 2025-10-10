@@ -17,9 +17,6 @@ YEARLY_PARTITIONS = StaticPartitionsDefinition(
     [str(year) for year in range(2020, 2026)]  # 2020-2025
 )
 
-# Partitions pour les données temps réel (30 derniers jours)
-DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2022-01-01")
-
 # ====================================
 # UTILITAIRES POUR RÉDUIRE LA REDONDANCE
 # ====================================
@@ -136,10 +133,10 @@ def extract_station_codes_from_result(result: Dict[str, Any], station_type: str 
                 "station_field": "code_station"
             },
             "hydrometry": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/hydrometrie",
-                "path": "/observations_tr",  # ❌ Pas d'endpoint stations avec filtrage, utiliser données
-                "start_param": "date_debut_obs",
-                "end_param": "date_fin_obs",
+                "base_url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie",
+                "path": "/obs_elab",  # ✅ Observations élaborées (historique complet)
+                "start_param": "date_debut_obs_elab",
+                "end_param": "date_fin_obs_elab",
                 "station_field": "code_station"
             },
             "piezometry": {
@@ -609,10 +606,10 @@ def _filter_active_stations_for_period(stations: list[str], partition_date: str,
                 "station_field": "code_station"
             },
             "hydrometry": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/hydrometrie",
-                "path": "/observations_tr",
-                "start_param": "date_debut_obs",
-                "end_param": "date_fin_obs",
+                "base_url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie",
+                "path": "/obs_elab",
+                "start_param": "date_debut_obs_elab",
+                "end_param": "date_fin_obs_elab",
                 "station_field": "code_station"
             },
             "piezometry": {
@@ -1092,13 +1089,6 @@ def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "hydrobio", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml", stations_data=stations_data, partition_date=partition_date)
-
-@asset(group_name="hubeau_hydrometry", partitions_def=DAILY_PARTITIONS, deps=[hydrometry_stations_reference])
-def hydrometry_observations(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests hydrometry observations data using dlt (30 derniers jours)."""
-    partition_date = _get_partition_date_daily(context)
-    stations_data, _ = _setup_observation_asset(context, "hydrometry", partition_date)
-    return ingest_dlt(context, "configs/hubeau/hydrometry_observations.yml", stations_data=stations_data)
 
 @asset(group_name="hubeau_piezometry", partitions_def=YEARLY_PARTITIONS, deps=[piezometry_stations_reference])
 def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:

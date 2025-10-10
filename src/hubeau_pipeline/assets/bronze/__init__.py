@@ -20,7 +20,7 @@ httpx + tenacity + pydantic pour une ingestion robuste et performante
 from .dlt_assets import (
     hydrobio_taxons,
     hydrobio_indices,
-    hydrometry_observations,
+    hydrometry_obs_elab,
     piezometry_chroniques,
     quality_rivers_analyses,
     quality_groundwater_analyses,
@@ -30,6 +30,7 @@ from .dlt_assets import (
     temperature_stations_reference,
     # Nouveaux assets de stations de référence
     hydrometry_stations_reference,
+    hydrometry_sites_reference,
     piezometry_stations_reference,
     quality_rivers_stations_reference,
     quality_groundwater_stations_reference,
@@ -50,6 +51,7 @@ from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 hubeau_bronze_assets_dlt = [
     # Assets de stations de référence (pas de partition)
     hydrometry_stations_reference,
+    hydrometry_sites_reference,
     piezometry_stations_reference,
     quality_rivers_stations_reference,
     quality_groundwater_stations_reference,
@@ -59,10 +61,10 @@ hubeau_bronze_assets_dlt = [
     prelevements_points_reference,
     temperature_stations_reference,
     
-    # Assets d'observations/analyses (avec partitions)
+    # Assets d'observations/analyses (avec partitions annuelles)
     hydrobio_taxons,
     hydrobio_indices,
-    hydrometry_observations,
+    hydrometry_obs_elab,
     piezometry_chroniques,
     quality_rivers_analyses,
     quality_groundwater_analyses,
@@ -85,7 +87,7 @@ __all__ = [
     "hubeau_bronze_assets_dlt",
     "hydrobio_taxons",
     "hydrobio_indices",
-    "hydrometry_observations",
+    "hydrometry_obs_elab",
     "piezometry_chroniques",
     "quality_rivers_analyses",
     "quality_groundwater_analyses",
@@ -95,6 +97,7 @@ __all__ = [
     "temperature_stations_reference",
     # Nouveaux assets de stations de référence
     "hydrometry_stations_reference",
+    "hydrometry_sites_reference",
     "piezometry_stations_reference",
     "quality_rivers_stations_reference",
     "quality_groundwater_stations_reference",
