@@ -355,8 +355,8 @@ def get_active_departments_for_stations(stations_data: Dict[str, List[str]], sta
             "dept_field": "code_departement"
         },
         "prelevements": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/prelevements/points_prelevement",
-            "station_field": "code_point_prelevement",
+            "url": "https://hubeau.eaufrance.fr/api/v1/prelevements/referentiel/ouvrages",  # ✅ CORRECTION: Utiliser ouvrages (chroniques utilisent code_ouvrage)
+            "station_field": "code_ouvrage",  # ✅ CORRECTION: code_ouvrage pour les chroniques
             "dept_field": "code_departement"
         }
     }
@@ -448,7 +448,7 @@ def _extract_station_codes_from_minio(station_type: str = "temperature") -> list
             "quality_groundwater": "quality_groundwater_api/quality_groundwater_stations/",
             "ecoulement": "ecoulement_api/ecoulement_stations/",
             "hydrobio": "hydrobio_api/hydrobio_stations/",
-            "prelevements": "prelevements_api/prelevements_stations/"
+            "prelevements": "prelevements_api/prelevements_ouvrages/"  # ✅ CORRECTION: Utiliser ouvrages (chroniques utilisent code_ouvrage)
         }
 
         prefix = station_prefixes.get(station_type, f"{station_type}_api/{station_type}_stations/")
@@ -520,7 +520,7 @@ def _extract_station_codes_from_minio(station_type: str = "temperature") -> list
             "quality_groundwater": "code_bss",
             "ecoulement": "code_station",
             "hydrobio": "code_station_hydrobio",
-            "prelevements": "code_point_prelevement"
+            "prelevements": "code_ouvrage"  # ✅ CORRECTION: Chroniques utilisent code_ouvrage (ouvrages)
         }
 
         key_field = station_key_fields.get(station_type, "code_station")
