@@ -8,7 +8,7 @@ path: /stations_hydrobio
 method: GET
 params_default:
   format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
+  size: 20000  # ✅ OPTIMISATION: Taille max pour contourner limite API 20K par département
 records_path: $.data
 primary_keys: [code_station_hydrobio]
 replication_key: date_maj_infos
@@ -16,7 +16,7 @@ pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 5000
+  page_size: 20000  # ✅ Taille max pour récupérer 20K par page (limite API par département)
   until_expr: "len($.data) == 0"
 slicer:
   mode: dept  # ✅ Récupération par département pour contourner limite pagination 20K

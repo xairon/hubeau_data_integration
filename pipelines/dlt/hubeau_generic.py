@@ -390,12 +390,20 @@ def hubeau_source(
                         log(f"🛑 Arrêt pagination: condition remplie (batch de {len(batch)} records)")
                         break
 
+                    # ✅ CORRECTIF: Only trigger truncation fallback if we hit threshold AND more pages likely exist
                     if needs_truncation(slice_records, resolved_cfg):
-                        truncated = True
-                        fallbacks = resolved_cfg.get('fallbacks') or {}
-                        threshold = fallbacks.get('truncation_threshold', 'non définie')
-                        log(f"⚠️ Troncature détectée: {slice_records} records (limite: {threshold})")
-                        break
+                        # Check if this was the last page (no more data available)
+                        page_size = pagination.get("page_size", 500) if pagination else 500
+                        if len(batch) < page_size:
+                            # Last page reached - no truncation needed, we got all data
+                            log(f"✅ Dernière page atteinte avec {slice_records} records (pas de troncature)")
+                        else:
+                            # More pages likely exist - trigger fallback to avoid excessive pagination
+                            truncated = True
+                            fallbacks = resolved_cfg.get('fallbacks') or {}
+                            threshold = fallbacks.get('truncation_threshold', 'non définie')
+                            log(f"⚠️ Troncature détectée: {slice_records} records (limite: {threshold}), fallback nécessaire")
+                            break
 
                     # Mise à jour du cursor ou de la page
                     if pagination and pagination.get("type") == "cursor":
