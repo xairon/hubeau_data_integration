@@ -19,7 +19,11 @@ pagination:
   page_size: 5000
   until_expr: "len($.data) == 0"
 slicer:
-  mode: global  # Pas de filtrage nécessaire - récupération globale
+  mode: dept  # ✅ Récupération par département pour contourner limite pagination 20K
+  param: code_departement
+  reference:
+    path: configs/hubeau/reference_departments.yml
+    key: departments
 rate_limit:
   target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 2.5x
   max_concurrency: 1
@@ -28,10 +32,15 @@ comment: |
   API Piézométrie Hub'Eau v1 - Référentiel des stations piézométriques
   
   📊 Données de référence:
-  - ~5,000 stations piézométriques (BSS - Banque du Sous-Sol)
+  - ~5,000 stations piézométriques actives (>20K historiques total - limite API pagination: 20K)
   - Données de référence (pas de partition temporelle)
   - Mise à jour occasionnelle des informations de station
-  
+
+  🎯 Stratégie:
+  - Mode dept: Récupération département par département
+  - Contourne la limite de pagination de l'API (20K records max)
+  - Permet récupération complète incluant stations historiques désactivées
+
   🎯 Utilisation:
   - Référentiel pour les chroniques piézométriques (chroniques_tr, chroniques)
   - Filtrage des stations actives pour les observations
