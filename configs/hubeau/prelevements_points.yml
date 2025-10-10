@@ -1,16 +1,16 @@
-name: prelevements_stations
+name: prelevements_points
 source: hubeau
 dataset_name: prelevements_api
 file_format: parquet
 layout: "{table_name}/{table_name}.parquet"
 base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
-path: /referentiel/ouvrages  # ⚠️ Utiliser /ouvrages au lieu de /points_prelevement (chroniques = ouvrages)
+path: /referentiel/points_prelevement
 method: GET
 params_default:
   format: json
   size: 20000  # ✅ OPTIMISATION: Taille max pour contourner limite API 20K par département
 records_path: $.data
-primary_keys: [code_ouvrage]  # ⚠️ code_ouvrage au lieu de code_point_prelevement
+primary_keys: [code_point_prelevement]
 replication_key: date_maj_infos
 pagination:
   type: page
@@ -29,25 +29,32 @@ rate_limit:
   max_concurrency: 1
 timeout: 60
 comment: |
-  API Prélèvements Hub'Eau - Référentiel des ouvrages de prélèvement
+  API Prélèvements Hub'Eau - Référentiel des POINTS de prélèvement
 
   📊 Données de référence:
-  - >20,000 ouvrages de prélèvement (limite API pagination: 20K)
-  - Un ouvrage = ensemble de points de prélèvement + infrastructure
+  - ~186,000 points de prélèvement (limite API pagination: 20K)
+  - Un point = emplacement spécifique de mesure sur un ouvrage
   - Données de référence (pas de partition temporelle)
-  - Mise à jour occasionnelle des informations d'ouvrage
+  - Mise à jour occasionnelle des informations de point
 
   🎯 Stratégie:
   - Mode dept: Récupération département par département
   - Contourne la limite de pagination de l'API (20K records max)
-  - 102 départements × ~200 ouvrages/dept en moyenne
+  - 102 départements × ~1,800 points/dept en moyenne
+
+  ⚠️ DISTINCTION:
+  - POINTS: ~186,000 points de mesure (ce fichier)
+  - OUVRAGES: ~168,000 installations techniques (voir prelevements_ouvrages.yml)
+  - Les chroniques utilisent code_ouvrage (pas code_point_prelevement)
 
   🎯 Utilisation:
-  - Référentiel pour les chroniques de prélèvement (attachées aux ouvrages)
-  - Filtrage des ouvrages actifs pour les chroniques
-  - Informations géographiques et techniques des ouvrages
+  - Référentiel complet des points de prélèvement
+  - Métadonnées détaillées par point de mesure
+  - Relation: 1 ouvrage → N points de prélèvement
 
-  ⚠️ IMPORTANT:
-  - Les chroniques de prélèvement sont rattachées aux OUVRAGES (code_ouvrage)
-  - PAS aux points de prélèvement individuels (code_point_prelevement)
-  - Un ouvrage peut avoir plusieurs points de prélèvement
+  📋 Champs clés:
+  - code_point_prelevement: Identifiant unique du point
+  - code_ouvrage: Identifiant de l'ouvrage parent
+  - code_departement: Code département
+  - nom_point: Nom du point de prélèvement
+  - coordonnees: Coordonnées géographiques

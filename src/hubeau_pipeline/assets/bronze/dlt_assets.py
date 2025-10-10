@@ -1014,9 +1014,24 @@ def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any
     return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
 
 @asset(group_name="hubeau_prelevements")
-def prelevements_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests prelevements stations reference data using dlt (pas de partition)."""
-    return ingest_dlt(context, "configs/hubeau/prelevements_stations.yml")
+def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """
+    Ingestion du référentiel des OUVRAGES de prélèvement (~168k ouvrages).
+
+    Un ouvrage = installation technique de prélèvement (infrastructure).
+    Utilisé par les chroniques (code_ouvrage).
+    """
+    return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
+
+@asset(group_name="hubeau_prelevements")
+def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """
+    Ingestion du référentiel des POINTS de prélèvement (~186k points).
+
+    Un point = emplacement spécifique de mesure sur un ouvrage.
+    1 ouvrage peut avoir plusieurs points de prélèvement.
+    """
+    return ingest_dlt(context, "configs/hubeau/prelevements_points.yml")
 
 @asset(group_name="hubeau_temperature")
 def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -1113,7 +1128,7 @@ def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
     stations_data, _ = _setup_observation_asset(context, "ecoulement", partition_date)
     return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS, deps=[prelevements_stations_reference])
+@asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS, deps=[prelevements_ouvrages_reference])
 def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests prelevements chroniques data using dlt."""
     partition_date = _get_partition_date_yearly(context)

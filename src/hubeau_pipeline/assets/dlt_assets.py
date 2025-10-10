@@ -237,9 +237,14 @@ def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any
     return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
 
 @asset(group_name="hubeau_prelevements")
-def prelevements_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests prelevements stations reference data using dlt (pas de partition)."""
-    return ingest_dlt(context, "configs/hubeau/prelevements_stations.yml")
+def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests prelevements ouvrages reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
+
+@asset(group_name="hubeau_prelevements")
+def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests prelevements points reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/prelevements_points.yml")
 
 @asset(group_name="hubeau_temperature")
 def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -275,5 +280,6 @@ __all__ = [
     "quality_groundwater_stations_reference",
     "ecoulement_stations_reference",
     "hydrobio_stations_reference",
-    "prelevements_stations_reference",
+    "prelevements_ouvrages_reference",
+    "prelevements_points_reference",
 ]

@@ -35,7 +35,8 @@ from .dlt_assets import (
     quality_groundwater_stations_reference,
     ecoulement_stations_reference,
     hydrobio_stations_reference,
-    prelevements_stations_reference,
+    prelevements_ouvrages_reference,
+    prelevements_points_reference,
 )
 
 # Sources externes (référentiels géographiques et thesaurus)
@@ -54,7 +55,8 @@ hubeau_bronze_assets_dlt = [
     quality_groundwater_stations_reference,
     ecoulement_stations_reference,
     hydrobio_stations_reference,
-    prelevements_stations_reference,
+    prelevements_ouvrages_reference,
+    prelevements_points_reference,
     temperature_stations_reference,
     
     # Assets d'observations/analyses (avec partitions)
@@ -98,7 +100,8 @@ __all__ = [
     "quality_groundwater_stations_reference",
     "ecoulement_stations_reference",
     "hydrobio_stations_reference",
-    "prelevements_stations_reference",
+    "prelevements_ouvrages_reference",
+    "prelevements_points_reference",
     
     # Assets Hub'Eau Bronze (ancienne architecture - deprecated)
     "hubeau_bronze_assets_old",
