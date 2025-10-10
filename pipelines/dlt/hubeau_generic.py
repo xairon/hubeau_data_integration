@@ -192,6 +192,9 @@ def _should_stop_pagination(
 ) -> bool:
     if not pagination:
         return True
+    # ✅ Arrêt explicite si batch vide (évite requêtes inutiles)
+    if len(records) == 0:
+        return True
     page_size = pagination.get("page_size")
     if page_size is not None and len(records) < page_size:
         return True

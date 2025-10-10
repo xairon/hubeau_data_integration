@@ -16,7 +16,7 @@ pagination:
   type: page
   page_param: page
   page_size_param: size
-  page_size: 20000
+  page_size: 5000
   until_expr: "len($.data) == 0"
 slicer:
   mode: global  # Pas de filtrage nécessaire - récupération globale
