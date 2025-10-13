@@ -33,7 +33,9 @@ resource:
       data_type: text
       nullable: true
 extraction:
-  slicing_mode: global
+  slicing_mode: datetime
+  start_param: annee
+  end_param: annee
   pagination:
     type: page_based
     page_size: 20000

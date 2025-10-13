@@ -169,18 +169,9 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
                     cfg["temporal_filter"]["end_date"] = f"{year}-12-31"
             context.log.info(f"🗓️ Filtre temporel mis à jour pour l'année {year}")
 
-    # Extract config sections for easier access
-    resource_config = cfg.get("resource", {})
-    extraction_config = cfg.get("extraction", {})
-
-    resource_name = resource_config.get('name', 'unknown')
-    context.log.info(f"🚀 Starting DLT ingestion for: {resource_name}")
-    context.log.info(f"📊 Configuration loaded: {resource_config.get('base_url', '')}{resource_config.get('endpoint', '')}")
-    context.log.info(f"🔑 Primary keys: {resource_config.get('primary_key', [])}")
-    context.log.info(f"📅 Replication key: {resource_config.get('replication_key', 'N/A')}")
-    context.log.info(f"🗓️ Slicing mode: {extraction_config.get('slicing_mode', 'N/A')}")
-    if extraction_config.get('slicer'):
-        context.log.info(f"📈 Date range: {extraction_config.get('slicer', {}).get('start_date', 'N/A')} to {extraction_config.get('slicer', {}).get('end_date', 'N/A')}")
+    # Simple logging without accessing nested config fields
+    # (DLT will handle the nested config structure internally)
+    context.log.info(f"🚀 Starting DLT ingestion...")
 
     # Build MinIO credentials for dlt
     import os
@@ -195,43 +186,6 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         "endpoint_url": minio_endpoint,
         "region_name": minio_region,
     }
-
-    # Test API connectivity and get sample data first
-    context.log.info(f"🔍 Testing API connectivity for {resource_name}...")
-    try:
-        import requests
-        import time
-
-        test_params = extraction_config.get("default_params", {}).copy()
-        test_params.update({
-            "size": 10,  # Small test batch
-            "format": "json"
-        })
-
-        test_url = f"{resource_config.get('base_url', '')}{resource_config.get('endpoint', '')}"
-        test_start = time.time()
-        
-        response = requests.get(test_url, params=test_params, timeout=30)
-        test_duration = time.time() - test_start
-        
-        context.log.info(f"🌐 API test response: {response.status_code} in {test_duration:.2f}s")
-        
-        if response.status_code in [200, 206]:  # 206 = Partial Content (normal pour pagination)
-            data = response.json()
-            if cfg.get("records_path"):
-                import jsonpath_ng
-                jsonpath_expr = jsonpath_ng.parse(cfg["records_path"])
-                matches = [match.value for match in jsonpath_expr.find(data)]
-                context.log.info(f"📊 Test data sample: {len(matches)} records found")
-                if matches:
-                    context.log.info(f"📋 Sample record fields: {list(matches[0].keys()) if isinstance(matches[0], dict) else 'N/A'}")
-            else:
-                context.log.info(f"📊 Test data: {len(data) if isinstance(data, list) else 'single record'}")
-        else:
-            context.log.error(f"❌ API test failed with status {response.status_code}: {response.text[:200]}")
-            
-    except Exception as e:
-        context.log.warning(f"⚠️ API connectivity test failed: {str(e)}")
 
     # Run the dlt pipeline
     context.log.info(f"🏃 Starting DLT pipeline execution...")
@@ -281,11 +235,12 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         builtins.print = original_print
 
     pipeline_duration = time.time() - pipeline_start_time
-    context.log.info(f"✅ DLT pipeline for {resource_name} finished in {pipeline_duration:.2f}s")
+    context.log.info(f"✅ DLT pipeline finished in {pipeline_duration:.2f}s")
 
     # Extract detailed metrics and statistics
     # Note: DLT LoadInfo doesn't contain detailed metrics, so we rely on DLT's internal logs
     # which are displayed via our monkey-patched print function
+    resource_name = cfg.get("resource", {}).get("name", "unknown")
     stats = {
         "stream": resource_name,
         "rows": 0,  # Will be updated from DLT logs if available

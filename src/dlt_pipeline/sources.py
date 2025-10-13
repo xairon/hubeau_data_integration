@@ -106,18 +106,30 @@ def hubeau_source(
         http_client = HttpClient(http_config)
 
         # Configuration complète pour le slicing
+        # Créer le slicer depuis extraction_config
+        slicer = {}
+
+        # Mapper slicing_mode vers mode dans slicer
+        if "slicing_mode" in extraction_config:
+            slicer["mode"] = extraction_config["slicing_mode"]
+
+        # Copier les paramètres de slicing depuis extraction
+        for key in ["station_param", "station_chunk_size", "start_param", "end_param", "start_date", "end_date", "stations"]:
+            if key in extraction_config:
+                slicer[key] = extraction_config[key]
+
         full_config = {
             **config,
             "path": resource_config.get("endpoint", "/"),
             "name": resource_config["name"],
             "base_url": resource_config["base_url"],
-            "slicer": extraction_config.get("slicer", {}),
+            "slicer": slicer,
             "primary_keys": resource_config.get("primary_key", [])
         }
 
         # Créer les slices selon le mode de slicing
         slices = list(build_slices(full_config))
-        logger.info(f"Created {len(slices)} slices with mode {extraction_config.get('slicing_mode', 'global')}")
+        logger.info(f"Created {len(slices)} slices with mode {slicer.get('mode', 'global')}")
 
         # Stats pour logging
         total_records = 0
@@ -509,6 +521,17 @@ def run_pipeline(
             config = cfg.model_dump(mode="python")
         else:
             config = cfg
+
+    # Injecter les stations si fournies dans kwargs
+    stations_data = kwargs.pop("stations_data", None)
+    if stations_data:
+        # Ajouter les stations dans la config pour le slicing
+        # Elles doivent être dans extraction pour être disponibles pendant le slicing
+        if "extraction" not in config:
+            config["extraction"] = {}
+        # Si le mode est station_month_chunked, les stations sont nécessaires
+        if config["extraction"].get("slicing_mode") in ["station_month_chunked", "station_month"]:
+            config["extraction"]["stations"] = stations_data
 
     # Créer la source
     source = hubeau_source(
