@@ -1,47 +1,56 @@
-name: hydrobio_stations
-source: hubeau
-dataset_name: hydrobio_api
-file_format: parquet
-layout: "{table_name}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
-path: /stations_hydrobio
-method: GET
-params_default:
-  format: json
-  size: 10000  # ✅ OPTIMISATION: Limite max API hydrobio (10K, pas 20K comme autres APIs)
-records_path: $.data
-primary_keys: [code_station_hydrobio]
-replication_key: date_maj_infos
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 10000  # ✅ Limite max API hydrobio (10K par page)
-  until_expr: "len($.data) == 0"
-slicer:
-  mode: dept  # ✅ Récupération par département pour contourner limite pagination 20K
-  param: code_departement
-  reference:
-    path: configs/hubeau/reference_departments.yml
-    key: departments
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 2.5x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Hydrobiologie Hub'Eau - Référentiel des stations hydrobiologiques
-  
-  📊 Données de référence:
-  - ~2,000 stations hydrobiologiques (possibilité >20K avec nouvelles données)
-  - Données de référence (pas de partition temporelle)
-  - Mise à jour occasionnelle des informations de station
-
-  🎯 Stratégie:
-  - Mode dept: Récupération département par département
-  - Contourne la limite de pagination de l'API (20K records max)
-  - Sécurise la récupération complète même avec croissance future des données
-
-  🎯 Utilisation:
-  - Référentiel pour les indices et taxons hydrobiologiques
-  - Filtrage des stations actives pour les analyses
-  - Informations géographiques et techniques des stations
+source:
+  name: hydrobio
+  max_table_nesting: 2
+resource:
+  name: hydrobio_stations
+  endpoint: /stations_hydrobio
+  base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
+  primary_key: []
+  write_disposition: replace
+  columns:
+    code_station:
+      data_type: text
+      nullable: false
+    libelle_station:
+      data_type: text
+      nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    longitude:
+      data_type: double
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit: 2.0
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_ouverture
+    - date_fermeture
+    - date_maj
+- validate_coordinates:
+    lat_field: latitude
+    lon_field: longitude
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: hydrobio
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/hydrobio.duckdb

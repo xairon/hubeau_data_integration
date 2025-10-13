@@ -1,58 +1,45 @@
-name: prelevements_ouvrages
-source: hubeau
-dataset_name: prelevements_api
-file_format: parquet
-layout: "{table_name}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
-path: /referentiel/ouvrages  # ⚠️ Utiliser /ouvrages au lieu de /points_prelevement (chroniques = ouvrages)
-method: GET
-params_default:
-  format: json
-  size: 20000  # ✅ OPTIMISATION: Taille max pour contourner limite API 20K par département
-records_path: $.data
-primary_keys: [code_ouvrage]  # ⚠️ code_ouvrage au lieu de code_point_prelevement
-replication_key: date_maj_infos
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Taille max pour récupérer 20K par page (limite API par département)
-  until_expr: "len($.data) == 0"
-slicer:
-  mode: dept  # ✅ Récupération par département pour contourner limite pagination 20K
-  param: code_departement
-  reference:
-    path: configs/hubeau/reference_departments.yml
-    key: departments
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 2.5x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Prélèvements Hub'Eau - Référentiel des OUVRAGES de prélèvement
-
-  📊 Données de référence:
-  - ~168,000 ouvrages de prélèvement (limite API pagination: 20K)
-  - Un ouvrage = installation technique de prélèvement (infrastructure)
-  - Données de référence (pas de partition temporelle)
-  - Mise à jour occasionnelle des informations d'ouvrage
-
-  ⚠️ DISTINCTION:
-  - OUVRAGES: ~168,000 installations techniques (ce fichier)
-  - POINTS: ~186,000 points de mesure (voir prelevements_points.yml)
-  - Les chroniques utilisent code_ouvrage (pas code_point_prelevement)
-
-  🎯 Stratégie:
-  - Mode dept: Récupération département par département
-  - Contourne la limite de pagination de l'API (20K records max)
-  - 102 départements × ~200 ouvrages/dept en moyenne
-
-  🎯 Utilisation:
-  - Référentiel pour les chroniques de prélèvement (attachées aux ouvrages)
-  - Filtrage des ouvrages actifs pour les chroniques
-  - Informations géographiques et techniques des ouvrages
-
-  ⚠️ IMPORTANT:
-  - Les chroniques de prélèvement sont rattachées aux OUVRAGES (code_ouvrage)
-  - PAS aux points de prélèvement individuels (code_point_prelevement)
-  - Un ouvrage peut avoir plusieurs points de prélèvement
+source:
+  name: prelevements
+  max_table_nesting: 2
+resource:
+  name: prelevements_ouvrages
+  endpoint: /referentiel/ouvrages
+  base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
+  primary_key:
+  - code_ouvrage
+  write_disposition: merge
+  columns:
+    id:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_obs
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: prelevements
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/prelevements.duckdb

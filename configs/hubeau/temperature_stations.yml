@@ -1,31 +1,56 @@
-name: temperature_stations
-source: hubeau
-dataset_name: temperature_api
-file_format: parquet
-layout: "{table_name}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/temperature
-path: /station
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_station]
-replication_key: date_maj_infos
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 1000
-  until_expr: "len($.data) == 0"
-slicer:
-  mode: global  # Pas de filtrage nécessaire - récupération globale
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 2.5x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Température Hub'Eau - Liste des stations
-  - 849 stations de température
-  - Données de référence (pas de partition temporelle)
-  - Mise à jour occasionnelle des informations de station
+source:
+  name: temperature
+  max_table_nesting: 2
+resource:
+  name: temperature_stations
+  endpoint: /station
+  base_url: https://hubeau.eaufrance.fr/api/v1/temperature
+  primary_key: []
+  write_disposition: replace
+  columns:
+    code_station:
+      data_type: text
+      nullable: false
+    libelle_station:
+      data_type: text
+      nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    longitude:
+      data_type: double
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit: 2.0
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_ouverture
+    - date_fermeture
+    - date_maj
+- validate_coordinates:
+    lat_field: latitude
+    lon_field: longitude
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: temperature
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/temperature.duckdb

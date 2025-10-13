@@ -9,7 +9,7 @@ import yaml
 from dagster import AssetExecutionContext, DailyPartitionsDefinition, StaticPartitionsDefinition, asset
 from dlt.common.typing import TSecretValue
 
-from pipelines.dlt.hubeau_generic import run_pipeline
+from dlt_pipeline.hubeau_generic import run_pipeline
 
 # Partitions pour les données historiques (annuelles depuis 2020)
 YEARLY_PARTITIONS = StaticPartitionsDefinition([str(year) for year in range(2020, 2026)])

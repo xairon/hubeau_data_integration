@@ -9,6 +9,17 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import yaml
 
+# Import factorized date utilities
+try:
+    from hubeau.utils.date_utils import limit_to_partition_year
+except ImportError:
+    # Fallback if module not yet available (during migration)
+    def limit_to_partition_year(start: date, end_candidate: date) -> date:
+        if start.month == 1 and start.day == 1:
+            end_of_year = date(start.year, 12, 31)
+            return min(end_candidate, end_of_year)
+        return end_candidate
+
 TRUNCATION_DEFAULT = float("inf")  # Par défaut, pas de troncature (récupère toutes les données)
 
 
@@ -120,10 +131,7 @@ def build_slices(
 
         # ✅ CORRECTION: Pour partitions annuelles, limiter à la fin de l'année de partition
         # Si start_date est "2024-01-01", on limite à "2024-12-31" (pas au-delà)
-        if start.month == 1 and start.day == 1:
-            # Partition annuelle détectée (ex: "2024-01-01")
-            end_of_year = date(start.year, 12, 31)
-            end_candidate = min(end_candidate, end_of_year)
+        end_candidate = limit_to_partition_year(start, end_candidate)
 
         if override_end:
             end_candidate = min(end_candidate, date.fromisoformat(override_end))
@@ -205,10 +213,7 @@ def build_slices(
 
         # ✅ CORRECTION: Pour partitions annuelles, limiter à la fin de l'année de partition
         # Si start_date est "2024-01-01", on limite à "2024-12-31" (pas au-delà)
-        if start.month == 1 and start.day == 1:
-            # Partition annuelle détectée (ex: "2024-01-01")
-            end_of_year = date(start.year, 12, 31)
-            end_candidate = min(end_candidate, end_of_year)
+        end_candidate = limit_to_partition_year(start, end_candidate)
 
         if override_end:
             end_candidate = min(end_candidate, date.fromisoformat(override_end))

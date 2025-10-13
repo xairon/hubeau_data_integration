@@ -107,6 +107,48 @@ Le jumeau numérique s'appuiera sur l'ontologie **SOSA** (Sensor, Observation, S
 
 ---
 
+## 🚀 Tests Rapides Sans Docker
+
+**Vous n'avez PAS besoin de Docker** pour tester les APIs et le wrapper Python.
+
+### Option 1 : Script Simple (2 minutes)
+
+```bash
+# Installer les dépendances
+pip install -r requirements.txt
+
+# Lancer le test
+python test_local_simple.py
+```
+
+**Résultat** : 3 CSV dans `data/local_tests/`
+
+### Option 2 : Notebook Jupyter (5 minutes)
+
+```bash
+# Lancer Jupyter
+jupyter notebook notebooks/test_hubeau_wrapper.ipynb
+```
+
+**Résultat** : 9 CSV + visualisations dans `data/test_exports/`
+
+### Option 3 : CLI (1 minute)
+
+```bash
+# Lister les APIs
+python -m hubeau.cli list-apis
+
+# Tester la connectivité
+python -m hubeau.cli test-connectivity
+
+# Extraire des données
+python -m hubeau.cli get-data piezometry stations --limit 10 --export csv
+```
+
+**Guide complet** : [Tests Locaux Sans Docker](docs/QUICK_START_LOCAL.md)
+
+---
+
 ## 🚀 Installation & Déploiement
 
 ### Développement Local
@@ -256,9 +298,10 @@ hubeau_data_integration/
 │   ├── temperature_*.yml
 │   └── ...
 │
-├── pipelines/dlt/               # ✅ Pipeline DLT générique
+├── src/dlt_pipeline/            # ✅ Pipeline DLT générique
 │   ├── hubeau_generic.py        # Source DLT Hub'Eau
 │   ├── slicing.py               # Découpage intelligent
+│   ├── transformers.py          # Validation et transformation
 │   └── http_client.py           # Client HTTP avec retry
 │
 ├── src/hubeau_pipeline/         # ✅ Code Dagster
@@ -391,7 +434,7 @@ dagster run logs <run_id>
 
 ```bash
 # Vérifier une configuration DLT
-python -c "from pipelines.dlt.hubeau_generic import validate_config; validate_config('configs/hubeau/api.yml')"
+python -c "from dlt_pipeline.hubeau_generic import validate_config; validate_config('configs/hubeau/api.yml')"
 
 # Tester un asset
 dagster asset materialize -a temperature_stations_reference

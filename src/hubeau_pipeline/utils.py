@@ -5,7 +5,10 @@ Utilitaires partagés pour la robustesse et les retry
 import time
 import random
 import httpx
+import logging
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 def get_with_backoff(
     client: httpx.Client, 
@@ -105,7 +108,7 @@ def fetch_hubeau_with_retry(
             
         except Exception as e:
             # Log l'erreur et arrête la pagination
-            print(f"Error fetching page {page} from {base_url}: {e}")
+            logger.error(f"Error fetching page {page} from {base_url}: {e}")
             break
     
     return all_rows

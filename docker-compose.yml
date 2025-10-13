@@ -32,17 +32,13 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       MINIO_USER: ${MINIO_USER}
       MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${MINIO_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      AWS_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
-      AWS_DEFAULT_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./dagster:/app/dagster
       - ./src:/app/src
-      - ./pipelines:/app/pipelines
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
@@ -64,17 +60,13 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       MINIO_USER: ${MINIO_USER}
       MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${MINIO_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      AWS_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
-      AWS_DEFAULT_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./dagster:/app/dagster
       - ./src:/app/src
-      - ./pipelines:/app/pipelines
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
     command: ["dagster-daemon","run","-m","hubeau_pipeline"]

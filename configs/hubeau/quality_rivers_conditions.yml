@@ -1,75 +1,47 @@
-name: quality_rivers_conditions
-source: hubeau
-dataset_name: quality_rivers_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
-path: /condition_environnementale_pc
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_station, date_operation, code_parametre_env]
-# replication_key: date_operation  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions annuelles) - gain 3-5x
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
-  until_expr: "len($.data) == 0"
-# ✅ STRATÉGIE ULTRA-OPTIMISÉE QUALITY RIVERS CONDITIONS: Mode station_month_chunked
-# Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-# Évite de requêter les départements vides (~60% des départements!)
-slicer:
-  mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
-  station_param: code_station  # Paramètre station pour l'API
-  station_chunk_size: 20  # ✅ 10 stations par requête (évite troncature à 20K records)
-  start_param: date_debut_operation
-  end_param: date_fin_operation
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-  # Les stations seront injectées dynamiquement par Dagster via stations_data
-# ✅ Filtre temporel optimisé pour chaque département
-temporal_filter:
-  start_param: date_debut_operation
-  end_param: date_fin_operation
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [station_month]  # Si troncature → découpage station×mois (dernier recours)
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 3.3x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Qualité des Cours d'Eau - Conditions environnementales
-
-  📊 Données disponibles:
-  - Paramètres environnementaux lors du prélèvement
-  - Conditions hydrologiques et météorologiques
-  - Mesures in-situ (température, pH, conductivité, etc.)
-
-  🎯 Utilisation:
-  - Contextualisation des analyses physico-chimiques
-  - Interprétation des résultats d'analyses
-  - Suivi des conditions environnementales
-
-  📋 Champs clés:
-  - code_station: Identifiant de la station
-  - date_operation: Date de l'opération
-  - code_parametre_env: Code du paramètre environnemental
-  - libelle_parametre_env: Libellé du paramètre
-  - resultat_parametre_env: Valeur mesurée
-  - unite_parametre_env: Unité de mesure
-
-  ℹ️ Exemples de paramètres environnementaux:
-  - Température de l'eau
-  - pH
-  - Conductivité
-  - Oxygène dissous
-  - Débit du cours d'eau
-  - Conditions météorologiques
-
-  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-qualite-cours-deau
+source:
+  name: quality
+  max_table_nesting: 2
+resource:
+  name: quality_rivers_conditions
+  endpoint: /condition_environnementale_pc
+  base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
+  primary_key:
+  - code_station
+  - date_operation
+  - code_parametre_env
+  write_disposition: merge
+  columns:
+    id:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_observation
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: quality
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/quality.duckdb

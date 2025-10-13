@@ -1,80 +1,67 @@
-name: prelevements_chroniques
-source: hubeau
-dataset_name: prelevements_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
-path: /chroniques
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_ouvrage, annee, code_usage]  # ✅ CORRECTION: mois n'existe pas dans l'API, utiliser code_usage pour unicité
-replication_key: annee  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
-lookback_days: 365  # ⏪ Fenêtre de lookback pour corrections retroactives (365j pour données annuelles)
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
-  until_expr: "len($.data) == 0"
-# ✅ STRATÉGIE ULTRA-OPTIMISÉE PRELEVEMENTS: Mode station_month_chunked
-# Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-# Évite de requêter les départements vides (~60% des départements!)
-slicer:
-  mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
-  station_param: code_ouvrage  # Paramètre station pour l'API (ouvrage de prélèvement)
-  station_chunk_size: 20  # ✅ 100 stations par requête (optimisation aggressive)
-  start_param: annee_min
-  end_param: annee_max
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-  # Les stations seront injectées dynamiquement par Dagster via stations_data
-# ✅ Filtre temporel optimisé pour chaque département
-temporal_filter:
-  start_param: annee_min
-  end_param: annee_max
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [station_month]  # Si troncature → découpage station×mois (dernier recours)
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 5x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Prélèvements en Eau - Chroniques de prélèvement
-
-  ✅ STRATÉGIE ULTRA-OPTIMISÉE - MODE STATION_MONTH_CHUNKED:
-  - ~20,000 ouvrages totaux (installations techniques de prélèvement)
-  - ⚠️ LIMITE CRITIQUE: 20,000 records par requête !
-  - Solution: Mode station_month_chunked (stations actives uniquement!)
-
-  Stratégie ULTRA-optimisée (NOUVELLE):
-  1. Dagster récupère les ~20,000 stations actives depuis l'API
-  2. Mode station_month_chunked: 10 stations × 12 mois = ~24,000 requêtes
-  3. Évite 100% des départements vides (~60 départements sans stations!)
-  4. Fallback station_month: Découpage station×mois si troncature
-  5. Partitions: Annuelles Dagster
-
-  Avantages vs mode dept précédent:
-  - Optimisation: ~24,000 requêtes vs 60,000+ (-60% de requêtes!)
-  - Aucune requête sur départements vides
-  - Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-  - Compatible API: multi-stations supporté par Hub'Eau
-
-  Calcul des requêtes ULTRA-OPTIMISÉ:
-  - ~20,000 stations actives ÷ 10 (chunk_size) = 2,000 chunks
-  - 2,000 chunks × 12 mois exacts = 24,000 requêtes total (2024 uniquement)
-  - vs ancien mode dept: 60,000+ requêtes (-60%!)
-  - vs ancien code original: 80,000 stations × 12 mois = 960,000 requêtes (-97%!)
-  - Optimisation: Pages de 20K records + fenêtres mensuelles exactes
-
-  Données:
-  - Mise à jour mensuelle depuis Naïades
-  - ~500,000 chroniques par an
-  - Filtrage temporel par année (annee_min/annee_max)
-  - ✅ IMPORTANT: Utilise code_ouvrage comme identifiant station
-
+source:
+  name: prelevements
+  max_table_nesting: 2
+resource:
+  name: prelevements_chroniques
+  endpoint: /chroniques
+  base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
+  primary_key:
+  - code_ouvrage
+  - annee
+  - code_usage
+  write_disposition: merge
+  columns:
+    code_station:
+      data_type: text
+      nullable: false
+    libelle_station:
+      data_type: text
+      nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    longitude:
+      data_type: double
+      nullable: true
+    date_obs:
+      data_type: timestamp
+      nullable: false
+    resultat:
+      data_type: double
+      nullable: true
+    code_parametre:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_obs
+    - date_debut
+    - date_fin
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: prelevements
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/prelevements.duckdb

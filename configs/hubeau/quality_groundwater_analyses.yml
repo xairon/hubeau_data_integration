@@ -1,89 +1,60 @@
-name: quality_groundwater_analyses
-source: hubeau
-dataset_name: quality_groundwater_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
-path: /analyses
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_bss, date_debut_prelevement, code_param]
-replication_key: date_debut_prelevement  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
-lookback_days: 30  # ⏪ Fenêtre de lookback pour corrections retroactives (30j pour données qualité)
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
-  until_expr: "len($.data) == 0"
-# ✅ STRATÉGIE ULTRA-OPTIMISÉE QUALITY GROUNDWATER: Mode station_month_chunked
-# Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-# Évite de requêter les départements vides (~60% des départements!)
-slicer:
-  mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
-  station_param: code_bss  # Paramètre station pour l'API (BSS = Banque du Sous-Sol)
-  station_chunk_size: 1  # ✅ REQUIS: Stations individuelles dépassent 20K (fallback day nécessaire)
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-  # Les stations seront injectées dynamiquement par Dagster via stations_data
-# Ajout du filtre temporel pour chaque département
-temporal_filter:
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [station_month, day]  # Niveau 1: station×mois, Niveau 2: station×jour
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 3.3x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Qualité des Nappes - Analyses eaux souterraines
-
-  ✅ STRATÉGIE OPTIMISÉE - MODE STATION_MONTH_CHUNKED:
-  - ~84,000 stations totales dans référentiel
-  - ~10,669 stations actives en 2024 (mesure réelle API)
-  - Limite: 20,000 records par requête
-  - Solution: Mode station_month_chunked optimisé (chunk_size=8)
-
-  📊 VOLUMÉTRIE RÉELLE 2024 (mesurée via API Hub'Eau):
-  - Total analyses: 8,534,869 records
-  - Moyenne: 800 analyses/station/an (~67/mois)
-  - Janvier (pire mois): 2,320 analyses/station
-  - Distribution: ~102 stations dans échantillon 20K records
-
-  🎯 STRATÉGIE OPTIMISÉE (chunk_size=8):
-  1. Dagster récupère stations actives depuis API Hub'Eau (filtrage temporel 2024)
-  2. Extraction intelligente: Dict {code_bss: [mois avec données]}
-  3. Mode station_month_chunked: 8 stations par chunk
-  4. Calcul: 8 stations × 2,320 (janv) = 18,560 analyses (~93% limite)
-  5. Marge sécurité: 7% pour variations mensuelles
-  6. Fallback station_month disponible mais non sollicité
-  7. Partitions: Annuelles Dagster
-
-  📈 CALCUL NOMBRE DE REQUÊTES:
-  - Mode station_month_chunked: 1 station par requête (chunk_size=1)
-  - Stations du référentiel MinIO (toutes les stations)
-  - DLT filtre automatiquement les stations sans données
-  - Fallback day activé si station×mois > 20K
-  - Note: Certaines stations ont >20K analyses/mois → fallback systématique
-
-  ✅ AVANTAGES chunk_size=8 vs 10:
-  - Aucun dépassement 20K même en janvier (pire mois)
-  - Évite déclenchement fallback station_month
-  - Plus prévisible et stable
-  - Marge pour pics imprévus
-
-  📊 DONNÉES TECHNIQUES:
-  - Mise à jour mensuelle depuis Naïades
-  - ~150+ paramètres physico-chimiques différents
-  - Identifiant station: code_bss (Banque du Sous-Sol)
-  - Extraction active: Filtrage temporel par mois via API
-
+source:
+  name: quality
+  max_table_nesting: 2
+resource:
+  name: quality_groundwater_analyses
+  endpoint: /analyses
+  base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
+  primary_key:
+  - code_bss
+  - date_debut_prelevement
+  - code_param
+  write_disposition: merge
+  columns:
+    code_prelevement:
+      data_type: text
+      nullable: false
+    date_prelevement:
+      data_type: timestamp
+      nullable: true
+    code_parametre:
+      data_type: text
+      nullable: true
+    resultat:
+      data_type: double
+      nullable: true
+    unite:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_prelevement
+    - date_analyse
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: quality
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/quality.duckdb

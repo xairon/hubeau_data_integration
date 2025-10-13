@@ -1,72 +1,66 @@
-name: piezometry_chroniques
-source: hubeau
-dataset_name: piezometry_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-path: /chroniques_tr
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_bss, timestamp_mesure]
-replication_key: date_mesure  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
-lookback_days: 30  # ⏪ Fenêtre de lookback pour corrections retroactives (30j pour données piézo)
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
-  until_expr: "len($.data) == 0"
-# ✅ STRATÉGIE ULTRA-OPTIMISÉE PIEZOMETRY: Mode station_month_chunked
-# Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-# Évite de requêter les départements vides (~60% des départements!)
-slicer:
-  mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
-  station_param: code_bss  # Paramètre station pour l'API (BSS = Banque du Sous-Sol)
-  station_chunk_size: 20  # ✅ 50 stations par requête (optimisation batch size)
-  start_param: date_debut_mesure
-  end_param: date_fin_mesure
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-  # Les stations seront injectées dynamiquement par Dagster via stations_data
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [station_month]  # Si troncature → découpage station×mois
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 3.3x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Piézométrie Hub'Eau v1 - Chroniques temps réel
-
-  ✅ STRATÉGIE ULTRA-OPTIMISÉE - MODE STATION_MONTH_CHUNKED:
-  - ~5,000 stations totales (dont ~1,500 encore en service)
-  - Limite: 20,000 records par requête
-  - Solution: Mode station_month_chunked (stations actives uniquement!)
-
-  Stratégie ULTRA-optimisée (NOUVELLE):
-  1. Dagster récupère les ~1,500 stations actives depuis l'API
-  2. Mode station_month_chunked: 10 stations × 12 mois = ~1,800 requêtes
-  3. Évite 100% des départements vides (~60 départements sans stations!)
-  4. Fallback station_month: Découpage station×mois si troncature
-  5. Partitions: Annuelles Dagster
-
-  Avantages vs mode dept_datetime précédent:
-  - Optimisation: ~1,800 requêtes vs 4,500+ (-60% de requêtes!)
-  - Aucune requête sur départements vides
-  - Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-  - Compatible API: multi-stations supporté par Hub'Eau
-
-  Calcul des requêtes ULTRA-OPTIMISÉ:
-  - ~1,500 stations actives ÷ 10 (chunk_size) = 150 chunks
-  - 150 chunks × 12 mois exacts = 1,800 requêtes total (2024 uniquement)
-  - vs ancien mode dept_datetime: 4,500+ requêtes (-60%!)
-  - vs ancien code original: 5,000 stations × 12 mois = 60,000 requêtes (-97%!)
-  - Optimisation: Pages de 20K records + fenêtres mensuelles exactes
-
-  Données:
-  - Mise à jour mensuelle/trimestrielle depuis Naïades
-  - ~200,000 mesures par an
-  - ✅ IMPORTANT: Utilise code_bss (Banque du Sous-Sol) comme identifiant station
+source:
+  name: piezometry
+  max_table_nesting: 2
+resource:
+  name: piezometry_chroniques
+  endpoint: /chroniques
+  base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
+  primary_key:
+  - code_bss
+  - timestamp_mesure
+  write_disposition: merge
+  columns:
+    code_station:
+      data_type: text
+      nullable: false
+    libelle_station:
+      data_type: text
+      nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    longitude:
+      data_type: double
+      nullable: true
+    date_obs:
+      data_type: timestamp
+      nullable: false
+    resultat:
+      data_type: double
+      nullable: true
+    code_parametre:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_obs
+    - date_debut
+    - date_fin
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: piezometry
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/piezometry.duckdb

@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("jsonpath_ng", reason="jsonpath-ng dependency missing")
 
-from pipelines.dlt.http_client import HttpClient
+from dlt_pipeline.http_client import HttpClient
 
 
 class DummyResponse:
@@ -42,7 +42,7 @@ def test_retry_on_429(monkeypatch):
     http_client = HttpClient(cfg, client=client)
     http_client.bucket.consume = MagicMock()  # avoid sleeping
     http_client.bucket.consume.side_effect = lambda *args, **kwargs: None
-    monkeypatch.setattr("pipelines.dlt.http_client.time.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("dlt_pipeline.http_client.time.sleep", lambda *_args, **_kwargs: None)
     data = http_client.get("/endpoint", params={})
     assert client.calls == 2
     assert data == {"data": []}
@@ -66,7 +66,7 @@ def test_request_stops_after_max_attempts(monkeypatch):
     cfg = {"base_url": "https://example.com", "max_attempts": 3}
     http_client = HttpClient(cfg, client=failing_client)
     http_client.bucket.consume = MagicMock(side_effect=lambda *args, **kwargs: None)
-    monkeypatch.setattr("pipelines.dlt.http_client.time.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("dlt_pipeline.http_client.time.sleep", lambda *_args, **_kwargs: None)
 
     with pytest.raises(httpx.TransportError):
         http_client.request("GET", "/endpoint", params={})

@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("dlt", reason="dlt dependency missing")
 
 try:
-    from pipelines.dlt.hubeau_generic import run_pipeline
+    from dlt_pipeline.hubeau_generic import run_pipeline
 except NotImplementedError as exc:  # pragma: no cover - dependency issue
     pytest.skip(f"dlt import failed: {exc}", allow_module_level=True)
 
@@ -35,7 +35,7 @@ class DummyHttpClient:
 
 def test_pipeline_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("DESTINATION__FILESYSTEM__PATH", str(tmp_path))
-    monkeypatch.setattr("pipelines.dlt.hubeau_generic.HttpClient", DummyHttpClient)
+    monkeypatch.setattr("dlt_pipeline.hubeau_generic.HttpClient", DummyHttpClient)
     cfg = {
         "name": "hydrobio_taxons",
         "source": "hubeau",

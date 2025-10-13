@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("dlt", reason="dlt must be installed to import hubeau_generic")
 
-from pipelines.dlt.hubeau_generic import _evaluate_until_expr, _should_stop_pagination
+from dlt_pipeline.hubeau_generic import _evaluate_until_expr, _should_stop_pagination
 
 
 def test_evaluate_until_expr_len_lt():

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from pipelines.dlt.slicing import build_slices, generate_fallback_slices, needs_truncation
+from dlt_pipeline.slicing import build_slices, generate_fallback_slices, needs_truncation
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ class _MockDate(date):
 
 
 def test_build_datetime_slices(monkeypatch, datetime_cfg):
-    monkeypatch.setattr("pipelines.dlt.slicing.date", _MockDate)
+    monkeypatch.setattr("dlt_pipeline.slicing.date", _MockDate)
     slices = list(build_slices(datetime_cfg))
     assert len(slices) == 3
     assert slices[0].params == {"start": "2024-01-01", "end": "2024-01-01"}
@@ -46,7 +46,7 @@ def test_needs_truncation_with_threshold():
 
 
 def test_fallback_day(monkeypatch, datetime_cfg):
-    monkeypatch.setattr("pipelines.dlt.slicing.date", _MockDate)
+    monkeypatch.setattr("dlt_pipeline.slicing.date", _MockDate)
     cfg = {**datetime_cfg, "fallbacks": {"split_chain": ["day"]}}
     root_slice = next(iter(build_slices(cfg)))
     fallbacks = generate_fallback_slices(root_slice, cfg, root_slice.level)
@@ -55,7 +55,7 @@ def test_fallback_day(monkeypatch, datetime_cfg):
 
 
 def test_fallback_station_month(monkeypatch, datetime_cfg):
-    monkeypatch.setattr("pipelines.dlt.slicing.date", _MockDate)
+    monkeypatch.setattr("dlt_pipeline.slicing.date", _MockDate)
     cfg = {
         **datetime_cfg,
         "fallbacks": {"split_chain": ["station_month"]},

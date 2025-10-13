@@ -1,80 +1,60 @@
-name: quality_rivers_analyses
-source: hubeau
-dataset_name: quality_rivers_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
-path: /analyse_pc
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_station, date_prelevement, code_parametre]
-replication_key: date_prelevement  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
-lookback_days: 30  # ⏪ Fenêtre de lookback pour corrections retroactives (30j pour données qualité)
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
-  until_expr: "len($.data) == 0"
-# ✅ STRATÉGIE ULTRA-OPTIMISÉE QUALITY RIVERS: Mode station_month_chunked
-# Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-# Évite de requêter les départements vides (~60% des départements!)
-slicer:
-  mode: station_month_chunked  # ✅ Nouveau mode optimisé par stations
-  station_param: code_station  # Paramètre station pour l'API
-  station_chunk_size: 20  # ✅ 10 stations par requête (évite troncature à 20K records)
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (ex: "2024-01-01")
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-  # Les stations seront injectées dynamiquement par Dagster via stations_data
-# ✅ Filtre temporel optimisé pour chaque département
-temporal_filter:
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [station_month]  # Si troncature → découpage station×mois (dernier recours)
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 3.3x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Qualité des Cours d'Eau - Analyses physico-chimiques
-
-  ✅ STRATÉGIE ULTRA-OPTIMISÉE - MODE STATION_MONTH_CHUNKED:
-  - ~3,000 stations totales (dont ~800 encore en service)
-  - Limite: 20,000 records par requête
-  - Solution: Mode station_month_chunked (stations actives uniquement!)
-
-  Stratégie ULTRA-optimisée (NOUVELLE):
-  1. Dagster récupère les ~800 stations actives depuis l'API
-  2. Mode station_month_chunked: 10 stations × 12 mois = ~960 requêtes
-  3. Évite 100% des départements vides (~60 départements sans stations!)
-  4. Fallback station_month: Découpage station×mois si troncature (rare avec chunk_size=10)
-  5. Partitions: Annuelles Dagster
-
-  Avantages vs mode dept précédent:
-  - Optimisation: ~960 requêtes vs 2,400+ (-60% de requêtes!)
-  - Aucune requête sur départements vides
-  - Utilise UNIQUEMENT les stations actives (fournies par Dagster)
-  - Compatible API: multi-stations supporté par Hub'Eau
-
-  Calcul des requêtes ULTRA-OPTIMISÉ:
-  - ~800 stations actives ÷ 10 (chunk_size) = 80 chunks
-  - 80 chunks × 12 mois exacts = 960 requêtes total (2024 uniquement)
-  - Chunk_size: 10 stations (évite troncature: 10×~400 = ~4K records << 20K limite)
-  - vs ancien mode dept: 2,400+ requêtes (-60%!)
-  - vs ancien code original: 3,000 stations × 12 mois = 36,000 requêtes (-97%!)
-  - Optimisation: Pages de 20K records + fenêtres mensuelles exactes
-
-  Données:
-  - Mise à jour mensuelle depuis Naïades
-  - ~500,000 analyses par an
-  - 200+ paramètres différents
-
+source:
+  name: quality
+  max_table_nesting: 2
+resource:
+  name: quality_rivers_analyses
+  endpoint: /analyse_pc
+  base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
+  primary_key:
+  - code_station
+  - date_prelevement
+  - code_parametre
+  write_disposition: merge
+  columns:
+    code_prelevement:
+      data_type: text
+      nullable: false
+    date_prelevement:
+      data_type: timestamp
+      nullable: true
+    code_parametre:
+      data_type: text
+      nullable: true
+    resultat:
+      data_type: double
+      nullable: true
+    unite:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_prelevement
+    - date_analyse
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: quality
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/quality.duckdb

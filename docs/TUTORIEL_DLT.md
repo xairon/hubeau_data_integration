@@ -382,7 +382,7 @@ docker-compose logs dagster_daemon | grep temperature_chroniques
 ### Test de Configuration
 ```python
 # Test d'une configuration DLT
-from pipelines.dlt.hubeau_generic import test_config
+from dlt_pipeline.hubeau_generic import test_config
 test_config('configs/hubeau/temperature_chroniques.yml')
 ```
 

@@ -1,46 +1,47 @@
-name: hydrobio_indices
-source: hubeau
-dataset_name: hydrobio_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
-path: /indices
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_station_hydrobio, date_prelevement, code_indice]
-replication_key: date_prelevement  # 🔄 DÉDUPLICATION: Mode MERGE avec détection retroactive
-lookback_days: 90  # ⏪ Fenêtre de lookback pour corrections retroactives (90j pour campagnes saisonnières)
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 2000  # ✅ Doc officielle: taille max 2000
-  until_expr: "len($.data) == 0"
-slicer:
-  mode: dept_datetime  # ✅ Chunking par département + temps (comme l'ancien code)
-  dept_param: code_departement
-  dept_chunk_size: 8  # ✅ Optimisé : 8 départements par requête (101÷8≈13 chunks)
-  dept_list_dynamic: true  # ✅ NOUVEAU: Calculer départements depuis stations actives (-20% requêtes estimé)
-  dept_list: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95"]
-  start_param: date_debut_prelevement
-  end_param: date_fin_prelevement
-  window_days: 30  # ✅ Fenêtre mensuelle exacte (utilise month_windows automatiquement)
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster (année)
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 10000  # ✅ Doc officielle: profondeur max 10k
-  split_chain: [day]  # Si troncature → découper par jour
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 2.9x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Hydrobiologie - Indices biologiques (IBGN, I2M2, etc.)
-  - ~2,000 stations
-  - ~5,000 indices par an
-  - Limite de profondeur: 10,000 records (plus stricte que les autres APIs)
-  - Données annuelles, semestrielles selon les stations
-
+source:
+  name: hydrobio
+  max_table_nesting: 2
+resource:
+  name: hydrobio_indices
+  endpoint: /indices
+  base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
+  primary_key:
+  - code_station_hydrobio
+  - date_prelevement
+  - code_indice
+  write_disposition: merge
+  columns:
+    id:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_obs
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: hydrobio
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/hydrobio.duckdb

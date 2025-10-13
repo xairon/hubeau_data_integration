@@ -1,71 +1,66 @@
-name: piezometry_chroniques_historical
-source: hubeau
-dataset_name: piezometry_api
-file_format: parquet
-layout: "{table_name}/year={{ partition_year }}/{table_name}.parquet"
-base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-path: /chroniques
-method: GET
-params_default:
-  format: json
-  size: 5000  # ✅ OPTIMISATION: Augmenté de 1000 à 5000 - gain 3-5x
-records_path: $.data
-primary_keys: [code_bss, timestamp_mesure]
-# replication_key: date_mesure  # ✅ OPTIMISATION: Commenté pour mode APPEND (partitions uniques) - gain 3-5x
-pagination:
-  type: page
-  page_param: page
-  page_size_param: size
-  page_size: 20000  # ✅ Optimisation: Pages de 20K records
-  until_expr: "len($.data) == 0"
-slicer:
-  mode: dept_datetime  # ✅ Chunking par département + temps
-  dept_param: code_departement
-  dept_chunk_size: 8  # ✅ Optimisé : 8 départements par requête (101÷8≈13 chunks)
-  dept_list: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "2A", "2B", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95"]
-  start_param: date_debut_mesure
-  end_param: date_fin_mesure
-  window_days: 30  # ✅ Fenêtre mensuelle exacte (utilise month_windows automatiquement)
-  start_date: "{{ partition_date }}"  # Utilise la partition Dagster
-  end_offset_days: 0  # ✅ Pas d'offset pour éviter les fenêtres supplémentaires
-fallbacks:
-  truncation_threshold: 20000  # ✅ Cohérent avec la taille de page (20K)
-  split_chain: [station_month]  # Si troncature → découpage station×mois
-rate_limit:
-  target_rps: 5.0  # ✅ OPTIMISATION: Augmenté à 5.0 RPS (auto-adjust si 429) - gain 3.3x
-  max_concurrency: 1
-timeout: 60
-comment: |
-  API Piézométrie Hub'Eau v1 - Chroniques historiques complètes
-
-  📊 Données disponibles:
-  - Niveaux de nappes phréatiques (historique complet)
-  - Fréquence: mensuelle à trimestrielle selon les stations
-  - Volume: ~5,000 stations, ~200,000 mesures/an
-  - Historique: données depuis ~20+ ans
-
-  🎯 Stratégie optimale:
-  - Mode dept_datetime: Chunking par département + temps (8 départements × 30 jours)
-  - Partitions annuelles Dagster pour l'historique
-  - Utilisation des stations de référence pour filtrage
-
-  📋 Champs clés:
-  - code_bss: Identifiant BSS de la station
-  - date_mesure: Date de mesure
-  - timestamp_mesure: Timestamp précis de la mesure
-  - niveau_nappe_eau: Niveau de la nappe (m NGF)
-  - profondeur_nappe: Profondeur de la nappe (m)
-  - code_qualification: Qualité de la mesure
-  - mode_obtention: Mode d'obtention (manuel, automatique)
-
-  ⚠️ Différences vs chroniques_tr:
-  - `/chroniques`: Historique complet (toutes dates)
-  - `/chroniques_tr`: Données temps réel/récentes uniquement
-  - `/chroniques`: Données validées et qualifiées
-  - `/chroniques_tr`: Données brutes temps réel
-
-  💡 Utilisation recommandée:
-  - Utiliser `/chroniques` pour analyses historiques complètes
-  - Utiliser `/chroniques_tr` pour suivi temps réel
-
-  🔗 Documentation: https://hubeau.eaufrance.fr/page/api-niveaux-nappes
+source:
+  name: piezometry
+  max_table_nesting: 2
+resource:
+  name: piezometry_chroniques_historical
+  endpoint: /chroniques_tr
+  base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
+  primary_key:
+  - code_bss
+  - timestamp_mesure
+  write_disposition: merge
+  columns:
+    code_station:
+      data_type: text
+      nullable: false
+    libelle_station:
+      data_type: text
+      nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    longitude:
+      data_type: double
+      nullable: true
+    date_obs:
+      data_type: timestamp
+      nullable: false
+    resultat:
+      data_type: double
+      nullable: true
+    code_parametre:
+      data_type: text
+      nullable: true
+extraction:
+  slicing_mode: global
+  pagination:
+    type: page_based
+    page_size: 20000
+    max_pages: null
+  default_params: {}
+performance:
+  parallelism: 5
+  chunk_size: 10000
+  retry_times: 3
+  retry_delay: 2.0
+  rate_limit:
+    target_rps: 5.0
+    max_concurrency: 1
+transformers:
+- validate_primary_keys
+- normalize_dates:
+    fields:
+    - date_obs
+    - date_debut
+    - date_fin
+destinations:
+  postgres:
+    dataset_name: bronze
+    schema_name: piezometry
+    create_indexes: true
+  filesystem:
+    bucket_url: s3://hubeau-bronze
+    file_format: parquet
+    layout: '{table_name}/year={year}/{load_id}.parquet'
+  duckdb:
+    database: data/piezometry.duckdb
