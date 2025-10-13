@@ -168,13 +168,19 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
                 if cfg["temporal_filter"].get("end_param"):
                     cfg["temporal_filter"]["end_date"] = f"{year}-12-31"
             context.log.info(f"🗓️ Filtre temporel mis à jour pour l'année {year}")
-    
-    context.log.info(f"🚀 Starting DLT ingestion for: {cfg['name']}")
-    context.log.info(f"📊 Configuration loaded: {cfg.get('base_url', '')}{cfg.get('path', '')}")
-    context.log.info(f"🔑 Primary keys: {cfg.get('primary_keys', [])}")
-    context.log.info(f"📅 Replication key: {cfg.get('replication_key', 'N/A')}")
-    context.log.info(f"🗓️ Slicer mode: {cfg.get('slicer', {}).get('mode', 'N/A')}")
-    context.log.info(f"📈 Date range: {cfg.get('slicer', {}).get('start_date', 'N/A')} to {cfg.get('slicer', {}).get('end_date', 'N/A')}")
+
+    # Extract config sections for easier access
+    resource_config = cfg.get("resource", {})
+    extraction_config = cfg.get("extraction", {})
+
+    resource_name = resource_config.get('name', 'unknown')
+    context.log.info(f"🚀 Starting DLT ingestion for: {resource_name}")
+    context.log.info(f"📊 Configuration loaded: {resource_config.get('base_url', '')}{resource_config.get('endpoint', '')}")
+    context.log.info(f"🔑 Primary keys: {resource_config.get('primary_key', [])}")
+    context.log.info(f"📅 Replication key: {resource_config.get('replication_key', 'N/A')}")
+    context.log.info(f"🗓️ Slicing mode: {extraction_config.get('slicing_mode', 'N/A')}")
+    if extraction_config.get('slicer'):
+        context.log.info(f"📈 Date range: {extraction_config.get('slicer', {}).get('start_date', 'N/A')} to {extraction_config.get('slicer', {}).get('end_date', 'N/A')}")
 
     # Build MinIO credentials for dlt
     import os
@@ -191,18 +197,18 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     }
 
     # Test API connectivity and get sample data first
-    context.log.info(f"🔍 Testing API connectivity for {cfg['name']}...")
+    context.log.info(f"🔍 Testing API connectivity for {resource_name}...")
     try:
         import requests
         import time
-        
-        test_params = cfg.get("params_default", {}).copy()
+
+        test_params = extraction_config.get("default_params", {}).copy()
         test_params.update({
             "size": 10,  # Small test batch
             "format": "json"
         })
-        
-        test_url = f"{cfg.get('base_url', '')}{cfg.get('path', '')}"
+
+        test_url = f"{resource_config.get('base_url', '')}{resource_config.get('endpoint', '')}"
         test_start = time.time()
         
         response = requests.get(test_url, params=test_params, timeout=30)
@@ -275,13 +281,13 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         builtins.print = original_print
 
     pipeline_duration = time.time() - pipeline_start_time
-    context.log.info(f"✅ DLT pipeline for {cfg['name']} finished in {pipeline_duration:.2f}s")
+    context.log.info(f"✅ DLT pipeline for {resource_name} finished in {pipeline_duration:.2f}s")
 
     # Extract detailed metrics and statistics
     # Note: DLT LoadInfo doesn't contain detailed metrics, so we rely on DLT's internal logs
     # which are displayed via our monkey-patched print function
     stats = {
-        "stream": cfg["name"],
+        "stream": resource_name,
         "rows": 0,  # Will be updated from DLT logs if available
         "files": 0,
         "packages": 0,
@@ -337,21 +343,24 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             stats["load_packages"].append(package_stats)
 
     # Log final statistics
-    context.log.info(f"🎉 Ingestion {cfg['name']} completed!")
+    context.log.info(f"🎉 Ingestion {resource_name} completed!")
     context.log.info(f"📊 Final statistics:")
     context.log.info(f"   • Load packages: {stats['packages']}")
     context.log.info(f"   • Files written: {stats['files']}")
     context.log.info(f"   • Duration: {pipeline_duration:.2f}s")
     context.log.info(f"   • Data written to MinIO: ✅ (see DLT logs above for detailed metrics)")
-    
+
     # Check if we have load packages (indicates successful data ingestion)
+    destinations_config = cfg.get("destinations", {})
+    default_dataset = destinations_config.get("filesystem", {}).get("dataset_name", "bronze")
+
     if stats['packages'] > 0:
-        context.log.info(f"✅ Data successfully ingested for {cfg['name']}")
+        context.log.info(f"✅ Data successfully ingested for {resource_name}")
         context.log.info(f"   • Detailed metrics available in DLT logs above")
-        context.log.info(f"   • Files stored in MinIO bucket: bronze/{cfg.get('dataset_name', 'bronze')}")
+        context.log.info(f"   • Files stored in MinIO bucket: bronze/{default_dataset}")
         stats["rows"] = "see_dlt_logs"  # Indicate that metrics are in DLT logs
     else:
-        context.log.warning(f"⚠️ No data ingested for {cfg['name']}! This might indicate:")
+        context.log.warning(f"⚠️ No data ingested for {resource_name}! This might indicate:")
         context.log.warning(f"   • API returned empty results")
         context.log.warning(f"   • Date range has no data")
         context.log.warning(f"   • API endpoint might be incorrect")
