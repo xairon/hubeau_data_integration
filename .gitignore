@@ -78,3 +78,5 @@ secrets/
 *.key
 *.pem
 *.crt
+configs/hubeau_backup_*/
+nul
