@@ -476,7 +476,9 @@ def validate_config(config: Dict) -> List[str]:
 def run_pipeline(
     cfg: Any,
     context: Any = None,
-    destination: str = "postgres",
+    destination: str = "filesystem",
+    bucket_url: str = None,
+    credentials: Dict = None,
     **kwargs
 ) -> Any:
     """
@@ -486,13 +488,15 @@ def run_pipeline(
         cfg: Configuration (dict ou path)
         context: Contexte Dagster (optionnel)
         destination: Type de destination
+        bucket_url: URL du bucket pour filesystem destination
+        credentials: Credentials pour la destination
         **kwargs: Arguments additionnels
 
     Returns:
         LoadInfo DLT
     """
     import dlt
-    from .destinations import get_destination_from_config
+    from .destinations import get_destination, get_destination_from_config
 
     # Gérer cfg qui peut être un dict ou un path
     if isinstance(cfg, (str, Path)):
@@ -513,13 +517,27 @@ def run_pipeline(
     )
 
     # Créer la destination
-    dest = get_destination_from_config(config)
+    # Si bucket_url est fourni, utiliser filesystem avec les credentials fournis
+    if bucket_url:
+        dest_config = {
+            "bucket_url": bucket_url,
+            **kwargs  # Inclut file_format, layout, etc.
+        }
+        dest = dlt.destinations.filesystem(
+            bucket_url=bucket_url,
+            credentials=credentials,
+            **{k: v for k, v in kwargs.items() if k in ["layout", "file_format"]}
+        )
+    else:
+        # Sinon utiliser la config YAML
+        dest = get_destination_from_config(config)
 
     # Créer et exécuter le pipeline
+    dataset_name = kwargs.get("dataset_name") or config.get("destinations", {}).get(destination, {}).get("dataset_name", "bronze")
     pipeline = dlt.pipeline(
         pipeline_name=f"hubeau_{config['resource']['name']}",
         destination=dest,
-        dataset_name=config.get("destinations", {}).get(destination, {}).get("dataset_name", "bronze")
+        dataset_name=dataset_name
     )
 
     # Log si contexte Dagster
