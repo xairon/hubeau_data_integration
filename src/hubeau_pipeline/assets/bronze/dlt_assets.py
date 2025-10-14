@@ -19,16 +19,8 @@ try:
         extract_station_codes_from_result,
         get_active_departments_for_stations
     )
-    from hubeau.extractors.station_minio import (
-        extract_station_codes_from_minio as _extract_station_codes_from_minio,
-        filter_active_stations_for_period as _filter_active_stations_for_period
-    )
 except ImportError:
-    # Fallback during migration - will be removed once refactoring is complete
-    import sys
-    sys.stderr.write("Warning: hubeau.extractors modules not found, using local definitions\n")
-
-    # Define fallback functions
+    # Fallback pour station_api
     def extract_station_codes_from_result(result: Dict, station_type: str, partition_date: str) -> Dict[str, List[str]]:
         """Fallback: retourne un dict vide si module non disponible"""
         return {}
@@ -36,6 +28,17 @@ except ImportError:
     def get_active_departments_for_stations(stations: List[str]) -> List[str]:
         """Fallback: retourne une liste vide si module non disponible"""
         return []
+
+# Import des fonctions de lecture MinIO (toujours disponibles maintenant)
+try:
+    from src.hubeau_pipeline.utils.station_minio import (
+        extract_station_codes_from_minio as _extract_station_codes_from_minio,
+        filter_active_stations_for_period as _filter_active_stations_for_period
+    )
+except ImportError as e:
+    # Fallback si le module station_minio n'est pas accessible
+    import sys
+    sys.stderr.write(f"Warning: station_minio module not found ({e}), using fallback\n")
 
     def _extract_station_codes_from_minio(station_type: str) -> List[str]:
         """Fallback: retourne une liste vide si module non disponible"""
