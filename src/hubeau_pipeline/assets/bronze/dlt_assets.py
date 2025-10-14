@@ -191,9 +191,17 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     context.log.info(f"🏃 Starting DLT pipeline execution...")
     pipeline_start_time = time.time()
     
+    # ✅ DEBUG: Log les paramètres stations_data pour comprendre le problème
+    if stations_data:
+        context.log.warning(f"🔍 DEBUG: stations_data type={type(stations_data)}, count={len(stations_data)}")
+        # Afficher quelques exemples
+        sample_stations = list(stations_data.items())[:3] if isinstance(stations_data, dict) else stations_data[:3]
+        context.log.warning(f"🔍 DEBUG: Sample stations_data: {sample_stations}")
+    
     # Capture all logs from DLT pipeline and display them in Dagster
     import io
     import sys
+    import logging
     from contextlib import redirect_stdout, redirect_stderr
     
     # Store reference to built-in print function
@@ -203,10 +211,30 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     # Custom print function that sends to Dagster
     def dagster_print(*args, **kwargs):
         message = ' '.join(str(arg) for arg in args)
-        context.log.info(f"DLT: {message}")
+        context.log.warning(f"DLT: {message}")  # ✅ Utiliser WARNING au lieu de INFO pour être sûr de voir les logs
     
     # Monkey patch print to use Dagster logger
     builtins.print = dagster_print
+    
+    # ✅ Aussi capturer les logs Python des modules dlt_pipeline
+    # Créer un handler qui envoie vers Dagster
+    class DagsterLogHandler(logging.Handler):
+        def emit(self, record):
+            msg = self.format(record)
+            context.log.warning(f"DLT [{record.levelname}]: {msg}")
+    
+    dagster_handler = DagsterLogHandler()
+    dagster_handler.setLevel(logging.DEBUG)
+    
+    # Capturer les logs de sources.py
+    sources_logger = logging.getLogger('dlt_pipeline.sources')
+    sources_logger.setLevel(logging.DEBUG)
+    sources_logger.addHandler(dagster_handler)
+    
+    # Capturer les logs de slicing.py
+    slicing_logger = logging.getLogger('dlt_pipeline.slicing')
+    slicing_logger.setLevel(logging.DEBUG)
+    slicing_logger.addHandler(dagster_handler)
     
     try:
         # Execute DLT pipeline with monkey-patched print
@@ -233,6 +261,9 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     finally:
         # Restore original print function
         builtins.print = original_print
+        # Retirer les handlers Dagster pour éviter les fuites mémoire
+        sources_logger.removeHandler(dagster_handler)
+        slicing_logger.removeHandler(dagster_handler)
 
     pipeline_duration = time.time() - pipeline_start_time
     context.log.info(f"✅ DLT pipeline finished in {pipeline_duration:.2f}s")

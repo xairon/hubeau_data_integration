@@ -94,6 +94,7 @@ Le jumeau numérique s'appuiera sur l'ontologie **SOSA** (Sensor, Observation, S
 | **Orchestration** | Dagster 1.5+ | ✅ Prod | Workflow, scheduling, monitoring |
 | **Data Loading** | DLT Custom | ✅ Prod | Extraction Hub'Eau → Parquet |
 | **Stockage Bronze** | MinIO (S3) | ✅ Prod | Data lake Parquet |
+| **Monitoring** | Portainer CE | ✅ Prod | Docker management & monitoring |
 
 ### Roadmap 🚧 (Phases Silver/Gold)
 
@@ -170,6 +171,7 @@ docker-compose up -d
 # 4. Accès aux services
 # - Dagster UI : http://localhost:8080
 # - MinIO Console : http://localhost:9001
+# - Portainer : https://localhost:9443
 ```
 
 ### Déploiement Production (GitLab CI/CD)
@@ -388,6 +390,14 @@ hubeau-bronze/
 ---
 
 ## 🔍 Monitoring
+
+### Portainer (https://localhost:9443)
+
+- ✅ **Container Management** : Start/stop/restart containers
+- ✅ **Resource Monitoring** : CPU, memory, network usage
+- ✅ **Log Viewer** : Centralized log access
+- ✅ **Stack Management** : Deploy and manage stacks
+- ✅ **Volume/Network Management** : Visual management
 
 ### Dagster UI (http://localhost:8080)
 

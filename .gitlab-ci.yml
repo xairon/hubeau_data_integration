@@ -9,6 +9,7 @@ variables:
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: ""
   PROJECT_DIR: /srv/brgm
+  # Portainer accessible sur https://srv991054.hstgr.cloud:9443 après déploiement
 
 # Stage 1: Build de l'image Docker (automatique sur chaque push)
 build:image:

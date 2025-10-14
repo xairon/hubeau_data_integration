@@ -51,6 +51,31 @@ Voir `.gitlab-ci.yml` pour les détails de configuration.
 
 ---
 
+## 🌐 Services en Production
+
+| Service | Port | URL Production | Description |
+|---------|------|----------------|-------------|
+| Dagster UI | 8080 | http://srv991054.hstgr.cloud:8080 | Orchestration UI |
+| MinIO Console | 9001 | http://srv991054.hstgr.cloud:9001 | Object storage UI |
+| Portainer | 9443 | https://srv991054.hstgr.cloud:9443 | Docker monitoring |
+
+### Accès Portainer
+
+1. **Première connexion** :
+   - Accéder à https://srv991054.hstgr.cloud:9443
+   - Accepter le certificat auto-signé
+   - Créer un compte admin avec mot de passe fort
+   - Sélectionner environnement "Local"
+
+2. **Fonctionnalités disponibles** :
+   - Monitoring temps réel des containers
+   - Visualisation des logs
+   - Gestion des volumes et réseaux
+   - Statistiques de ressources
+   - Redémarrage des services
+
+---
+
 ## 🔐 Variables d'Environnement
 
 ### Développement Local

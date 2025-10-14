@@ -129,7 +129,18 @@ def hubeau_source(
 
         # Créer les slices selon le mode de slicing
         slices = list(build_slices(full_config))
-        logger.warning(f"DEBUG: Created {len(slices)} slices with mode {slicer.get('mode', 'global')} for {resource_config['name']}")
+        logger.warning(f"🔢 Created {len(slices)} slices with mode {slicer.get('mode', 'global')} for {resource_config['name']}")
+        
+        # ✅ DEBUG: Log des premières slices pour comprendre le problème
+        if len(slices) > 0:
+            logger.warning(f"🔍 First slice: {slices[0].params}")
+            if len(slices) > 1:
+                logger.warning(f"🔍 Last slice: {slices[-1].params}")
+        
+        # ✅ Si beaucoup de slices, avertir l'utilisateur
+        if len(slices) > 100:
+            logger.warning(f"⚠️ ATTENTION: {len(slices)} slices à traiter - cela peut prendre du temps!")
+            logger.warning(f"⏱️ Temps estimé: ~{len(slices) * 2}s à ~{len(slices) * 5}s (selon la charge API)")
 
         # Stats pour logging
         total_records = 0
@@ -139,7 +150,20 @@ def hubeau_source(
         # Extraire les données par slice
         for slice_idx, slice_obj in enumerate(slices):
             try:
-                logger.info(f"Processing slice {slice_idx + 1}/{len(slices)}: {slice_obj.params}")
+                # ✅ Log de progression: toutes les 10 slices + début et fin
+                if slice_idx % 10 == 0:
+                    elapsed = time.time() - start_time
+                    avg_time_per_slice = elapsed / (slice_idx + 1) if slice_idx > 0 else 0
+                    remaining_slices = len(slices) - slice_idx - 1
+                    eta_seconds = avg_time_per_slice * remaining_slices
+                    logger.warning(
+                        f"📊 Progression: {slice_idx + 1}/{len(slices)} slices "
+                        f"({(slice_idx + 1) / len(slices) * 100:.1f}%) | "
+                        f"⏱️ ETA: {eta_seconds:.0f}s | "
+                        f"📈 {total_records} records"
+                    )
+                if slice_idx < 3 or slice_idx >= len(slices) - 3:
+                    logger.info(f"Slice {slice_idx + 1}/{len(slices)}: {slice_obj.params}")
 
                 # Extraire les données du slice
                 slice_data = extract_slice(
@@ -534,6 +558,9 @@ def run_pipeline(
         # Si le mode est station_month_chunked, les stations sont nécessaires
         if config["extraction"].get("slicing_mode") in ["station_month_chunked", "station_month"]:
             config["extraction"]["stations"] = stations_data
+            logger.warning(f"✅ Injected {len(stations_data)} stations into extraction config for {config['resource']['name']}")
+    else:
+        logger.warning(f"⚠️ No stations_data provided for {config['resource']['name']} with mode {config['extraction'].get('slicing_mode')}")
 
     # Injecter les dates de partition si fournies
     if partition_date:

@@ -331,6 +331,26 @@ hubeau-bronze/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│                    MONITORING & OBSERVABILITÉ ✅                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                  Portainer CE 2.19.4                    │   │
+│  │                                                         │   │
+│  │  ✅ Container Management (start/stop/restart)           │   │
+│  │  ✅ Resource Monitoring (CPU/RAM/Network)               │   │
+│  │  ✅ Log Viewer centralisé                               │   │
+│  │  ✅ Volume/Network Management                           │   │
+│  │  ✅ Stack deployment                                    │   │
+│  │  ✅ Health checks visualization                         │   │
+│  │                                                         │   │
+│  │  Sécurité :                                            │   │
+│  │  • HTTPS uniquement (port 9443)                        │   │
+│  │  • Docker socket read-only                             │   │
+│  │  • Resource limits (256MB RAM)                          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
 │                    ORCHESTRATION ✅                             │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │                    Dagster 1.5+                         │   │
@@ -403,6 +423,7 @@ hubeau-bronze/
 
 | Couche | Technologie | Version | Statut | Rôle |
 |--------|-------------|---------|--------|------|
+| **Monitoring** | Portainer CE | 2.19.4 | ✅ Prod | Docker management & monitoring |
 | **Orchestration** | Dagster | 1.5+ | ✅ Prod | Workflow, scheduling, monitoring |
 | **Ingestion** | DLT Custom | - | ✅ Prod | Extraction Hub'Eau → Parquet |
 | **Bronze** | MinIO | Latest | ✅ Prod | Stockage S3 données brutes |
