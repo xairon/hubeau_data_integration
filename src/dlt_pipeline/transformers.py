@@ -163,7 +163,7 @@ def validate_primary_keys(
 @dlt.transformer(name="normalize_dates")
 def normalize_dates(
     items: Iterator[TDataItem],
-    date_fields: Optional[List[str]] = None
+    fields: Optional[List[str]] = None
 ) -> Iterator[TDataItem]:
     """
     Normalise les formats de dates en ISO 8601.
@@ -172,7 +172,7 @@ def normalize_dates(
     
     Args:
         items: Iterator de records DLT
-        date_fields: Champs date a normaliser (auto-detecte si None)
+        fields: Champs date a normaliser (auto-detecte si None)
         
     Yields:
         Records avec dates normalisees
@@ -191,6 +191,7 @@ def normalize_dates(
     
     for item in items:
         # Auto-detection des champs date
+        date_fields = fields
         if date_fields is None:
             date_fields = [
                 k for k in item.keys()
