@@ -133,8 +133,7 @@ def create_hubeau_paginator(pagination_config: Dict[str, Any]) -> PageNumberPagi
 
     return PageNumberPaginator(
         total_path=total_path,
-        page_param='page',
-        page=1
+        base_page=1
     )
 
 
