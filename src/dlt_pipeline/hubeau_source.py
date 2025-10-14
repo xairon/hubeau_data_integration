@@ -150,29 +150,27 @@ def create_hubeau_client(config: Dict[str, Any]) -> RESTClient:
     """
     Crée un RESTClient DLT configuré pour Hub'Eau.
 
+    Note: On n'utilise PAS de paginator automatique car Hub'Eau commence
+    les pages à 1 (pas à 0), ce qui nécessite une pagination manuelle.
+
     Args:
         config: Configuration complète depuis YAML
 
     Returns:
-        RESTClient configuré avec paginator, session et base_url
+        RESTClient configuré avec session et base_url (sans paginator)
     """
     resource_config = config['resource']
-    extraction_config = config.get('extraction', {})
     performance_config = config.get('performance', {})
 
     base_url = resource_config.get('base_url', 'https://hubeau.eaufrance.fr/api')
 
-    # Créer paginator Hub'Eau
-    pagination_config = extraction_config.get('pagination', {})
-    paginator = create_hubeau_paginator(pagination_config)
-
     # Créer session avec retry
     session = create_hubeau_session(performance_config)
 
-    # Créer REST client
+    # Créer REST client SANS paginator (pagination manuelle)
     return RESTClient(
         base_url=base_url,
-        paginator=paginator,
+        paginator=None,  # Pas de paginator automatique
         session=session
     )
 
@@ -254,6 +252,7 @@ def slice_global(
     Stratégie global: une seule requête paginée sans découpage.
 
     Utilisé pour les endpoints avec peu de données ou sans besoin de filtrage.
+    Implémente la pagination manuelle car Hub'Eau commence à page=1 (pas 0).
 
     Args:
         client: RESTClient DLT
@@ -266,7 +265,7 @@ def slice_global(
     pagination_config = extraction_config.get('pagination', {})
     page_size = pagination_config.get('page_size', 5000)
 
-    # Construire les paramètres
+    # Construire les paramètres de base
     params = {
         'format': 'json',
         'size': page_size
@@ -276,12 +275,34 @@ def slice_global(
     default_params = extraction_config.get('default_params', {})
     params.update(default_params)
 
-    # Paginer automatiquement avec DLT
-    for page_data in client.paginate(endpoint, params=params):
+    # Pagination manuelle (Hub'Eau commence à page=1)
+    page = 1
+    while True:
+        # Ajouter le numéro de page
+        page_params = {**params, 'page': page}
+
+        # Faire la requête
+        response = client.get(endpoint, params=page_params)
+        page_data = response.json()
+
+        # Extraire les records
         records = extract_records(page_data, extraction_config)
+
+        # Si pas de records, on arrête
+        if not records:
+            break
+
+        # Yield les records
         for record in records:
             record['_slice_mode'] = 'global'
             yield record
+
+        # Vérifier si on a atteint la dernière page
+        last_page = page_data.get('last_page', page_data.get('count', 1))
+        if page >= last_page:
+            break
+
+        page += 1
 
 
 def slice_by_department(
@@ -294,6 +315,7 @@ def slice_by_department(
 
     Itère sur une liste de codes départements (01-95 + DOM-TOM).
     Utilisé pour contourner les limites API ou paralléliser l'extraction.
+    Implémente la pagination manuelle car Hub'Eau commence à page=1 (pas 0).
 
     Args:
         client: RESTClient DLT
@@ -310,7 +332,7 @@ def slice_by_department(
 
     # Pour chaque département
     for dept in departments:
-        # Construire les paramètres
+        # Construire les paramètres de base
         params = {
             'format': 'json',
             'size': page_size,
@@ -321,12 +343,34 @@ def slice_by_department(
         default_params = extraction_config.get('default_params', {})
         params.update(default_params)
 
-        # Paginer pour ce département
-        for page_data in client.paginate(endpoint, params=params):
+        # Pagination manuelle pour ce département
+        page = 1
+        while True:
+            # Ajouter le numéro de page
+            page_params = {**params, 'page': page}
+
+            # Faire la requête
+            response = client.get(endpoint, params=page_params)
+            page_data = response.json()
+
+            # Extraire les records
             records = extract_records(page_data, extraction_config)
+
+            # Si pas de records, passer au département suivant
+            if not records:
+                break
+
+            # Yield les records
             for record in records:
                 record['_slice_dept'] = dept
                 yield record
+
+            # Vérifier si on a atteint la dernière page
+            last_page = page_data.get('last_page', page_data.get('count', 1))
+            if page >= last_page:
+                break
+
+            page += 1
 
 
 def slice_by_station_month(
@@ -419,13 +463,29 @@ def slice_by_station_month(
                 end_param: f"{month}-31"
             }
 
-            # Paginate
-            for page_data in client.paginate(endpoint, params=params):
+            # Pagination manuelle pour ce chunk
+            page = 1
+            while True:
+                page_params = {**params, 'page': page}
+
+                response = client.get(endpoint, params=page_params)
+                page_data = response.json()
+
                 records = extract_records(page_data, extraction_config)
+                if not records:
+                    break
+
                 for record in records:
                     record['_chunk_month'] = month
                     record['_chunk_stations'] = len(active_stations)
                     yield record
+
+                # Vérifier dernière page
+                last_page = page_data.get('last_page', page_data.get('count', 1))
+                if page >= last_page:
+                    break
+
+                page += 1
 
 
 def slice_by_datetime(
@@ -478,13 +538,29 @@ def slice_by_datetime(
         default_params = extraction_config.get('default_params', {})
         params.update(default_params)
 
-        # Paginate pour cette période
-        for page_data in client.paginate(endpoint, params=params):
+        # Pagination manuelle pour cette période
+        page = 1
+        while True:
+            page_params = {**params, 'page': page}
+
+            response = client.get(endpoint, params=page_params)
+            page_data = response.json()
+
             records = extract_records(page_data, extraction_config)
+            if not records:
+                break
+
             for record in records:
                 record['_slice_start'] = current.isoformat()
                 record['_slice_end'] = next_date.isoformat()
                 yield record
+
+            # Vérifier dernière page
+            last_page = page_data.get('last_page', page_data.get('count', 1))
+            if page >= last_page:
+                break
+
+            page += 1
 
         current = next_date + timedelta(days=1)
 
