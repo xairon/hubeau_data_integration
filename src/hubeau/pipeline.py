@@ -5,7 +5,7 @@ import dlt
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import yaml
-from src.dlt_pipeline.sources import hubeau_source
+from src.dlt_pipeline.hubeau_source import hubeau_rest_source as hubeau_source
 from src.dlt_pipeline.destinations import get_destination
 
 

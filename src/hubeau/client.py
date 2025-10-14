@@ -5,7 +5,7 @@ import yaml
 from pathlib import Path
 from typing import Iterator, Dict, Any, List, Optional
 import dlt
-from src.dlt_pipeline.sources import hubeau_source, load_config
+from src.dlt_pipeline.hubeau_source import hubeau_rest_source as hubeau_source, load_hubeau_config as load_config
 
 
 class HubeauClient:

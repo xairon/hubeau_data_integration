@@ -28,6 +28,23 @@ except ImportError:
     import sys
     sys.stderr.write("Warning: hubeau.extractors modules not found, using local definitions\n")
 
+    # Define fallback functions
+    def extract_station_codes_from_result(result: Dict, station_type: str, partition_date: str) -> Dict[str, List[str]]:
+        """Fallback: retourne un dict vide si module non disponible"""
+        return {}
+
+    def get_active_departments_for_stations(stations: List[str]) -> List[str]:
+        """Fallback: retourne une liste vide si module non disponible"""
+        return []
+
+    def _extract_station_codes_from_minio(station_type: str) -> List[str]:
+        """Fallback: retourne une liste vide si module non disponible"""
+        return []
+
+    def _filter_active_stations_for_period(stations: List[str], partition_date: str, station_type: str) -> List[str]:
+        """Fallback: retourne toutes les stations si module non disponible"""
+        return stations
+
 # Partitions pour les données historiques (annuelles depuis 2020)
 YEARLY_PARTITIONS = StaticPartitionsDefinition(
     [str(year) for year in range(2020, 2026)]  # 2020-2025
