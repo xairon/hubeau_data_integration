@@ -287,6 +287,7 @@ def slice_global(
     # Pagination manuelle (Hub'Eau commence à page=1)
     page = 1
     total_records = 0
+    api_total_count = None
 
     while True:
         # Ajouter le numéro de page
@@ -298,6 +299,11 @@ def slice_global(
         logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
 
         page_data = response.json()
+
+        # Récupérer le count total annoncé par l'API (première page seulement)
+        if page == 1 and 'count' in page_data:
+            api_total_count = page_data.get('count')
+            logger.info(f"📊 API announced total: {api_total_count} records")
 
         # Extraire les records
         records = extract_records(page_data, extraction_config)
@@ -326,6 +332,19 @@ def slice_global(
 
         page += 1
 
+    # ⚠️ Vérification de truncation : comparer avec le total annoncé
+    if api_total_count and total_records < api_total_count:
+        logger.warning(f"⚠️ WARNING: Possible data truncation detected!")
+        logger.warning(f"   Expected: {api_total_count} records (from API count)")
+        logger.warning(f"   Received: {total_records} records")
+        logger.warning(f"   Missing: {api_total_count - total_records} records ({100*(api_total_count-total_records)/api_total_count:.1f}%)")
+        logger.warning(f"   Solution: Use 'dept' or 'datetime' slicing mode instead of 'global'")
+    
+    # ⚠️ Détection si on atteint 20k (limite Hub'Eau)
+    if total_records >= 20000:
+        logger.warning(f"⚠️ WARNING: Reached Hub'Eau 20k records limit!")
+        logger.warning(f"   This endpoint may have more data. Consider using finer slicing.")
+    
     logger.info(f"🏁 GLOBAL slicing completed: {total_records} total records extracted")
 
 
@@ -420,6 +439,16 @@ def slice_by_department(
             page += 1
 
         total_records_all += dept_total_records
+        
+        # ⚠️ Détection de truncation : Hub'Eau limite à 20k records par requête
+        if dept_total_records >= 20000:
+            logger.warning(f"⚠️ WARNING: Department {dept} has reached 20k records limit!")
+            logger.warning(f"   This may indicate data truncation. Consider using finer slicing.")
+            logger.warning(f"   Possible solutions:")
+            logger.warning(f"   1. Add additional slicing dimension (e.g. first letter of station code)")
+            logger.warning(f"   2. Use date-based slicing if available")
+            logger.warning(f"   3. Check API documentation for pagination limits")
+        
         logger.info(f"✅ Department {dept} completed: {dept_total_records} records extracted")
 
     logger.info(f"🏁 DEPARTMENT slicing completed: {total_records_all} total records across {len(departments)} departments")

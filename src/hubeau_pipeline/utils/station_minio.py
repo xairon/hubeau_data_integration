@@ -62,15 +62,15 @@ def _get_station_code_column(station_type: str, columns: List[str]) -> str:
     return expected_column
 
 
-def _get_minio_path(station_type: str) -> str:
+def _get_minio_path(station_type: str) -> tuple[str, str]:
     """
-    Construit le chemin MinIO pour un type de station donné.
+    Construit le bucket et le chemin MinIO pour un type de station donné.
 
     Args:
         station_type: Type de station ("piezometry", "hydrometry", etc.)
 
     Returns:
-        Chemin dans MinIO (ex: "bronze/piezometry_api/piezometry_stations/")
+        Tuple (bucket, path) pour MinIO (ex: ("bronze", "piezometry_api/piezometry_stations/"))
     """
     # Mapping des types de stations vers les noms de datasets
     dataset_mapping = {
@@ -89,7 +89,10 @@ def _get_minio_path(station_type: str) -> str:
         (f"{station_type}_api", f"{station_type}_stations")
     )
 
-    return f"bronze/{dataset_name}/{resource_name}/"
+    bucket = os.getenv("MINIO_BUCKET", "bronze")
+    path = f"{dataset_name}/{resource_name}/"
+    
+    return bucket, path
 
 
 def _create_s3_filesystem():
@@ -136,27 +139,28 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
         >>> stations = extract_station_codes_from_minio("piezometry")
         >>> print(f"Trouvé {len(stations)} stations piezometry")
     """
-    minio_path = _get_minio_path(station_type)
+    bucket, path = _get_minio_path(station_type)
+    full_path = f"{bucket}/{path}"
 
     try:
         # Créer le système de fichiers S3
         s3 = _create_s3_filesystem()
 
         # Lister les fichiers parquet
-        # Note: minio_path contient déjà "bronze/" donc pas besoin de le préfixer
+        # Avec pyarrow S3, le path doit inclure le bucket: "bronze/piezometry_api/piezometry_stations/"
         try:
-            files = s3.get_file_info(pafs.FileSelector(minio_path, recursive=True))
+            files = s3.get_file_info(pafs.FileSelector(full_path, recursive=True))
         except Exception as e:
-            logger.error(f"❌ Erreur lors du listing des fichiers dans {minio_path}: {e}")
+            logger.error(f"❌ Erreur lors du listing des fichiers dans {full_path}: {e}")
             raise
 
         parquet_files = [f.path for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
 
         if not parquet_files:
-            logger.warning(f"⚠️ Aucun fichier parquet trouvé dans {minio_path}")
+            logger.warning(f"⚠️ Aucun fichier parquet trouvé dans {full_path}")
             return []
 
-        logger.info(f"📂 Trouvé {len(parquet_files)} fichiers parquet dans {minio_path}")
+        logger.info(f"📂 Trouvé {len(parquet_files)} fichiers parquet dans {full_path}")
 
         # Lire tous les fichiers parquet et extraire les codes de stations
         all_stations = set()
@@ -184,7 +188,7 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
 
     except Exception as e:
         logger.error(f"❌ Erreur lors de la lecture depuis MinIO pour {station_type}: {e}")
-        logger.debug(f"   Path essayé: {minio_path}")
+        logger.debug(f"   Path essayé: {full_path}")
         return []
 
 
@@ -222,24 +226,25 @@ def filter_active_stations_for_period(stations: List[str], partition_date: str, 
         logger.error(f"❌ Format de date invalide: {partition_date}. Attendu: YYYY-MM-DD")
         return stations
 
-    minio_path = _get_minio_path(station_type)
+    bucket, path = _get_minio_path(station_type)
+    full_path = f"{bucket}/{path}"
 
     try:
         # Créer le système de fichiers S3
         s3 = _create_s3_filesystem()
 
         # Lister les fichiers parquet
-        # Note: minio_path contient déjà "bronze/" donc pas besoin de le préfixer
+        # Avec pyarrow S3, le path doit inclure le bucket: "bronze/piezometry_api/piezometry_stations/"
         try:
-            files = s3.get_file_info(pafs.FileSelector(minio_path, recursive=True))
+            files = s3.get_file_info(pafs.FileSelector(full_path, recursive=True))
         except Exception as e:
-            logger.error(f"❌ Erreur lors du listing des fichiers dans {minio_path}: {e}")
+            logger.error(f"❌ Erreur lors du listing des fichiers dans {full_path}: {e}")
             raise
 
         parquet_files = [f.path for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
 
         if not parquet_files:
-            logger.warning(f"⚠️ Aucun fichier parquet trouvé dans {minio_path}, retour de toutes les stations")
+            logger.warning(f"⚠️ Aucun fichier parquet trouvé dans {full_path}, retour de toutes les stations")
             return stations
 
         logger.info(f"📂 Filtrage des stations actives pour l'année {year} depuis {len(parquet_files)} fichiers")
@@ -316,5 +321,6 @@ def filter_active_stations_for_period(stations: List[str], partition_date: str, 
 
     except Exception as e:
         logger.error(f"❌ Erreur lors du filtrage des stations: {e}")
+        logger.debug(f"   Path essayé: {full_path}")
         logger.debug(f"   Retour de toutes les stations ({len(stations)} stations)")
         return stations
