@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 import pyarrow.fs as pafs
 import pandas as pd
 
-from src.dlt_pipeline.sources import hubeau_source, load_config
+from src.dlt_pipeline.hubeau_source import hubeau_rest_source, load_hubeau_config
 
 # Import factorized station extraction functions
 try:
@@ -269,7 +269,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         )
 
         # Créer la source Hub'Eau
-        source = hubeau_source(
+        source = hubeau_rest_source(
             config_path=str(full_path),
             stations_data=stations_data,
             partition_date=partition_date

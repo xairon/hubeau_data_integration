@@ -5,7 +5,7 @@ resource:
   name: piezometry_stations
   endpoint: /stations
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-  primary_key: []
+  primary_key: ["code_station"]
   write_disposition: replace
   columns:
     code_station:
