@@ -131,4 +131,24 @@ services:
     command: ["python", "/app/scripts/init_minio.py"]
     restart: "no"
 
+  portainer:
+    image: portainer/portainer-ce:2.19.4-alpine
+    container_name: brgm-portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "9443:9443"  # HTTPS interface
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /srv/brgm-data/portainer:/data
+    command: --http-disabled
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "https://localhost:9443", "--no-check-certificate"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.1
+
 # Pas de volumes nommés : tout est dans /srv/brgm-data/ pour faciliter les backups
