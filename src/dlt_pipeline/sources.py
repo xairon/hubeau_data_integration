@@ -114,7 +114,7 @@ def hubeau_source(
             slicer["mode"] = extraction_config["slicing_mode"]
 
         # Copier les paramètres de slicing depuis extraction
-        for key in ["station_param", "station_chunk_size", "start_param", "end_param", "start_date", "end_date", "stations"]:
+        for key in ["station_param", "station_chunk_size", "start_param", "end_param", "start_date", "end_date", "end_offset_days", "stations"]:
             if key in extraction_config:
                 slicer[key] = extraction_config[key]
 
@@ -547,8 +547,9 @@ def run_pipeline(
             # Pour les partitions annuelles, configurer l'année complète
             config["extraction"]["start_date"] = f"{year}-01-01"
             config["extraction"]["end_date"] = f"{year}-12-31"
+            config["extraction"]["end_offset_days"] = 0  # Pas d'offset pour partitions annuelles
 
-            logger.info(f"Injected partition dates: {year}-01-01 to {year}-12-31")
+            logger.info(f"Injected partition dates: {year}-01-01 to {year}-12-31 with end_offset_days=0")
 
     # Créer la source
     source = hubeau_source(

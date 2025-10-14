@@ -34,7 +34,7 @@ resource:
 extraction:
   slicing_mode: station_month_chunked
   station_param: code_bss
-  station_chunk_size: 20
+  station_chunk_size: 80  # Optimisé: 80 stations par chunk (safe pour limite URL 2083 chars)
   start_param: date_debut_mesure
   end_param: date_fin_mesure
   pagination:
