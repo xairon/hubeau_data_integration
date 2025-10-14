@@ -111,7 +111,7 @@ def get_filesystem_destination(config: Dict = None) -> Any:
     config = config or {}
 
     # Déterminer le type de filesystem
-    bucket_url = config.get("bucket_url", os.getenv("MINIO_BUCKET_URL", "s3://hubeau-bronze"))
+    bucket_url = config.get("bucket_url", os.getenv("MINIO_BUCKET_URL", "s3://bronze"))
 
     # Configuration selon le protocole
     if bucket_url.startswith("s3://"):

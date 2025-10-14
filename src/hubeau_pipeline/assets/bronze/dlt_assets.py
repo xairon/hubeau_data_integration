@@ -277,6 +277,15 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     slicing_logger.setLevel(logging.DEBUG)
     slicing_logger.addHandler(dagster_handler)
     
+    # ✅ CORRECTION CRITIQUE: Capturer les logs de hubeau_source.py (deux formats possibles)
+    hubeau_source_logger = logging.getLogger('src.dlt_pipeline.hubeau_source')
+    hubeau_source_logger.setLevel(logging.DEBUG)
+    hubeau_source_logger.addHandler(dagster_handler)
+    
+    hubeau_source_logger2 = logging.getLogger('dlt_pipeline.hubeau_source')
+    hubeau_source_logger2.setLevel(logging.DEBUG)
+    hubeau_source_logger2.addHandler(dagster_handler)
+    
     try:
         # Execute DLT pipeline with monkey-patched print
         # Get state store from config or use default
@@ -336,6 +345,8 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Retirer les handlers Dagster pour éviter les fuites mémoire
         sources_logger.removeHandler(dagster_handler)
         slicing_logger.removeHandler(dagster_handler)
+        hubeau_source_logger.removeHandler(dagster_handler)
+        hubeau_source_logger2.removeHandler(dagster_handler)
 
     pipeline_duration = time.time() - pipeline_start_time
     context.log.info(f"✅ DLT pipeline finished in {pipeline_duration:.2f}s")

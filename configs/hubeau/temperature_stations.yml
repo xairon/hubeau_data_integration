@@ -49,7 +49,7 @@ destinations:
     schema_name: temperature
     create_indexes: true
   filesystem:
-    bucket_url: s3://hubeau-bronze
+    bucket_url: s3://bronze
     file_format: parquet
     layout: '{table_name}/year={YYYY}/{load_id}.parquet'
   duckdb:

@@ -46,7 +46,7 @@ destinations:
     schema_name: quality
     create_indexes: true
   filesystem:
-    bucket_url: s3://hubeau-bronze
+    bucket_url: s3://bronze
     file_format: parquet
     layout: '{table_name}/year={YYYY}/{load_id}.parquet'
   duckdb:
