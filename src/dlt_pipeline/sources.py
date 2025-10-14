@@ -522,16 +522,33 @@ def run_pipeline(
         else:
             config = cfg
 
-    # Injecter les stations si fournies dans kwargs
+    # Injecter les stations et dates si fournies dans kwargs
     stations_data = kwargs.pop("stations_data", None)
+    partition_date = kwargs.pop("partition_date", None)
+
+    if "extraction" not in config:
+        config["extraction"] = {}
+
+    # Injecter les stations si fournies
     if stations_data:
-        # Ajouter les stations dans la config pour le slicing
-        # Elles doivent être dans extraction pour être disponibles pendant le slicing
-        if "extraction" not in config:
-            config["extraction"] = {}
         # Si le mode est station_month_chunked, les stations sont nécessaires
         if config["extraction"].get("slicing_mode") in ["station_month_chunked", "station_month"]:
             config["extraction"]["stations"] = stations_data
+
+    # Injecter les dates de partition si fournies
+    if partition_date:
+        slicing_mode = config["extraction"].get("slicing_mode")
+        if slicing_mode in ["station_month_chunked", "station_month", "datetime"]:
+            # Calculer start_date et end_date depuis partition_date
+            # partition_date est au format "YYYY-MM-DD" (ex: "2024-01-01")
+            date_obj = datetime.strptime(partition_date, "%Y-%m-%d")
+            year = date_obj.year
+
+            # Pour les partitions annuelles, configurer l'année complète
+            config["extraction"]["start_date"] = f"{year}-01-01"
+            config["extraction"]["end_date"] = f"{year}-12-31"
+
+            logger.info(f"Injected partition dates: {year}-01-01 to {year}-12-31")
 
     # Créer la source
     source = hubeau_source(
