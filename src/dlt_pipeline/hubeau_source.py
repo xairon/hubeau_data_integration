@@ -36,6 +36,34 @@ logger.setLevel(logging.INFO)
 
 
 # ============================================
+# DATE UTILITIES
+# ============================================
+
+def get_month_end_date(month_str: str) -> str:
+    """
+    Calcule le dernier jour d'un mois donné.
+
+    Args:
+        month_str: Format "YYYY-MM" (ex: "2024-02")
+
+    Returns:
+        Date fin de mois format "YYYY-MM-DD" (ex: "2024-02-29")
+
+    Examples:
+        >>> get_month_end_date("2024-02")
+        "2024-02-29"
+        >>> get_month_end_date("2024-04")
+        "2024-04-30"
+        >>> get_month_end_date("2024-12")
+        "2024-12-31"
+    """
+    import calendar
+    year, month = map(int, month_str.split('-'))
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year:04d}-{month:02d}-{last_day:02d}"
+
+
+# ============================================
 # CHARGEMENT ET VALIDATION CONFIG
 # ============================================
 
@@ -396,6 +424,25 @@ def slice_by_department(
         default_params = extraction_config.get('default_params', {})
         params.update(default_params)
 
+        # ✅ AJOUT: Support temporal_filter pour découpage temporel par département
+        temporal_filter = extraction_config.get('temporal_filter')
+        if temporal_filter:
+            start_param_temp = temporal_filter.get('start_param')
+            end_param_temp = temporal_filter.get('end_param')
+            start_date_str = temporal_filter.get('start_date')
+            end_offset_days = temporal_filter.get('end_offset_days', 0)
+
+            if start_param_temp and end_param_temp and start_date_str:
+                # Calculer date de fin
+                from datetime import datetime, timedelta
+                end_date = datetime.now().date() - timedelta(days=end_offset_days)
+
+                # Ajouter paramètres temporels
+                params[start_param_temp] = start_date_str
+                params[end_param_temp] = end_date.isoformat()
+
+                logger.info(f"📅 Temporal filter applied: {start_date_str} to {end_date.isoformat()}")
+
         # Pagination manuelle pour ce département
         page = 1
         dept_total_records = 0
@@ -566,7 +613,7 @@ def slice_by_station_month(
                 'size': page_size,
                 station_param: ','.join(active_stations),
                 start_param: f"{month}-01",
-                end_param: f"{month}-31"
+                end_param: get_month_end_date(month)  # ✅ CORRECTION: Utilise le dernier jour réel du mois
             }
 
             # Pagination manuelle pour ce chunk
@@ -729,6 +776,159 @@ def slice_by_datetime(
         current = next_date + timedelta(days=1)
 
     logger.info(f"🏁 DATETIME slicing completed: {total_records_all} total records extracted across {period_index} periods")
+
+
+def slice_by_dept_datetime(
+    client: RESTClient,
+    endpoint: str,
+    extraction_config: Dict[str, Any],
+    temporal_config: Dict[str, Any],
+    incremental_state: Optional[Any] = None
+) -> Iterator[Dict[str, Any]]:
+    """
+    Stratégie dept_datetime: découpage par département + période temporelle.
+
+    Optimisé pour contourner les limites API Hub'Eau (20k records).
+    Chunke les départements ET découpe temporellement (mois).
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        extraction_config: Configuration d'extraction
+        temporal_config: Configuration temporelle
+        incremental_state: State DLT pour incremental
+
+    Yields:
+        Records extraits avec métadonnées de chunking dept+temps
+    """
+    # Paramètres départementaux
+    dept_list = extraction_config.get('dept_list', [])
+    if not dept_list:
+        raise ValueError("dept_datetime mode requires dept_list in extraction config")
+
+    dept_chunk_size = extraction_config.get('dept_chunk_size', 8)
+    dept_param = extraction_config.get('dept_param', 'code_departement')
+
+    # Paramètres temporels
+    start_date_str = temporal_config.get('start_date', '2020-01-01')
+    start_date = datetime.fromisoformat(start_date_str).date()
+
+    end_offset_days = temporal_config.get('end_offset_days', 0)
+    end_date = datetime.now().date() - timedelta(days=end_offset_days)
+
+    # Paramètres API
+    start_param = extraction_config.get('start_param', 'date_debut')
+    end_param = extraction_config.get('end_param', 'date_fin')
+
+    # Taille de page
+    pagination_config = extraction_config.get('pagination', {})
+    page_size = pagination_config.get('page_size', 20000)
+
+    # Utiliser month_windows pour découpage mensuel
+    import calendar
+    from datetime import date as date_type
+
+    def month_windows(start: date_type, end: date_type):
+        """Génère des fenêtres mensuelles exactes"""
+        cursor = date_type(start.year, start.month, 1)
+        final = date_type(end.year, end.month, calendar.monthrange(end.year, end.month)[1])
+        while cursor <= final:
+            last_day = calendar.monthrange(cursor.year, cursor.month)[1]
+            period_end = date_type(cursor.year, cursor.month, last_day)
+            yield cursor, min(period_end, final)
+            if cursor.month == 12:
+                cursor = date_type(cursor.year + 1, 1, 1)
+            else:
+                cursor = date_type(cursor.year, cursor.month + 1, 1)
+
+    logger.info(f"🗺️📅 Starting DEPT_DATETIME slicing for endpoint: {endpoint}")
+    logger.info(f"📍 {len(dept_list)} departments, chunk_size: {dept_chunk_size}")
+    logger.info(f"📅 Date range: {start_date} to {end_date}")
+    logger.info(f"📄 Page size: {page_size}")
+
+    total_records_all = 0
+    total_chunks = (len(dept_list) + dept_chunk_size - 1) // dept_chunk_size
+    chunk_index = 0
+
+    # Chunker les départements
+    for i in range(0, len(dept_list), dept_chunk_size):
+        dept_chunk = dept_list[i:i + dept_chunk_size]
+        chunk_index += 1
+
+        logger.info(f"📦 Processing dept chunk {chunk_index}/{total_chunks} ({len(dept_chunk)} depts: {', '.join(dept_chunk)})")
+
+        # Pour chaque mois
+        month_index = 0
+        for d0, d1 in month_windows(start_date, end_date):
+            month_index += 1
+            month_str = d0.strftime('%Y-%m')
+
+            logger.info(f"📆 Month {month_index}: {month_str} ({d0} to {d1})")
+
+            # Construire les paramètres
+            params = {
+                'format': 'json',
+                'size': page_size,
+                dept_param: ','.join(dept_chunk),
+                start_param: d0.isoformat(),
+                end_param: d1.isoformat()
+            }
+
+            # Ajouter paramètres par défaut
+            default_params = extraction_config.get('default_params', {})
+            params.update(default_params)
+
+            # Pagination manuelle
+            page = 1
+            period_total_records = 0
+
+            while True:
+                page_params = {**params, 'page': page}
+
+                logger.info(f"📡 HTTP GET {client.base_url}{endpoint} chunk={chunk_index} month={month_str} page={page}")
+                response = client.get(endpoint, params=page_params)
+                logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
+                page_data = response.json()
+
+                records = extract_records(page_data, extraction_config)
+                record_count = len(records)
+                period_total_records += record_count
+
+                if not records:
+                    logger.info(f"⚠️ No records on page {page}, moving to next period")
+                    break
+
+                logger.info(f"📊 Extracted {record_count} records from page {page}")
+
+                # Yield records
+                for record in records:
+                    record['_dept_chunk'] = ','.join(dept_chunk)
+                    record['_slice_month'] = month_str
+                    yield record
+
+                # Vérifier dernière page
+                last_page = page_data.get('last_page', page_data.get('count', 1))
+                logger.info(f"📖 Page {page}/{last_page} completed ({record_count} records)")
+
+                if page >= last_page:
+                    logger.info(f"✅ Reached last page ({last_page})")
+                    break
+
+                page += 1
+
+            total_records_all += period_total_records
+
+            # Détection truncation (20k limit Hub'Eau)
+            if period_total_records >= 20000:
+                logger.warning(f"⚠️ WARNING: Period {month_str} for dept chunk {','.join(dept_chunk)} reached 20k records!")
+                logger.warning(f"   This may indicate data truncation. Consider finer slicing.")
+
+            logger.info(f"✅ Month {month_str} completed: {period_total_records} records")
+
+        logger.info(f"✅ Dept chunk {chunk_index}/{total_chunks} completed")
+
+    logger.info(f"🏁 DEPT_DATETIME slicing completed: {total_records_all} total records")
 
 
 # ============================================
@@ -902,7 +1102,16 @@ def create_observations_resource(
 
         slicing_mode = extraction_config.get('slicing_mode', 'global')
 
-        if slicing_mode == 'station_month_chunked' and stations_data:
+        if slicing_mode == 'dept_datetime':
+            # ✅ NOUVEAU: Support dept_datetime
+            yield from slice_by_dept_datetime(
+                client, endpoint, extraction_config,
+                temporal_config, None
+            )
+        elif slicing_mode == 'dept':
+            # ✅ NOUVEAU: Support dept simple avec temporal_filter
+            yield from slice_by_department(client, endpoint, extraction_config)
+        elif slicing_mode == 'station_month_chunked' and stations_data:
             yield from slice_by_station_month(
                 client, endpoint, extraction_config,
                 stations_data, None

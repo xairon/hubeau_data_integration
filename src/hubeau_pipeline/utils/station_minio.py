@@ -18,6 +18,9 @@ import pyarrow.fs as pafs
 
 logger = logging.getLogger(__name__)
 
+# ✅ Force le niveau de log à DEBUG pour voir tous les messages
+logger.setLevel(logging.DEBUG)
+
 
 def _get_station_code_column(station_type: str, columns: List[str]) -> str:
     """
@@ -142,22 +145,53 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
     bucket, path = _get_minio_path(station_type)
     full_path = f"{bucket}/{path}"
 
+    # ✅ Utiliser print() ET logger pour être sûr que ça s'affiche
+    print(f"🔍 DEBUG extract_station_codes_from_minio START")
+    print(f"   station_type: {station_type}")
+    print(f"   bucket: {bucket}")
+    print(f"   path: {path}")
+    print(f"   full_path: {full_path}")
+    
+    logger.info(f"🔍 DEBUG extract_station_codes_from_minio START")
+    logger.info(f"   station_type: {station_type}")
+    logger.info(f"   bucket: {bucket}")
+    logger.info(f"   path: {path}")
+    logger.info(f"   full_path: {full_path}")
+
     try:
         # Créer le système de fichiers S3
         s3 = _create_s3_filesystem()
+        logger.info(f"✅ S3 filesystem created")
 
         # Lister les fichiers parquet
         # Avec pyarrow S3, le path doit inclure le bucket: "bronze/piezometry_api/piezometry_stations/"
         try:
+            logger.info(f"📂 Listing files in: {full_path}")
             files = s3.get_file_info(pafs.FileSelector(full_path, recursive=True))
+            logger.info(f"✅ get_file_info returned {len(files)} items")
+            
+            # Debug: afficher tous les fichiers trouvés
+            for f in files[:10]:  # Limiter à 10 pour ne pas spammer
+                logger.info(f"   File: {f.path}, type={f.type}, size={f.size}")
+            if len(files) > 10:
+                logger.info(f"   ... and {len(files) - 10} more files")
+                
         except Exception as e:
             logger.error(f"❌ Erreur lors du listing des fichiers dans {full_path}: {e}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             raise
 
         parquet_files = [f.path for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
+        logger.info(f"📊 Filtered to {len(parquet_files)} parquet files")
+        
+        if parquet_files:
+            logger.info(f"   First parquet file: {parquet_files[0]}")
 
         if not parquet_files:
             logger.warning(f"⚠️ Aucun fichier parquet trouvé dans {full_path}")
+            logger.warning(f"   Total files found: {len(files)}")
+            logger.warning(f"   Parquet files after filter: {len(parquet_files)}")
             return []
 
         logger.info(f"📂 Trouvé {len(parquet_files)} fichiers parquet dans {full_path}")

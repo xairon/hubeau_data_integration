@@ -286,6 +286,11 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     hubeau_source_logger2.setLevel(logging.DEBUG)
     hubeau_source_logger2.addHandler(dagster_handler)
     
+    # ✅ Capturer les logs de station_minio.py
+    station_minio_logger = logging.getLogger('src.hubeau_pipeline.utils.station_minio')
+    station_minio_logger.setLevel(logging.DEBUG)
+    station_minio_logger.addHandler(dagster_handler)
+    
     try:
         # Execute DLT pipeline with monkey-patched print
         # Get state store from config or use default
@@ -315,6 +320,40 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Assurer un bucket_url par défaut si non spécifié dans YAML
         if "bucket_url" not in filesystem_config:
             filesystem_config["bucket_url"] = "s3://bronze"
+
+        # ✅ CORRECTION CRITIQUE: Résoudre le layout avec la partition_key
+        # DLT utilise la date actuelle pour {year}, {month} etc., pas la partition !
+        # On doit résoudre manuellement les placeholders custom comme {YYYY}
+        if partition_key and "layout" in filesystem_config:
+            layout = filesystem_config["layout"]
+            
+            # Extraire l'année de la partition_key
+            try:
+                if len(partition_key) == 4 and partition_key.isdigit():
+                    # Partition annuelle : "2024"
+                    year = partition_key
+                    month = "00"  # Pas de mois spécifique
+                    day = "00"
+                elif len(partition_key) == 7:
+                    # Partition mensuelle : "2024-08"
+                    year = partition_key[:4]
+                    month = partition_key[5:7]
+                    day = "00"
+                else:
+                    # Partition quotidienne : "2024-08-15"
+                    year = partition_key[:4]
+                    month = partition_key[5:7]
+                    day = partition_key[8:10]
+                
+                # Résoudre les placeholders custom
+                layout = layout.replace("{YYYY}", year)
+                layout = layout.replace("{MM}", month)
+                layout = layout.replace("{DD}", day)
+                
+                filesystem_config["layout"] = layout
+                context.log.info(f"✅ Layout résolu: {layout} (partition: {partition_key})")
+            except Exception as e:
+                context.log.warning(f"⚠️ Erreur lors de la résolution du layout: {e}")
 
         # Log de la config pour debug
         context.log.info(f"📦 Filesystem config: bucket={filesystem_config.get('bucket_url')}, "
@@ -347,6 +386,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         slicing_logger.removeHandler(dagster_handler)
         hubeau_source_logger.removeHandler(dagster_handler)
         hubeau_source_logger2.removeHandler(dagster_handler)
+        station_minio_logger.removeHandler(dagster_handler)
 
     pipeline_duration = time.time() - pipeline_start_time
     context.log.info(f"✅ DLT pipeline finished in {pipeline_duration:.2f}s")
