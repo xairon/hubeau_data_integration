@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 import pyarrow.fs as pafs
 import pandas as pd
 
-from dlt_pipeline.sources import run_pipeline
+from src.dlt_pipeline.sources import hubeau_source, load_config
 
 # Import factorized station extraction functions
 try:
@@ -123,7 +123,19 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     context.log.info(f"🚀 Starting dlt ingestion for config: {config_path}")
 
     # Load configuration from YAML
-    full_path = os.path.join("/app", config_path)
+    # Use absolute path if exists, otherwise join with current directory
+    from pathlib import Path
+    config_file = Path(config_path)
+    if not config_file.is_absolute():
+        # Try /app for Docker, fallback to current directory
+        docker_path = Path("/app") / config_path
+        if docker_path.exists():
+            full_path = docker_path
+        else:
+            full_path = Path.cwd() / config_path
+    else:
+        full_path = config_file
+
     with open(full_path, 'r') as f:
         cfg = yaml.safe_load(f)
     
@@ -241,23 +253,30 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Get state store from config or use default
         state_store = cfg.get("state_store", "s3://bronze/_state")
         
-        load_info = run_pipeline(
-            cfg,
-            bucket_url=f"s3://bronze",
-            credentials=credentials,
-            dataset_name=cfg.get("dataset_name", "bronze"),
-            file_format=cfg.get("file_format", "parquet"),
-            layout=cfg.get("layout", "{table_name}/{load_id}.{file_id}.parquet"),
-            state_fs_options={
-                "aws_access_key_id": TSecretValue(minio_user),
-                "aws_secret_access_key": TSecretValue(minio_pass),
-                "endpoint_url": minio_endpoint,
-                "region_name": minio_region,
-            },
-            dagster_log=None,  # Use monkey-patched print instead
+        # Créer le pipeline DLT
+        pipeline = dlt.pipeline(
+            pipeline_name="hubeau_pipeline",
+            destination=dlt.destinations.filesystem(
+                bucket_url="s3://bronze",
+                credentials={
+                    "aws_access_key_id": minio_user,
+                    "aws_secret_access_key": minio_pass,
+                    "endpoint_url": minio_endpoint,
+                    "region_name": minio_region,
+                }
+            ),
+            dataset_name=cfg.get("dataset_name", "bronze")
+        )
+
+        # Créer la source Hub'Eau
+        source = hubeau_source(
+            config_path=str(full_path),
             stations_data=stations_data,
             partition_date=partition_date
         )
+
+        # Exécuter le pipeline
+        load_info = pipeline.run(source)
     finally:
         # Restore original print function
         builtins.print = original_print

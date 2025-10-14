@@ -5,7 +5,7 @@ Surveillance des erreurs et alertes
 
 from dagster import RunRequest, SensorEvaluationContext, SkipReason, sensor
 
-from hubeau_pipeline.jobs import sync_all_yearly_data
+from src.hubeau_pipeline.jobs import sync_all_yearly_data
 
 @sensor(
     job=sync_all_yearly_data,

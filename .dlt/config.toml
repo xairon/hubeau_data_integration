@@ -1,74 +1,64 @@
-# Configuration DLT optimisée pour performances
-# Documentation: https://dlthub.com/docs/reference/performance
+# Configuration DLT pour Hub'Eau
+# Ce fichier contient les paramètres de configuration généraux
 
-# ====================================
-# NORMALIZE - Parallélisation de la normalisation
-# ====================================
-[normalize]
-workers = 1  # ↓ Réduit à 1 worker (minimal RAM, évite OOM sur gros datasets)
-pool_type = "process"  # Utiliser multiprocessing pour vrai parallélisme
+[sources.hubeau]
+# URL de base de l'API Hub'Eau
+base_url = "https://hubeau.eaufrance.fr/api"
 
-# ====================================
-# LOAD - Parallélisation du chargement
-# ====================================
-[load]
-workers = 1  # ↓ Réduit à 1 worker (minimal RAM, évite OOM)
-pool_type = "process"
+# Limites de rate
+rate_limit = 10  # requêtes par seconde
+retry_count = 3   # nombre de retries
+timeout = 30      # timeout en secondes
 
-# ====================================
-# DATA WRITER - Buffering optimisé
-# ====================================
-[data_writer]
-buffer_max_items = 5000   # ↓ Réduit à 5K (minimal RAM, flush très fréquent)
-file_max_items = 25000    # ↓ Réduit à 25K (fichiers plus petits, moins de RAM)
-file_max_bytes = 26214400  # ↓ Réduit à 25MB (flush très agressif, évite OOM)
-disable_compression = false
+# Configuration par défaut pour la pagination
+page_size = 5000  # taille de page par défaut
+# max_pages non défini = pas de limite
 
-# ====================================
-# RUNTIME - Configuration générale
-# ====================================
-[runtime]
-dlthub_telemetry = false  # Désactiver télémétrie pour privacy
-log_level = "INFO"
-sentry_dsn = ""  # Pas de Sentry
-
-# ====================================
-# DESTINATION FILESYSTEM - Configuration Parquet
-# ====================================
-[destination.filesystem]
+[destinations.filesystem]
+# Configuration pour MinIO/S3
+bucket_url = "s3://bronze"
+dataset_name = "bronze"
+file_format = "parquet"
 layout = "{table_name}/{load_id}.{file_id}.parquet"
 
-# Configuration Parquet spécifique
-[destination.filesystem.parquet_writer]
-# PyArrow Parquet writer options
-row_group_size = 25000  # ↓ Réduit à 25K lignes (minimal RAM pendant écriture)
-compression = "snappy"   # Compression rapide
-# compression_level = null  # Snappy n'a pas de level (commenté car null invalide en TOML)
-version = "2.6"  # Version Parquet moderne
-use_dictionary = true  # Dictionnaires pour colonnes répétitives
-write_statistics = true  # Stats pour query optimization
+# Options de partitionnement
+partition_columns = []  # Pas de partitionnement par défaut
 
-# ====================================
-# EXTRACT - Configuration extraction
-# ====================================
+[destinations.postgres]
+# Configuration PostgreSQL
+database = "hubeau"
+schema = "bronze"
+host = "localhost"
+port = 5432
+# user et password doivent être dans secrets.toml
+
+[destinations.duckdb]
+# Configuration DuckDB
+database = "hubeau.duckdb"
+schema = "bronze"
+
+[runtime]
+# Paramètres d'exécution
+log_level = "INFO"
+dlthub_telemetry = false  # désactiver la télémétrie
+progress = "tqdm"  # barre de progression
+
+# Paramètres de performance
+max_parallel_items = 1000
+buffer_max_items = 10000
+
+[normalizers]
+# Configuration de normalisation des noms
+naming_convention = "snake_case"  # Convention de nommage
+json_normalizer = "relational"    # Normalisation JSON
+
 [extract]
-# Pas de limite sur la taille des batches
-max_table_nesting = 1000
+# Paramètres d'extraction
+max_retries = 3
+retry_backoff = 2.0  # Facteur de backoff exponentiel
+retry_on_status = [429, 500, 502, 503, 504]
 
-# ====================================
-# EXTRACTION - Optimisations API
-# ====================================
-[extract.http]
-retry_status_codes = [429, 500, 502, 503, 504]  # Retry sur ces codes
-max_retries = 5  # Plus de retries
-retry_backoff_factor = 1.5  # Backoff exponentiel
-timeout = 60  # Timeout plus long pour grosses requêtes
-
-# ====================================
-# SOURCES - Configuration par défaut
-# ====================================
-[sources]
-# Taille de page par défaut plus grande
-default_page_size = 5000
-max_parallel_items = 10  # Parallélisation des items
-
+[load]
+# Paramètres de chargement
+raise_on_failed_jobs = false
+truncate_tables_before_load = false

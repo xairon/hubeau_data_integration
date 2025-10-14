@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from dagster import RunRequest, SensorEvaluationContext, SkipReason, sensor
 
-from hubeau_pipeline.jobs import sync_realtime_data
+from src.hubeau_pipeline.jobs import sync_realtime_data
 
 @sensor(
     job=sync_realtime_data,

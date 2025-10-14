@@ -1,684 +1,483 @@
 """
-Sources DLT natives pour Hub'Eau avec configuration YAML
+Sources DLT natives pour Hub'Eau - Version 2.0
+Utilise 100% les capacités natives de DLT
 """
-import dlt
-from dlt.sources.helpers import requests
-from typing import Iterator, Optional, Dict, Any, List
-import yaml
-import os
-import gc
-import time
-import logging
-from datetime import datetime
+
+from typing import Iterator, Optional, Dict, Any, List, Generator
+from datetime import datetime, date, timedelta
 from pathlib import Path
+import yaml
+import dlt
+from dlt.sources.helpers.rest_client import RESTClient
+from dlt.sources.helpers.rest_client.paginators import PageNumberPaginator
+from dlt.sources.helpers.requests import Session
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-from .http_client import HttpClient
-from .slicing import build_slices
-from .transformers import get_transformer, create_reject_duplicates_transformer
 
-logger = logging.getLogger(__name__)
+def load_config(config_path: str) -> Dict[str, Any]:
+    """Charge la configuration depuis un fichier YAML"""
+    config_file = Path(config_path)
+    if not config_file.is_absolute():
+        # Try /app for Docker, fallback to current directory
+        docker_path = Path("/app") / config_path
+        if docker_path.exists():
+            full_path = docker_path
+        else:
+            full_path = Path.cwd() / config_path
+    else:
+        full_path = config_file
+
+    with open(full_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
 
-@dlt.source(name="hubeau", max_table_nesting=2)
+def configure_session() -> Session:
+    """Configure session avec retry et rate limiting DLT natifs"""
+    session = Session()
+
+    # Configuration retry avec backoff exponentiel
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"]
+    )
+
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    # Timeout par défaut
+    session.timeout = 30
+
+    return session
+
+
+@dlt.source(name="hubeau")
 def hubeau_source(
-    config_path: str = None,
-    config_dict: Dict = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    **runtime_params
+    config_path: str,
+    api_key: Optional[str] = None,
+    base_url: str = "https://hubeau.eaufrance.fr/api",
+    stations_data: Optional[Dict[str, List[str]]] = None,
+    partition_date: Optional[str] = None
 ):
     """
-    Source DLT native pour Hub'Eau avec configuration YAML.
+    Source DLT native pour Hub'Eau
 
     Args:
-        config_path: Chemin vers le fichier YAML
-        config_dict: Ou directement un dict de config
-        start_date: Date de début (format YYYY-MM-DD)
-        end_date: Date de fin (format YYYY-MM-DD)
-        **runtime_params: Paramètres runtime additionnels
-
-    Returns:
-        Resource DLT configurée
-
-    Examples:
-        # Depuis un fichier YAML
-        source = hubeau_source(
-            config_path="configs/hubeau/hydrometry_stations.yml"
-        )
-
-        # Avec dates
-        source = hubeau_source(
-            config_path="configs/hubeau/temperature_chroniques.yml",
-            start_date="2024-01-01",
-            end_date="2024-12-31"
-        )
-
-        # Depuis un dict
-        source = hubeau_source(config_dict=my_config)
+        config_path: Chemin vers le fichier de configuration YAML
+        api_key: Clé API optionnelle
+        base_url: URL de base de l'API
+        stations_data: Données de stations pour filtrage temporel
+        partition_date: Date de partition pour traitement batch
     """
 
-    # Charger la configuration
-    if config_path:
-        config = load_config(config_path)
-    elif config_dict:
-        config = config_dict
+    # Charger configuration
+    config = load_config(config_path)
+
+    # Extraire les paramètres de l'API
+    api_config = config.get('api', {})
+    api_name = api_config.get('name')
+    endpoint_name = api_config.get('endpoint')
+
+    # Configuration extraction
+    extraction_config = config.get('extraction', {})
+    slicing_mode = extraction_config.get('slicing_mode', 'global')
+
+    # Créer RESTClient avec configuration appropriée
+    client = create_rest_client(base_url, api_key, extraction_config)
+
+    # Déterminer le type de resource selon l'endpoint
+    if "stations" in endpoint_name:
+        yield create_stations_resource(client, config, api_name, endpoint_name)
+    elif "chroniques" in endpoint_name:
+        yield create_chroniques_resource(client, config, api_name, endpoint_name, stations_data, partition_date)
+    elif "observations" in endpoint_name or "obs_elab" in endpoint_name:
+        yield create_observations_resource(client, config, api_name, endpoint_name)
     else:
-        raise ValueError("Either config_path or config_dict must be provided")
+        # Resource générique pour autres endpoints
+        yield create_generic_resource(client, config, api_name, endpoint_name)
 
-    # Extraire les sections de config
-    source_config = config.get("source", {})
-    resource_config = config["resource"]
-    extraction_config = config["extraction"]
-    performance_config = config.get("performance", {})
-    transformer_configs = config.get("transformers", [])
 
-    # Créer la resource DLT
+def create_rest_client(
+    base_url: str,
+    api_key: Optional[str],
+    extraction_config: Dict[str, Any]
+) -> RESTClient:
+    """Crée un RESTClient configuré pour Hub'Eau"""
+
+    # Configuration de la pagination
+    pagination_config = extraction_config.get('pagination', {})
+    page_size = pagination_config.get('page_size', 5000)
+
+    # Créer le paginator approprié
+    paginator = PageNumberPaginator(
+        page_param="page",
+        size_param="size",
+        total_pages_param="last_page",
+        page_size=page_size,
+        page_start=1  # Hub'Eau commence à page 1
+    )
+
+    # Headers avec API key si fournie
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    # Créer le client avec session configurée
+    client = RESTClient(
+        base_url=base_url,
+        headers=headers,
+        paginator=paginator,
+        session=configure_session()
+    )
+
+    return client
+
+
+def create_stations_resource(
+    client: RESTClient,
+    config: Dict[str, Any],
+    api_name: str,
+    endpoint_name: str
+):
+    """Crée une resource DLT pour les stations"""
+
+    extraction_config = config.get('extraction', {})
+    slicing_mode = extraction_config.get('slicing_mode', 'global')
+
+    # Déterminer les clés primaires depuis la config
+    primary_keys = get_primary_keys(config)
+
     @dlt.resource(
-        name=resource_config["name"],
-        primary_key=resource_config.get("primary_key", []),
-        write_disposition=resource_config.get("write_disposition", "merge"),
-        columns=resource_config.get("columns", {}),
-        max_table_nesting=source_config.get("max_table_nesting", 2)
+        name=f"{api_name}_{endpoint_name}",
+        primary_key=primary_keys,
+        write_disposition="merge"
     )
-    def api_resource() -> Iterator[Dict]:
-        """
-        Resource DLT avec state management et extraction optimisée.
-        """
-        # Récupérer le state DLT natif
-        state = dlt.current.resource_state()
-        last_value = state.setdefault("last_value", {})
+    def stations_resource() -> Iterator[Dict[str, Any]]:
+        """Resource pour les stations avec slicing natif"""
 
-        # Logger le début
-        logger.info(f"Starting extraction for {resource_config['name']}")
-        logger.info(f"Date range: {start_date or 'beginning'} to {end_date or 'now'}")
+        endpoint_path = f"/v1/{api_name}/{endpoint_name}"
 
-        # Créer le client HTTP
-        http_config = {
-            "base_url": resource_config["base_url"],
-            "max_attempts": performance_config.get("retry_times", 3),
-            "backoff_initial": performance_config.get("retry_delay", 2.0),
-            "rate_limit": {
-                "target_rps": performance_config.get("rate_limit", 2.0)
-                if isinstance(performance_config.get("rate_limit"), (int, float))
-                else performance_config.get("rate_limit", {}).get("target_rps", 2.0)
-            }
-        }
-        http_client = HttpClient(http_config)
+        if slicing_mode == 'dept':
+            # Slicing par département
+            departments = extraction_config.get('values', [])
+            param_name = extraction_config.get('param', 'code_departement')
 
-        # Configuration complète pour le slicing
-        # Créer le slicer depuis extraction_config
-        slicer = {}
+            for dept in departments:
+                params = {
+                    param_name: dept,
+                    "format": "json"
+                }
 
-        # Mapper slicing_mode vers mode dans slicer
-        if "slicing_mode" in extraction_config:
-            slicer["mode"] = extraction_config["slicing_mode"]
+                # Ajouter paramètres par défaut
+                default_params = extraction_config.get('default_params', {})
+                params.update(default_params)
 
-        # Copier les paramètres de slicing depuis extraction
-        for key in ["station_param", "station_chunk_size", "start_param", "end_param", "start_date", "end_date", "end_offset_days", "stations"]:
-            if key in extraction_config:
-                slicer[key] = extraction_config[key]
+                # Paginate automatiquement avec DLT
+                for page_data in client.paginate(endpoint_path, params=params):
+                    # Extraire les données selon le records_path
+                    records_path = extraction_config.get('records_path', '$.data')
 
-        full_config = {
-            **config,
-            "path": resource_config.get("endpoint", "/"),
-            "name": resource_config["name"],
-            "base_url": resource_config["base_url"],
-            "slicer": slicer,
-            "primary_keys": resource_config.get("primary_key", [])
-        }
+                    if records_path == '$.data' and isinstance(page_data, dict):
+                        records = page_data.get('data', [])
+                    else:
+                        records = page_data if isinstance(page_data, list) else [page_data]
 
-        # Créer les slices selon le mode de slicing
-        slices = list(build_slices(full_config))
-        logger.warning(f"🔢 Created {len(slices)} slices with mode {slicer.get('mode', 'global')} for {resource_config['name']}")
-        
-        # ✅ DEBUG: Log des premières slices pour comprendre le problème
-        if len(slices) > 0:
-            logger.warning(f"🔍 First slice: {slices[0].params}")
-            if len(slices) > 1:
-                logger.warning(f"🔍 Last slice: {slices[-1].params}")
-        
-        # ✅ Si beaucoup de slices, avertir l'utilisateur
-        if len(slices) > 100:
-            logger.warning(f"⚠️ ATTENTION: {len(slices)} slices à traiter - cela peut prendre du temps!")
-            logger.warning(f"⏱️ Temps estimé: ~{len(slices) * 2}s à ~{len(slices) * 5}s (selon la charge API)")
-
-        # Stats pour logging
-        total_records = 0
-        total_slices = 0
-        start_time = time.time()
-
-        # Extraire les données par slice
-        for slice_idx, slice_obj in enumerate(slices):
-            try:
-                # ✅ Log de progression: toutes les 10 slices + début et fin
-                if slice_idx % 10 == 0:
-                    elapsed = time.time() - start_time
-                    avg_time_per_slice = elapsed / (slice_idx + 1) if slice_idx > 0 else 0
-                    remaining_slices = len(slices) - slice_idx - 1
-                    eta_seconds = avg_time_per_slice * remaining_slices
-                    logger.warning(
-                        f"📊 Progression: {slice_idx + 1}/{len(slices)} slices "
-                        f"({(slice_idx + 1) / len(slices) * 100:.1f}%) | "
-                        f"⏱️ ETA: {eta_seconds:.0f}s | "
-                        f"📈 {total_records} records"
-                    )
-                if slice_idx < 3 or slice_idx >= len(slices) - 3:
-                    logger.info(f"Slice {slice_idx + 1}/{len(slices)}: {slice_obj.params}")
-
-                # Extraire les données du slice
-                slice_data = extract_slice(
-                    http_client=http_client,
-                    endpoint=resource_config.get("endpoint", resource_config.get("path", "/")),
-                    slice_params=slice_obj.params,
-                    extraction_config=extraction_config,
-                    performance_config=performance_config,
-                    base_config=full_config
-                )
-
-                # Compter avant transformation
-                slice_records = list(slice_data)
-                records_count = len(slice_records)
-
-                if records_count > 0:
-                    # Ajouter metadata à tous les records AVANT le pipeline
-                    for record in slice_records:
-                        record["_slice_id"] = slice_obj.slice_id
-                        record["_scope"] = slice_obj.scope
-
-                    # Créer la source de données (liste Python - compatible avec pipe DLT)
-                    data_source = slice_records
-
-                    # Composer les transformers avec le pipe operator |
-                    for transformer_config in transformer_configs:
-                        if isinstance(transformer_config, str):
-                            transformer_name = transformer_config
-                            params = {}
-                        else:
-                            transformer_name = list(transformer_config.keys())[0]
-                            params = transformer_config[transformer_name] or {}
-
-                        # Ajouter les paramètres obligatoires depuis la resource config
-                        if transformer_name == "validate_primary_keys":
-                            if "primary_keys" not in params:
-                                params["primary_keys"] = resource_config.get("primary_key", [])
-                            if "api_name" not in params:
-                                params["api_name"] = resource_config["name"]
-
-                        elif transformer_name == "reject_duplicates":
-                            if "key_fields" not in params:
-                                params["key_fields"] = resource_config.get("primary_key", [])
-                            if "api_name" not in params:
-                                params["api_name"] = resource_config["name"]
-
-                        elif transformer_name in ["clean_text", "convert_types"]:
-                            if "api_name" not in params:
-                                params["api_name"] = resource_config["name"]
-
-                        # Appliquer le transformer avec pipe operator
-                        if transformer_name == "reject_duplicates":
-                            # Cas spécial: factory pour state partagé
-                            transformer = create_reject_duplicates_transformer(
-                                key_fields=params.get("key_fields", []),
-                                api_name=params.get("api_name", "unknown")
-                            )
-                            data_source = data_source | transformer
-                        else:
-                            # Cas normal: récupérer et appliquer
-                            transformer_func = get_transformer(transformer_name)
-                            data_source = data_source | transformer_func(**params)
-
-                    # Consommer le pipeline DLT et yielder les résultats
-                    for record in data_source:
+                    for record in records:
+                        # Ajouter métadonnées de slicing
+                        record['_slice_dept'] = dept
                         yield record
-                        total_records += 1
-
-                    # Mettre à jour le state après chaque slice réussi
-                    update_state(state, slice_obj.params, records_count)
-
-                    logger.info(f"Slice {slice_idx + 1} completed: {records_count} records")
-
-                total_slices += 1
-
-                # Garbage collection après chaque slice pour éviter OOM
-                if performance_config.get("enable_gc", True):
-                    gc.collect()
-
-            except Exception as e:
-                logger.error(f"Error processing slice {slice_idx + 1}: {e}")
-                if not extraction_config.get("continue_on_error", True):
-                    raise
-
-        # Logger le résumé
-        elapsed = time.time() - start_time
-        logger.info(f"Extraction completed for {resource_config['name']}")
-        logger.info(f"Total: {total_records} records from {total_slices} slices in {elapsed:.2f}s")
-
-        # Sauvegarder l'état final
-        if end_date:
-            state["last_date"] = end_date
-
-        # Fermer le client HTTP
-        http_client.close()
-
-    return api_resource
-
-
-def extract_slice(
-    http_client,
-    endpoint: str,
-    slice_params: Dict,
-    extraction_config: Dict,
-    performance_config: Dict,
-    base_config: Dict
-) -> Iterator[Dict]:
-    """
-    Extrait les données d'un slice avec pagination.
-
-    Args:
-        http_client: Client HTTP configuré
-        endpoint: Endpoint API
-        slice_params: Paramètres du slice
-        extraction_config: Configuration d'extraction
-        performance_config: Configuration de performance
-        base_config: Configuration de base complète
-
-    Yields:
-        Records du slice
-    """
-    # Paramètres de base
-    params = {
-        **extraction_config.get("default_params", {}),
-        **slice_params
-    }
-
-    # Configuration de pagination
-    pagination_config = extraction_config.get("pagination", {})
-    page_size = pagination_config.get("page_size", 20000)
-    max_pages = pagination_config.get("max_pages")
-    pagination_type = pagination_config.get("type", "page_based")
-
-    params["size"] = page_size
-
-    # Extraire avec pagination
-    if pagination_type == "cursor_based":
-        yield from extract_with_cursor_pagination(
-            http_client, endpoint, params, max_pages, base_config
-        )
-    else:
-        yield from extract_with_page_pagination(
-            http_client, endpoint, params, max_pages, base_config
-        )
-
-
-def extract_with_page_pagination(
-    http_client,
-    endpoint: str,
-    params: Dict,
-    max_pages: Optional[int],
-    base_config: Dict
-) -> Iterator[Dict]:
-    """
-    Extraction avec pagination par pages.
-    """
-    page = 1
-    total_fetched = 0
-
-    while True:
-        # Paramètres de la page
-        page_params = {**params, "page": page}
-
-        try:
-            # Faire la requête
-            response = http_client.request("GET", endpoint, params=page_params)
-
-            if not response:
-                break
-
-            # Extraire les records
-            data = http_client.extract_records(response, base_config.get("records_path", "$.data"))
-            data_list = list(data)
-
-            if not data_list:
-                break
-
-            # Yield les records
-            for record in data_list:
-                yield record
-                total_fetched += 1
-
-            # Vérifier si on a tout récupéré
-            if len(data_list) < params.get("size", 20000):
-                break
-
-            # Vérifier la limite de pages
-            if max_pages and page >= max_pages:
-                logger.warning(f"Reached max pages limit: {max_pages}")
-                break
-
-            page += 1
-
-            # Check for API truncation
-            if response.get("truncated", False):
-                logger.warning(f"API response truncated at page {page}")
-                break
-
-        except Exception as e:
-            logger.error(f"Error fetching page {page}: {e}")
-            if page == 1:
-                raise
-            # ✅ Si erreur sur page > 1, c'est probablement une limite API
-            logger.warning(
-                f"Pagination stopped at page {page} (likely API limit). "
-                f"Consider increasing page_size to fetch all data in one request."
-            )
-            break
-
-
-def extract_with_cursor_pagination(
-    http_client,
-    endpoint: str,
-    params: Dict,
-    max_pages: Optional[int],
-    base_config: Dict
-) -> Iterator[Dict]:
-    """
-    Extraction avec pagination par curseur.
-    """
-    cursor = None
-    pages_fetched = 0
-
-    while True:
-        # Paramètres avec curseur
-        page_params = {**params}
-        if cursor:
-            page_params["cursor"] = cursor
-
-        try:
-            # Faire la requête
-            response = http_client.request("GET", endpoint, params=page_params)
-
-            if not response:
-                break
-
-            # Extraire les records
-            data = http_client.extract_records(response, base_config.get("records_path", "$.data"))
-            data_list = list(data)
-
-            if not data_list:
-                break
-
-            # Yield les records
-            for record in data_list:
-                yield record
-
-            # Récupérer le prochain curseur
-            import jsonpath_ng
-            cursor_path = "$.next"
-            jsonpath_expr = jsonpath_ng.parse(cursor_path)
-            matches = [match.value for match in jsonpath_expr.find(response)]
-
-            if matches and matches[0]:
-                # Extraire le cursor de l'URL
-                from urllib.parse import urlparse, parse_qs
-                next_url = matches[0]
-                parsed = urlparse(next_url)
-                query_params = parse_qs(parsed.query)
-                cursor = query_params.get("cursor", [None])[0]
-                if not cursor:
-                    break
-            else:
-                break
-
-            pages_fetched += 1
-
-            # Vérifier la limite de pages
-            if max_pages and pages_fetched >= max_pages:
-                logger.warning(f"Reached max pages limit: {max_pages}")
-                break
-
-        except Exception as e:
-            logger.error(f"Error with cursor pagination: {e}")
-            break
-
-
-def update_state(state: Dict, slice_params: Dict, records_count: int):
-    """
-    Met à jour le state après traitement d'un slice.
-
-    Args:
-        state: State DLT
-        slice_params: Paramètres du slice
-        records_count: Nombre de records traités
-    """
-    # Mettre à jour les compteurs
-    state.setdefault("total_records", 0)
-    state["total_records"] += records_count
-
-    state.setdefault("slices_processed", 0)
-    state["slices_processed"] += 1
-
-    # Sauvegarder la dernière date si présente
-    if "date_debut_mesure" in slice_params:
-        state["last_date"] = slice_params["date_debut_mesure"]
-    elif "date" in slice_params:
-        state["last_date"] = slice_params["date"]
-
-    # Timestamp de dernière mise à jour
-    state["last_updated"] = datetime.now().isoformat()
-
-
-def load_config(config_path: str) -> Dict:
-    """
-    Charge et valide la configuration YAML.
-
-    Args:
-        config_path: Chemin vers le fichier YAML
-
-    Returns:
-        Configuration parsée et validée
-
-    Raises:
-        ValueError: Si la configuration est invalide
-    """
-    config_path = Path(config_path)
-
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_path, encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-
-    # Validation du nouveau format
-    errors = validate_config(config)
-    if errors:
-        raise ValueError(f"Invalid config {config_path.name}: {'; '.join(errors)}")
-
-    return config
-
-
-def validate_config(config: Dict) -> List[str]:
-    """
-    Valide le format de configuration.
-
-    Args:
-        config: Configuration à valider
-
-    Returns:
-        Liste des erreurs (vide si valide)
-    """
-    errors = []
-
-    # Sections requises
-    required_sections = ["source", "resource", "extraction"]
-    for section in required_sections:
-        if section not in config:
-            errors.append(f"Missing required section: {section}")
-
-    # Champs requis dans resource
-    if "resource" in config:
-        required_resource_fields = ["name", "endpoint", "base_url"]
-        for field in required_resource_fields:
-            if field not in config["resource"]:
-                errors.append(f"Missing required field in resource: {field}")
-
-    # Validation du slicing_mode
-    if "extraction" in config:
-        valid_slicing_modes = [
-            "global", "datetime", "dept",
-            "station_month_chunked", "dept_datetime"
-        ]
-        slicing_mode = config["extraction"].get("slicing_mode")
-        if slicing_mode and slicing_mode not in valid_slicing_modes:
-            errors.append(f"Invalid slicing_mode: {slicing_mode}")
-
-    # Validation des transformers
-    if "transformers" in config:
-        valid_transformers = [
-            "validate_primary_keys", "normalize_dates",
-            "validate_coordinates", "reject_duplicates",
-            "clean_text", "convert_types"
-        ]
-        for transformer in config["transformers"]:
-            if isinstance(transformer, str):
-                if transformer not in valid_transformers:
-                    errors.append(f"Unknown transformer: {transformer}")
-            elif isinstance(transformer, dict):
-                transformer_name = list(transformer.keys())[0]
-                if transformer_name not in valid_transformers:
-                    errors.append(f"Unknown transformer: {transformer_name}")
-
-    return errors
-
-
-# Fonction de compatibilité pour l'ancien code
-def run_pipeline(
-    cfg: Any,
-    context: Any = None,
-    destination: str = "filesystem",
-    bucket_url: str = None,
-    credentials: Dict = None,
-    **kwargs
-) -> Any:
-    """
-    Fonction de compatibilité avec l'ancienne interface.
-
-    Args:
-        cfg: Configuration (dict ou path)
-        context: Contexte Dagster (optionnel)
-        destination: Type de destination
-        bucket_url: URL du bucket pour filesystem destination
-        credentials: Credentials pour la destination
-        **kwargs: Arguments additionnels
-
-    Returns:
-        LoadInfo DLT
-    """
-    import dlt
-    from .destinations import get_destination, get_destination_from_config
-
-    # Gérer cfg qui peut être un dict ou un path
-    if isinstance(cfg, (str, Path)):
-        config = load_config(cfg)
-    elif isinstance(cfg, dict):
-        config = cfg
-    else:
-        # Si c'est un objet validé (ancien code), extraire le dict
-        if hasattr(cfg, 'model_dump'):
-            config = cfg.model_dump(mode="python")
         else:
-            config = cfg
+            # Mode global - une seule requête paginée
+            params = {"format": "json"}
+            default_params = extraction_config.get('default_params', {})
+            params.update(default_params)
 
-    # Injecter les stations et dates si fournies dans kwargs
-    stations_data = kwargs.pop("stations_data", None)
-    partition_date = kwargs.pop("partition_date", None)
+            for page_data in client.paginate(endpoint_path, params=params):
+                # Extraire les données
+                records_path = extraction_config.get('records_path', '$.data')
 
-    if "extraction" not in config:
-        config["extraction"] = {}
+                if records_path == '$.data' and isinstance(page_data, dict):
+                    records = page_data.get('data', [])
+                else:
+                    records = page_data if isinstance(page_data, list) else [page_data]
 
-    # Injecter les stations si fournies
-    if stations_data:
-        # Si le mode est station_month_chunked, les stations sont nécessaires
-        if config["extraction"].get("slicing_mode") in ["station_month_chunked", "station_month"]:
-            config["extraction"]["stations"] = stations_data
-            logger.warning(f"✅ Injected {len(stations_data)} stations into extraction config for {config['resource']['name']}")
-    else:
-        # ✅ Warning seulement si le mode NÉCESSITE des stations
-        slicing_mode = config["extraction"].get("slicing_mode")
-        if slicing_mode in ["station_month_chunked", "station_month"]:
-            logger.warning(f"⚠️ No stations_data provided for {config['resource']['name']} with mode {slicing_mode}")
+                for record in records:
+                    record['_slice_mode'] = 'global'
+                    yield record
 
-    # Injecter les dates de partition si fournies
-    if partition_date:
-        slicing_mode = config["extraction"].get("slicing_mode")
-        if slicing_mode in ["station_month_chunked", "station_month", "datetime"]:
-            # Calculer start_date et end_date depuis partition_date
-            # partition_date est au format "YYYY-MM-DD" (ex: "2024-01-01")
-            date_obj = datetime.strptime(partition_date, "%Y-%m-%d")
-            year = date_obj.year
+    return stations_resource()
 
-            # Pour les partitions annuelles, configurer l'année complète
-            config["extraction"]["start_date"] = f"{year}-01-01"
-            config["extraction"]["end_date"] = f"{year}-12-31"
-            config["extraction"]["end_offset_days"] = 0  # Pas d'offset pour partitions annuelles
 
-            logger.info(f"Injected partition dates: {year}-01-01 to {year}-12-31 with end_offset_days=0")
+def create_chroniques_resource(
+    client: RESTClient,
+    config: Dict[str, Any],
+    api_name: str,
+    endpoint_name: str,
+    stations_data: Optional[Dict[str, List[str]]] = None,
+    partition_date: Optional[str] = None
+):
+    """Crée une resource DLT pour les chroniques avec incremental loading"""
 
-    # Créer la source
-    source = hubeau_source(
-        config_dict=config,
-        **kwargs
+    extraction_config = config.get('extraction', {})
+    slicing_mode = extraction_config.get('slicing_mode', 'global')
+    primary_keys = get_primary_keys(config)
+
+    # Déterminer le champ de date pour incremental
+    temporal_config = config.get('temporal_filter', {})
+    date_field = temporal_config.get('date_field', 'date_mesure')
+
+    @dlt.resource(
+        name=f"{api_name}_{endpoint_name}",
+        primary_key=primary_keys,
+        write_disposition="merge"
     )
-
-    # Créer la destination
-    # Si bucket_url est fourni, utiliser filesystem avec les credentials fournis
-    if bucket_url:
-        dest_config = {
-            "bucket_url": bucket_url,
-            **kwargs  # Inclut file_format, layout, etc.
-        }
-        dest = dlt.destinations.filesystem(
-            bucket_url=bucket_url,
-            credentials=credentials,
-            **{k: v for k, v in kwargs.items() if k in ["layout", "file_format"]}
+    def chroniques_resource(
+        last_value=dlt.sources.incremental(
+            date_field,
+            initial_value="2020-01-01"
         )
-    else:
-        # Sinon utiliser la config YAML
-        dest = get_destination_from_config(config)
+    ) -> Iterator[Dict[str, Any]]:
+        """Resource pour chroniques avec incremental loading natif"""
 
-    # Créer et exécuter le pipeline
-    dataset_name = kwargs.get("dataset_name") or config.get("destinations", {}).get(destination, {}).get("dataset_name", "bronze")
-    pipeline = dlt.pipeline(
-        pipeline_name=f"hubeau_{config['resource']['name']}",
-        destination=dest,
-        dataset_name=dataset_name
+        endpoint_path = f"/v1/{api_name}/{endpoint_name}"
+
+        if slicing_mode == 'station_month_chunked' and stations_data:
+            # Slicing par station et mois
+            yield from process_station_month_chunks(
+                client, endpoint_path, extraction_config,
+                stations_data, last_value
+            )
+        elif slicing_mode == 'datetime':
+            # Slicing par période temporelle
+            yield from process_datetime_slices(
+                client, endpoint_path, extraction_config,
+                temporal_config, last_value
+            )
+        else:
+            # Mode standard avec incremental
+            params = {
+                "format": "json",
+                temporal_config.get('start_param', 'date_debut'): last_value.start_value
+            }
+
+            # Ajouter date de fin si configurée
+            if temporal_config.get('end_param'):
+                end_date = datetime.now().date() - timedelta(days=1)
+                params[temporal_config['end_param']] = end_date.isoformat()
+
+            # Paginate avec incremental
+            for page_data in client.paginate(endpoint_path, params=params):
+                records = extract_records(page_data, extraction_config)
+                for record in records:
+                    yield record
+
+    return chroniques_resource()
+
+
+def create_observations_resource(
+    client: RESTClient,
+    config: Dict[str, Any],
+    api_name: str,
+    endpoint_name: str
+):
+    """Crée une resource DLT pour les observations"""
+
+    extraction_config = config.get('extraction', {})
+    primary_keys = get_primary_keys(config)
+
+    @dlt.resource(
+        name=f"{api_name}_{endpoint_name}",
+        primary_key=primary_keys,
+        write_disposition="append"
     )
+    def observations_resource() -> Iterator[Dict[str, Any]]:
+        """Resource pour observations"""
 
-    # Log si contexte Dagster
-    if context:
-        if hasattr(context, 'log'):
-            context.log.info(f"Running pipeline for {config['resource']['name']}")
+        endpoint_path = f"/v1/{api_name}/{endpoint_name}"
+        params = {"format": "json"}
 
-    # Exécuter
-    info = pipeline.run(source)
+        # Ajouter filtres temporels si configurés
+        temporal_config = config.get('temporal_filter', {})
+        if temporal_config:
+            if temporal_config.get('start_date'):
+                params[temporal_config.get('start_param', 'date_debut')] = temporal_config['start_date']
+            if temporal_config.get('end_date'):
+                params[temporal_config.get('end_param', 'date_fin')] = temporal_config['end_date']
 
-    # Log les résultats
-    if context and hasattr(context, 'log'):
-        context.log.info(f"Pipeline completed: {info}")
+        # Paginate
+        for page_data in client.paginate(endpoint_path, params=params):
+            records = extract_records(page_data, extraction_config)
+            for record in records:
+                yield record
 
-    return info
-
-
-def run_from_file(config_path: str | Path) -> Any:
-    """
-    Execute un pipeline depuis un fichier de configuration.
-
-    Args:
-        config_path: Chemin vers le fichier YAML
-
-    Returns:
-        LoadInfo DLT
-    """
-    return run_pipeline(config_path)
+    return observations_resource()
 
 
-__all__ = ["run_pipeline", "run_from_file", "hubeau_source"]
+def create_generic_resource(
+    client: RESTClient,
+    config: Dict[str, Any],
+    api_name: str,
+    endpoint_name: str
+):
+    """Crée une resource DLT générique pour tout endpoint"""
+
+    extraction_config = config.get('extraction', {})
+    primary_keys = get_primary_keys(config)
+
+    @dlt.resource(
+        name=f"{api_name}_{endpoint_name}",
+        primary_key=primary_keys,
+        write_disposition="merge"
+    )
+    def generic_resource() -> Iterator[Dict[str, Any]]:
+        """Resource générique"""
+
+        endpoint_path = f"/v1/{api_name}/{endpoint_name}"
+        params = extraction_config.get('default_params', {"format": "json"})
+
+        for page_data in client.paginate(endpoint_path, params=params):
+            records = extract_records(page_data, extraction_config)
+            for record in records:
+                yield record
+
+    return generic_resource()
+
+
+def process_station_month_chunks(
+    client: RESTClient,
+    endpoint_path: str,
+    extraction_config: Dict[str, Any],
+    stations_data: Dict[str, List[str]],
+    incremental_state
+) -> Iterator[Dict[str, Any]]:
+    """Traite les chunks station/mois pour contourner les limites d'URL"""
+
+    chunk_size = extraction_config.get('chunk_size', 80)
+    station_codes = list(stations_data.keys())
+
+    # Chunker les stations
+    for i in range(0, len(station_codes), chunk_size):
+        chunk = station_codes[i:i + chunk_size]
+
+        # Pour chaque mois actif dans ce chunk
+        months_in_chunk = set()
+        for code in chunk:
+            months_in_chunk.update(stations_data[code])
+
+        for month in sorted(months_in_chunk):
+            # Filtrer les stations actives pour ce mois
+            active_stations = [
+                code for code in chunk
+                if month in stations_data[code]
+            ]
+
+            if not active_stations:
+                continue
+
+            # Construire les paramètres
+            params = {
+                "code_bss": ",".join(active_stations),
+                "date_debut_mesure": f"{month}-01",
+                "date_fin_mesure": f"{month}-31",
+                "format": "json"
+            }
+
+            # Paginate
+            for page_data in client.paginate(endpoint_path, params=params):
+                records = extract_records(page_data, extraction_config)
+                for record in records:
+                    record['_chunk_month'] = month
+                    record['_chunk_stations'] = len(active_stations)
+                    yield record
+
+
+def process_datetime_slices(
+    client: RESTClient,
+    endpoint_path: str,
+    extraction_config: Dict[str, Any],
+    temporal_config: Dict[str, Any],
+    incremental_state
+) -> Iterator[Dict[str, Any]]:
+    """Traite les slices temporelles"""
+
+    # Récupérer la configuration de slicing
+    start_date = datetime.fromisoformat(
+        temporal_config.get('start_date', '2020-01-01')
+    ).date()
+
+    end_date = datetime.now().date() - timedelta(days=1)
+
+    # Générer les slices par période
+    period_days = extraction_config.get('period_days', 30)
+    current = start_date
+
+    while current < end_date:
+        next_date = min(current + timedelta(days=period_days), end_date)
+
+        params = {
+            temporal_config.get('start_param', 'date_debut'): current.isoformat(),
+            temporal_config.get('end_param', 'date_fin'): next_date.isoformat(),
+            "format": "json"
+        }
+
+        # Paginate pour cette période
+        for page_data in client.paginate(endpoint_path, params=params):
+            records = extract_records(page_data, extraction_config)
+            for record in records:
+                record['_slice_start'] = current.isoformat()
+                record['_slice_end'] = next_date.isoformat()
+                yield record
+
+        current = next_date + timedelta(days=1)
+
+
+def extract_records(
+    page_data: Any,
+    extraction_config: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Extrait les records depuis la réponse API selon la config"""
+
+    records_path = extraction_config.get('records_path', '$.data')
+
+    if records_path == '$.data' and isinstance(page_data, dict):
+        return page_data.get('data', [])
+    elif isinstance(page_data, list):
+        return page_data
+    elif isinstance(page_data, dict):
+        # Essayer d'extraire selon le path
+        if '.' in records_path:
+            # Navigation dans un path imbriqué
+            parts = records_path.replace('$', '').strip('.').split('.')
+            result = page_data
+            for part in parts:
+                if isinstance(result, dict):
+                    result = result.get(part, [])
+            return result if isinstance(result, list) else [result]
+        return [page_data]
+    else:
+        return []
+
+
+def get_primary_keys(config: Dict[str, Any]) -> List[str]:
+    """Extrait les clés primaires depuis la configuration"""
+
+    schema = config.get('schema', {})
+    primary_keys = []
+
+    for field_name, field_config in schema.items():
+        if field_config.get('primary_key'):
+            primary_keys.append(field_name)
+
+    # Fallback sur des clés par défaut si aucune trouvée
+    if not primary_keys:
+        # Chercher des patterns communs
+        for field in ['code_station', 'code_bss', 'code', 'id']:
+            if field in schema:
+                primary_keys.append(field)
+                break
+
+    return primary_keys if primary_keys else ['id']
+

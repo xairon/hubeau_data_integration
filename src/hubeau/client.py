@@ -5,7 +5,7 @@ import yaml
 from pathlib import Path
 from typing import Iterator, Dict, Any, List, Optional
 import dlt
-from dlt_pipeline.sources import hubeau_source, load_config
+from src.dlt_pipeline.sources import hubeau_source, load_config
 
 
 class HubeauClient:
@@ -157,17 +157,27 @@ class HubeauClient:
         # Récupérer la configuration
         config = self.get_config(api, endpoint)
 
-        # Créer la source DLT
-        source = hubeau_source(
-            config_dict=config,
-            start_date=start_date,
-            end_date=end_date,
-            **params
-        )
+        # Sauvegarder la config dans un fichier temporaire
+        import tempfile
+        import os
 
-        # Exécuter la source et yield les données
-        for resource in source.resources.values():
-            yield from resource
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+            yaml.dump(config, f)
+            temp_config_path = f.name
+
+        try:
+            # Créer la source DLT
+            source = hubeau_source(
+                config_path=temp_config_path,
+                **params
+            )
+
+            # Exécuter la source et yield les données
+            for resource in source:
+                yield from resource
+        finally:
+            # Nettoyer le fichier temporaire
+            os.unlink(temp_config_path)
 
     def save_to_postgres(
         self,

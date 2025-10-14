@@ -5,8 +5,8 @@ import dlt
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import yaml
-from dlt_pipeline.sources import hubeau_source
-from dlt_pipeline.destinations import get_destination
+from src.dlt_pipeline.sources import hubeau_source
+from src.dlt_pipeline.destinations import get_destination
 
 
 class HubeauPipeline:
@@ -139,9 +139,7 @@ class HubeauPipeline:
 
         # Créer la source DLT
         source = hubeau_source(
-            config_dict=config,
-            start_date=start_date,
-            end_date=end_date,
+            config_path=str(config_path),
             **kwargs
         )
 
@@ -343,9 +341,15 @@ class HubeauPipeline:
             with open(config_path, encoding='utf-8') as f:
                 config = yaml.safe_load(f)
 
-            # Utiliser la validation de sources.py
-            from dlt_pipeline.sources import validate_config
-            return validate_config(config)
+            # Validation basique de la config
+            errors = []
+            if not config.get('api'):
+                errors.append("Missing 'api' section in config")
+            if not config.get('api', {}).get('name'):
+                errors.append("Missing 'api.name' in config")
+            if not config.get('api', {}).get('endpoint'):
+                errors.append("Missing 'api.endpoint' in config")
+            return errors
 
         except FileNotFoundError as e:
             return [str(e)]
