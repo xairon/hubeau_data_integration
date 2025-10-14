@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .http_client import HttpClient
 from .slicing import build_slices
-from .transformers import apply_transformers
+from .transformers import get_transformer, create_reject_duplicates_transformer
 
 logger = logging.getLogger(__name__)
 
@@ -180,18 +180,55 @@ def hubeau_source(
                 records_count = len(slice_records)
 
                 if records_count > 0:
-                    # Appliquer les transformers
-                    transformed = apply_transformers(
-                        iter(slice_records),
-                        transformer_configs,
-                        api_name=resource_config["name"]
-                    )
-
-                    # Yield les données transformées
-                    for record in transformed:
-                        # Ajouter metadata
+                    # Ajouter metadata à tous les records AVANT le pipeline
+                    for record in slice_records:
                         record["_slice_id"] = slice_obj.slice_id
                         record["_scope"] = slice_obj.scope
+
+                    # Créer la source de données (liste Python - compatible avec pipe DLT)
+                    data_source = slice_records
+
+                    # Composer les transformers avec le pipe operator |
+                    for transformer_config in transformer_configs:
+                        if isinstance(transformer_config, str):
+                            transformer_name = transformer_config
+                            params = {}
+                        else:
+                            transformer_name = list(transformer_config.keys())[0]
+                            params = transformer_config[transformer_name] or {}
+
+                        # Ajouter les paramètres obligatoires depuis la resource config
+                        if transformer_name == "validate_primary_keys":
+                            if "primary_keys" not in params:
+                                params["primary_keys"] = resource_config.get("primary_key", [])
+                            if "api_name" not in params:
+                                params["api_name"] = resource_config["name"]
+
+                        elif transformer_name == "reject_duplicates":
+                            if "key_fields" not in params:
+                                params["key_fields"] = resource_config.get("primary_key", [])
+                            if "api_name" not in params:
+                                params["api_name"] = resource_config["name"]
+
+                        elif transformer_name in ["clean_text", "convert_types"]:
+                            if "api_name" not in params:
+                                params["api_name"] = resource_config["name"]
+
+                        # Appliquer le transformer avec pipe operator
+                        if transformer_name == "reject_duplicates":
+                            # Cas spécial: factory pour state partagé
+                            transformer = create_reject_duplicates_transformer(
+                                key_fields=params.get("key_fields", []),
+                                api_name=params.get("api_name", "unknown")
+                            )
+                            data_source = data_source | transformer
+                        else:
+                            # Cas normal: récupérer et appliquer
+                            transformer_func = get_transformer(transformer_name)
+                            data_source = data_source | transformer_func(**params)
+
+                    # Consommer le pipeline DLT et yielder les résultats
+                    for record in data_source:
                         yield record
                         total_records += 1
 
