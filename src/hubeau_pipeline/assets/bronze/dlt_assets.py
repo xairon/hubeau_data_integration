@@ -271,6 +271,12 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         state_store = cfg.get("state_store", "s3://bronze/_state")
         
         # Créer le pipeline DLT
+        # ✅ FIX: Déduire dataset_name du source.name pour éviter bronze/bronze
+        # Exemple: source.name="piezometry" → dataset_name="piezometry_api"
+        # Ça correspond aux paths dans station_minio.py (ex: "piezometry_api/piezometry_stations/")
+        source_name = cfg.get("source", {}).get("name", "unknown")
+        dataset_name = cfg.get("dataset_name", f"{source_name}_api")
+
         pipeline = dlt.pipeline(
             pipeline_name="hubeau_pipeline",
             destination=dlt.destinations.filesystem(
@@ -282,7 +288,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
                     "region_name": minio_region,
                 }
             ),
-            dataset_name=cfg.get("dataset_name", "bronze")
+            dataset_name=dataset_name
         )
 
         # Créer la source Hub'Eau
@@ -373,13 +379,10 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     context.log.info(f"   • Data written to MinIO: ✅ (see DLT logs above for detailed metrics)")
 
     # Check if we have load packages (indicates successful data ingestion)
-    destinations_config = cfg.get("destinations", {})
-    default_dataset = destinations_config.get("filesystem", {}).get("dataset_name", "bronze")
-
     if stats['packages'] > 0:
         context.log.info(f"✅ Data successfully ingested for {resource_name}")
         context.log.info(f"   • Detailed metrics available in DLT logs above")
-        context.log.info(f"   • Files stored in MinIO bucket: bronze/{default_dataset}")
+        context.log.info(f"   • Files stored in MinIO path: bronze/{dataset_name}/{resource_name}/")
         stats["rows"] = "see_dlt_logs"  # Indicate that metrics are in DLT logs
     else:
         context.log.warning(f"⚠️ No data ingested for {resource_name}! This might indicate:")

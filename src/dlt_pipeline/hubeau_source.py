@@ -22,12 +22,17 @@ from typing import Iterator, Optional, Dict, Any, List
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import yaml
+import logging
 import dlt
 from dlt.sources.helpers.rest_client import RESTClient
 from dlt.sources.helpers.rest_client.paginators import PageNumberPaginator
 from dlt.sources.helpers.requests import Session
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Configure logger pour Hub'Eau source
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 # ============================================
@@ -262,6 +267,8 @@ def slice_global(
     Yields:
         Records extraits avec métadonnée _slice_mode
     """
+    logger.info(f"🌍 Starting GLOBAL slicing for endpoint: {endpoint}")
+
     pagination_config = extraction_config.get('pagination', {})
     page_size = pagination_config.get('page_size', 5000)
 
@@ -275,22 +282,34 @@ def slice_global(
     default_params = extraction_config.get('default_params', {})
     params.update(default_params)
 
+    logger.info(f"📄 Pagination config: page_size={page_size}, params={params}")
+
     # Pagination manuelle (Hub'Eau commence à page=1)
     page = 1
+    total_records = 0
+
     while True:
         # Ajouter le numéro de page
         page_params = {**params, 'page': page}
 
         # Faire la requête
+        logger.info(f"📡 HTTP GET {client.base_url}{endpoint} page={page}/{page_params}")
         response = client.get(endpoint, params=page_params)
+        logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
         page_data = response.json()
 
         # Extraire les records
         records = extract_records(page_data, extraction_config)
+        record_count = len(records)
+        total_records += record_count
 
         # Si pas de records, on arrête
         if not records:
+            logger.info(f"⚠️ No records on page {page}, stopping pagination")
             break
+
+        logger.info(f"📊 Extracted {record_count} records from page {page}")
 
         # Yield les records
         for record in records:
@@ -299,10 +318,15 @@ def slice_global(
 
         # Vérifier si on a atteint la dernière page
         last_page = page_data.get('last_page', page_data.get('count', 1))
+        logger.info(f"📖 Page {page}/{last_page} completed ({record_count} records)")
+
         if page >= last_page:
+            logger.info(f"✅ Reached last page ({last_page})")
             break
 
         page += 1
+
+    logger.info(f"🏁 GLOBAL slicing completed: {total_records} total records extracted")
 
 
 def slice_by_department(
@@ -330,8 +354,18 @@ def slice_by_department(
     pagination_config = extraction_config.get('pagination', {})
     page_size = pagination_config.get('page_size', 5000)
 
+    logger.info(f"🗺️ Starting DEPARTMENT slicing for endpoint: {endpoint}")
+    logger.info(f"📍 Processing {len(departments)} departments with param '{param_name}'")
+    logger.info(f"📄 Pagination config: page_size={page_size}")
+
+    total_records_all = 0
+    dept_index = 0
+
     # Pour chaque département
     for dept in departments:
+        dept_index += 1
+        logger.info(f"🏛️ Department {dept_index}/{len(departments)}: {dept}")
+
         # Construire les paramètres de base
         params = {
             'format': 'json',
@@ -345,20 +379,30 @@ def slice_by_department(
 
         # Pagination manuelle pour ce département
         page = 1
+        dept_total_records = 0
+
         while True:
             # Ajouter le numéro de page
             page_params = {**params, 'page': page}
 
             # Faire la requête
+            logger.info(f"📡 HTTP GET {client.base_url}{endpoint} dept={dept} page={page}/{page_params}")
             response = client.get(endpoint, params=page_params)
+            logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
             page_data = response.json()
 
             # Extraire les records
             records = extract_records(page_data, extraction_config)
+            record_count = len(records)
+            dept_total_records += record_count
 
             # Si pas de records, passer au département suivant
             if not records:
+                logger.info(f"⚠️ No records on page {page} for dept {dept}, moving to next department")
                 break
+
+            logger.info(f"📊 Extracted {record_count} records from page {page} for dept {dept}")
 
             # Yield les records
             for record in records:
@@ -367,10 +411,18 @@ def slice_by_department(
 
             # Vérifier si on a atteint la dernière page
             last_page = page_data.get('last_page', page_data.get('count', 1))
+            logger.info(f"📖 Page {page}/{last_page} completed for dept {dept} ({record_count} records)")
+
             if page >= last_page:
+                logger.info(f"✅ Reached last page ({last_page}) for dept {dept}")
                 break
 
             page += 1
+
+        total_records_all += dept_total_records
+        logger.info(f"✅ Department {dept} completed: {dept_total_records} records extracted")
+
+    logger.info(f"🏁 DEPARTMENT slicing completed: {total_records_all} total records across {len(departments)} departments")
 
 
 def slice_by_station_month(
@@ -406,6 +458,10 @@ def slice_by_station_month(
 
     station_codes = list(stations_data.keys())
 
+    logger.info(f"🏢 Starting STATION_MONTH_CHUNKED slicing for endpoint: {endpoint}")
+    logger.info(f"📊 Total stations: {len(station_codes)}, chunk_size: {chunk_size}, page_size: {page_size}")
+    logger.info(f"🔑 Station param: '{station_param}', date params: {start_param}/{end_param}")
+
     # Récupérer la dernière date chargée depuis le state DLT
     last_loaded_month = None
     if incremental_state and hasattr(incremental_state, 'last_value'):
@@ -420,29 +476,47 @@ def slice_by_station_month(
                 elif hasattr(last_value, 'strftime'):
                     # Si c'est un objet date
                     last_loaded_month = last_value.strftime("%Y-%m")
-            except:
+                logger.info(f"🔄 Incremental loading: last_loaded_month = {last_loaded_month}")
+            except Exception as e:
                 # Si erreur, on recharge tout (mode safe)
+                logger.warning(f"⚠️ Error parsing incremental state: {e}, reloading all data")
                 last_loaded_month = None
+    else:
+        logger.info(f"📥 No incremental state, loading all data")
+
+    total_records_all = 0
+    total_chunks = (len(station_codes) + chunk_size - 1) // chunk_size
+    chunk_index = 0
+    skipped_months = 0
 
     # Chunker les stations
     for i in range(0, len(station_codes), chunk_size):
         chunk = station_codes[i:i + chunk_size]
+        chunk_index += 1
+
+        logger.info(f"📦 Processing chunk {chunk_index}/{total_chunks} ({len(chunk)} stations)")
 
         # Pour chaque mois actif dans ce chunk
         months_in_chunk = set()
         for code in chunk:
             months_in_chunk.update(stations_data[code])
 
-        for month in sorted(months_in_chunk):
+        logger.info(f"📅 Chunk has {len(months_in_chunk)} unique months to process")
+
+        for month_idx, month in enumerate(sorted(months_in_chunk), 1):
             # Skip les mois déjà chargés
             if last_loaded_month:
                 # Comparer les mois : "2024-01" vs "2024-03"
                 if month < last_loaded_month:
                     # Ce mois est avant le dernier mois chargé -> skip
+                    skipped_months += 1
+                    logger.debug(f"⏭️ Skipping month {month} (before last_loaded {last_loaded_month})")
                     continue
                 elif month == last_loaded_month:
                     # Même mois -> skip aussi (déjà chargé)
                     # Note : on pourrait charger quand même pour updates
+                    skipped_months += 1
+                    logger.debug(f"⏭️ Skipping month {month} (equals last_loaded)")
                     continue
 
             # Filtrer les stations actives pour ce mois
@@ -452,7 +526,10 @@ def slice_by_station_month(
             ]
 
             if not active_stations:
+                logger.debug(f"⚠️ No active stations for month {month} in chunk {chunk_index}, skipping")
                 continue
+
+            logger.info(f"📆 Month {month_idx}/{len(months_in_chunk)}: {month} with {len(active_stations)} active stations")
 
             # Construire les paramètres
             params = {
@@ -465,15 +542,26 @@ def slice_by_station_month(
 
             # Pagination manuelle pour ce chunk
             page = 1
+            month_total_records = 0
+
             while True:
                 page_params = {**params, 'page': page}
 
+                logger.info(f"📡 HTTP GET {client.base_url}{endpoint} chunk={chunk_index} month={month} page={page} stations={len(active_stations)}")
                 response = client.get(endpoint, params=page_params)
+                logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
                 page_data = response.json()
 
                 records = extract_records(page_data, extraction_config)
+                record_count = len(records)
+                month_total_records += record_count
+
                 if not records:
+                    logger.info(f"⚠️ No records on page {page} for chunk {chunk_index} month {month}, moving to next month")
                     break
+
+                logger.info(f"📊 Extracted {record_count} records from page {page} for month {month}")
 
                 for record in records:
                     record['_chunk_month'] = month
@@ -482,10 +570,22 @@ def slice_by_station_month(
 
                 # Vérifier dernière page
                 last_page = page_data.get('last_page', page_data.get('count', 1))
+                logger.info(f"📖 Page {page}/{last_page} completed for month {month} ({record_count} records)")
+
                 if page >= last_page:
+                    logger.info(f"✅ Reached last page ({last_page}) for month {month}")
                     break
 
                 page += 1
+
+            total_records_all += month_total_records
+            logger.info(f"✅ Month {month} completed: {month_total_records} records extracted")
+
+        logger.info(f"✅ Chunk {chunk_index}/{total_chunks} completed")
+
+    logger.info(f"🏁 STATION_MONTH_CHUNKED slicing completed: {total_records_all} total records extracted")
+    if skipped_months > 0:
+        logger.info(f"⏭️ Skipped {skipped_months} months due to incremental loading")
 
 
 def slice_by_datetime(
@@ -521,17 +621,35 @@ def slice_by_datetime(
     period_days = extraction_config.get('period_days', 30)
     pagination_config = extraction_config.get('pagination', {})
     page_size = pagination_config.get('page_size', 5000)
+    start_param = temporal_config.get('start_param', 'date_debut')
+    end_param = temporal_config.get('end_param', 'date_fin')
+
+    logger.info(f"📅 Starting DATETIME slicing for endpoint: {endpoint}")
+    logger.info(f"🗓️ Date range: {start_date} to {end_date} ({(end_date - start_date).days} days)")
+    logger.info(f"⏱️ Period chunk size: {period_days} days, page_size: {page_size}")
+    logger.info(f"🔑 Date params: {start_param}/{end_param}")
+
+    # Calculer le nombre total de périodes
+    total_days = (end_date - start_date).days
+    total_periods = (total_days + period_days - 1) // period_days
+    logger.info(f"📊 Total periods to process: {total_periods}")
 
     current = start_date
+    period_index = 0
+    total_records_all = 0
 
     while current < end_date:
+        period_index += 1
         next_date = min(current + timedelta(days=period_days), end_date)
+        period_days_actual = (next_date - current).days
+
+        logger.info(f"📆 Period {period_index}/{total_periods}: {current} to {next_date} ({period_days_actual} days)")
 
         params = {
             'format': 'json',
             'size': page_size,
-            temporal_config.get('start_param', 'date_debut'): current.isoformat(),
-            temporal_config.get('end_param', 'date_fin'): next_date.isoformat()
+            start_param: current.isoformat(),
+            end_param: next_date.isoformat()
         }
 
         # Ajouter les paramètres par défaut
@@ -540,15 +658,26 @@ def slice_by_datetime(
 
         # Pagination manuelle pour cette période
         page = 1
+        period_total_records = 0
+
         while True:
             page_params = {**params, 'page': page}
 
+            logger.info(f"📡 HTTP GET {client.base_url}{endpoint} period={period_index} page={page} dates={current}...{next_date}")
             response = client.get(endpoint, params=page_params)
+            logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
             page_data = response.json()
 
             records = extract_records(page_data, extraction_config)
+            record_count = len(records)
+            period_total_records += record_count
+
             if not records:
+                logger.info(f"⚠️ No records on page {page} for period {current}...{next_date}, moving to next period")
                 break
+
+            logger.info(f"📊 Extracted {record_count} records from page {page} for period {current}...{next_date}")
 
             for record in records:
                 record['_slice_start'] = current.isoformat()
@@ -557,12 +686,20 @@ def slice_by_datetime(
 
             # Vérifier dernière page
             last_page = page_data.get('last_page', page_data.get('count', 1))
+            logger.info(f"📖 Page {page}/{last_page} completed for period {current}...{next_date} ({record_count} records)")
+
             if page >= last_page:
+                logger.info(f"✅ Reached last page ({last_page}) for period {current}...{next_date}")
                 break
 
             page += 1
 
+        total_records_all += period_total_records
+        logger.info(f"✅ Period {period_index}/{total_periods} completed: {period_total_records} records extracted")
+
         current = next_date + timedelta(days=1)
+
+    logger.info(f"🏁 DATETIME slicing completed: {total_records_all} total records extracted across {period_index} periods")
 
 
 # ============================================
