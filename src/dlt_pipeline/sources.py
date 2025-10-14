@@ -366,6 +366,11 @@ def extract_with_page_pagination(
             logger.error(f"Error fetching page {page}: {e}")
             if page == 1:
                 raise
+            # ✅ Si erreur sur page > 1, c'est probablement une limite API
+            logger.warning(
+                f"Pagination stopped at page {page} (likely API limit). "
+                f"Consider increasing page_size to fetch all data in one request."
+            )
             break
 
 
@@ -597,7 +602,10 @@ def run_pipeline(
             config["extraction"]["stations"] = stations_data
             logger.warning(f"✅ Injected {len(stations_data)} stations into extraction config for {config['resource']['name']}")
     else:
-        logger.warning(f"⚠️ No stations_data provided for {config['resource']['name']} with mode {config['extraction'].get('slicing_mode')}")
+        # ✅ Warning seulement si le mode NÉCESSITE des stations
+        slicing_mode = config["extraction"].get("slicing_mode")
+        if slicing_mode in ["station_month_chunked", "station_month"]:
+            logger.warning(f"⚠️ No stations_data provided for {config['resource']['name']} with mode {slicing_mode}")
 
     # Injecter les dates de partition si fournies
     if partition_date:

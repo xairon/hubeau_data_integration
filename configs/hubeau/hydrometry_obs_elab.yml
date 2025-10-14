@@ -22,7 +22,7 @@ extraction:
   end_param: date_fin_obs_elab
   pagination:
     type: page_based
-    page_size: 20000
+    page_size: 5000
     max_pages: null
   default_params:
     format: json
