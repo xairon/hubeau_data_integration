@@ -15,7 +15,7 @@ from dagster import ScheduleDefinition
 # )
 
 # Schedules nouvelle architecture dlt (recommended)
-from ..jobs.dlt_jobs import (
+from ..jobs import (
     sync_all_stations,
     sync_all_yearly_data,
 )

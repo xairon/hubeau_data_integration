@@ -44,6 +44,12 @@ extraction:
   default_params:
     format: json
   records_path: $.data
+# Configuration pour incremental loading
+temporal_filter:
+  date_field: timestamp_mesure  # Champ utilisé pour l'incremental dans les données
+  start_param: date_debut_mesure  # Paramètre API pour date début
+  end_param: date_fin_mesure      # Paramètre API pour date fin
+  start_date: "2020-01-01"        # Date initiale pour premier run
 performance:
   parallelism: 5
   chunk_size: 10000

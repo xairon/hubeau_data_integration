@@ -353,10 +353,43 @@ def process_station_month_chunks(
     stations_data: Dict[str, List[str]],
     incremental_state
 ) -> Iterator[Dict[str, Any]]:
-    """Traite les chunks station/mois pour contourner les limites d'URL"""
+    """
+    Traite les chunks station/mois pour contourner les limites d'URL.
+
+    Supporte l'incremental loading : les mois déjà chargés sont automatiquement
+    skippés en utilisant le state DLT (incremental_state.last_value).
+
+    Args:
+        client: RESTClient DLT pour les requêtes HTTP
+        endpoint_path: Chemin de l'endpoint API
+        extraction_config: Configuration d'extraction
+        stations_data: Dict {station_code: [months]} des stations et mois actifs
+        incremental_state: State DLT pour tracking incremental
+
+    Yields:
+        Records extraits de l'API avec métadonnées de chunking
+    """
 
     chunk_size = extraction_config.get('chunk_size', 80)
     station_codes = list(stations_data.keys())
+
+    # Récupérer la dernière date chargée depuis le state DLT
+    last_loaded_month = None
+    if incremental_state and hasattr(incremental_state, 'last_value'):
+        last_value = incremental_state.last_value
+        if last_value:
+            # last_value est une date string comme "2024-03-15" ou un objet date
+            # On extrait le mois : "2024-03"
+            try:
+                if isinstance(last_value, str):
+                    # Format attendu : "YYYY-MM-DD" -> extraire "YYYY-MM"
+                    last_loaded_month = last_value[:7]  # "2024-03-15" -> "2024-03"
+                elif hasattr(last_value, 'strftime'):
+                    # Si c'est un objet date
+                    last_loaded_month = last_value.strftime("%Y-%m")
+            except:
+                # Si erreur, on recharge tout (mode safe)
+                last_loaded_month = None
 
     # Chunker les stations
     for i in range(0, len(station_codes), chunk_size):
@@ -368,6 +401,17 @@ def process_station_month_chunks(
             months_in_chunk.update(stations_data[code])
 
         for month in sorted(months_in_chunk):
+            # Skip les mois déjà chargés
+            if last_loaded_month:
+                # Comparer les mois : "2024-01" vs "2024-03"
+                if month < last_loaded_month:
+                    # Ce mois est avant le dernier mois chargé -> skip
+                    continue
+                elif month == last_loaded_month:
+                    # Même mois -> skip aussi (déjà chargé)
+                    # Note : on pourrait charger quand même pour updates
+                    continue
+
             # Filtrer les stations actives pour ce mois
             active_stations = [
                 code for code in chunk

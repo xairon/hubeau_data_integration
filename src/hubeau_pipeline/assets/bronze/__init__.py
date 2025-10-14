@@ -43,9 +43,9 @@ from .dlt_assets import (
     prelevements_points_reference,
 )
 
-# Sources externes (référentiels géographiques et thesaurus)
-from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
-from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
+# Sources externes (référentiels géographiques et thesaurus) - SUPPRIMÉS
+# from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
+# from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 
 # Assets de production Hub'Eau (ancienne architecture - supprimés)
 # hubeau_bronze_assets_old = []
@@ -79,14 +79,14 @@ hubeau_bronze_assets_dlt = [
     temperature_chroniques,
 ]
 
-# Assets externes (référentiels complémentaires)
-external_bronze_assets = [
-    bdlisa_geographic_bronze_real,  # BDLISA : Formations géologiques aquifères
-    sandre_thesaurus_bronze_real     # Sandre : Nomenclatures et référentiels
-]
+# Assets externes (référentiels complémentaires) - SUPPRIMÉS
+# external_bronze_assets = [
+#     bdlisa_geographic_bronze_real,  # BDLISA : Formations géologiques aquifères
+#     sandre_thesaurus_bronze_real     # Sandre : Nomenclatures et référentiels
+# ]
 
 # ✅ NOUVELLE ARCHITECTURE: Utiliser les assets dlt par défaut
-all_bronze_assets = hubeau_bronze_assets_dlt + external_bronze_assets
+all_bronze_assets = hubeau_bronze_assets_dlt
 
 __all__ = [
     # Assets Hub'Eau dlt (nouvelle architecture)
@@ -114,23 +114,6 @@ __all__ = [
     "hydrobio_stations_reference",
     "prelevements_ouvrages_reference",
     "prelevements_points_reference",
-    
-    # Assets Hub'Eau Bronze (ancienne architecture - deprecated)
-    "hubeau_bronze_assets_old",
-    "hubeau_hydrometry_bronze",
-    "hubeau_piezometry_bronze",
-    "hubeau_water_quality_surface_bronze",
-    "hubeau_water_quality_groundwater_bronze",
-    "hubeau_temperature_bronze",
-    "hubeau_ecoulement_bronze",
-    "hubeau_hydrobiology_bronze",
-    "hubeau_prelevements_bronze",
-    "hubeau_ingestion_summary",
-    
-    # Assets externes (référentiels)
-    "external_bronze_assets",
-    "bdlisa_geographic_bronze_real",
-    "sandre_thesaurus_bronze_real",
     
     # Tous les assets
     "all_bronze_assets"

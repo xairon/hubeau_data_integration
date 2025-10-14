@@ -5,10 +5,10 @@ Surveillance des erreurs et alertes
 
 from dagster import RunRequest, SensorEvaluationContext, SkipReason, sensor
 
-from src.hubeau_pipeline.jobs import sync_all_yearly_data
+# NOTE: Le job sera spécifié lors de l'appel du sensor si nécessaire
+# Retirer 'job=' évite les doublons dans les définitions Dagster
 
 @sensor(
-    job=sync_all_yearly_data,
     name="error_detection_sensor",
     description="Détecte les erreurs dans les pipelines"
 )
