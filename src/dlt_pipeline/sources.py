@@ -111,13 +111,12 @@ def create_rest_client(
     pagination_config = extraction_config.get('pagination', {})
     page_size = pagination_config.get('page_size', 5000)
 
-    # Créer le paginator approprié
+    # Créer le paginator approprié selon la documentation DLT
+    # PageNumberPaginator ne supporte PAS size_param
+    # Le paramètre size doit être passé dans les params de la requête
+    # Hub'Eau retourne "last_page" pour indiquer le nombre total de pages
     paginator = PageNumberPaginator(
-        page_param="page",
-        size_param="size",
-        total_pages_param="last_page",
-        page_size=page_size,
-        page_start=1  # Hub'Eau commence à page 1
+        total_path="last_page"
     )
 
     # Headers avec API key si fournie
@@ -134,6 +133,19 @@ def create_rest_client(
     )
 
     return client
+
+
+def get_base_params(extraction_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Retourne les paramètres de base pour les requêtes Hub'Eau incluant la pagination.
+    """
+    pagination_config = extraction_config.get('pagination', {})
+    page_size = pagination_config.get('page_size', 5000)
+    
+    return {
+        "format": "json",
+        "size": page_size
+    }
 
 
 def create_stations_resource(
@@ -166,10 +178,9 @@ def create_stations_resource(
             param_name = extraction_config.get('param', 'code_departement')
 
             for dept in departments:
-                params = {
-                    param_name: dept,
-                    "format": "json"
-                }
+                # Utiliser get_base_params pour inclure size
+                params = get_base_params(extraction_config)
+                params[param_name] = dept
 
                 # Ajouter paramètres par défaut
                 default_params = extraction_config.get('default_params', {})
@@ -191,7 +202,7 @@ def create_stations_resource(
                         yield record
         else:
             # Mode global - une seule requête paginée
-            params = {"format": "json"}
+            params = get_base_params(extraction_config)
             default_params = extraction_config.get('default_params', {})
             params.update(default_params)
 
@@ -258,10 +269,8 @@ def create_chroniques_resource(
             )
         else:
             # Mode standard avec incremental
-            params = {
-                "format": "json",
-                temporal_config.get('start_param', 'date_debut'): last_value.start_value
-            }
+            params = get_base_params(extraction_config)
+            params[temporal_config.get('start_param', 'date_debut')] = last_value.start_value
 
             # Ajouter date de fin si configurée
             if temporal_config.get('end_param'):
@@ -297,7 +306,7 @@ def create_observations_resource(
         """Resource pour observations"""
 
         endpoint_path = f"/v1/{api_name}/{endpoint_name}"
-        params = {"format": "json"}
+        params = get_base_params(extraction_config)
 
         # Ajouter filtres temporels si configurés
         temporal_config = config.get('temporal_filter', {})
@@ -336,7 +345,11 @@ def create_generic_resource(
         """Resource générique"""
 
         endpoint_path = f"/v1/{api_name}/{endpoint_name}"
-        params = extraction_config.get('default_params', {"format": "json"})
+        params = get_base_params(extraction_config)
+        
+        # Ajouter les paramètres par défaut de la config
+        default_params = extraction_config.get('default_params', {})
+        params.update(default_params)
 
         for page_data in client.paginate(endpoint_path, params=params):
             records = extract_records(page_data, extraction_config)
@@ -421,13 +434,13 @@ def process_station_month_chunks(
             if not active_stations:
                 continue
 
-            # Construire les paramètres
-            params = {
+            # Construire les paramètres avec size
+            params = get_base_params(extraction_config)
+            params.update({
                 "code_bss": ",".join(active_stations),
                 "date_debut_mesure": f"{month}-01",
-                "date_fin_mesure": f"{month}-31",
-                "format": "json"
-            }
+                "date_fin_mesure": f"{month}-31"
+            })
 
             # Paginate
             for page_data in client.paginate(endpoint_path, params=params):
@@ -461,11 +474,11 @@ def process_datetime_slices(
     while current < end_date:
         next_date = min(current + timedelta(days=period_days), end_date)
 
-        params = {
+        params = get_base_params(extraction_config)
+        params.update({
             temporal_config.get('start_param', 'date_debut'): current.isoformat(),
-            temporal_config.get('end_param', 'date_fin'): next_date.isoformat(),
-            "format": "json"
-        }
+            temporal_config.get('end_param', 'date_fin'): next_date.isoformat()
+        })
 
         # Paginate pour cette période
         for page_data in client.paginate(endpoint_path, params=params):
