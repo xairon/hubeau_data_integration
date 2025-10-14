@@ -17,14 +17,16 @@ resource:
 extraction:
   slicing_mode: station_month_chunked
   station_param: code_station_hydrobio
-  station_chunk_size: 20
+  station_chunk_size: 50
   start_param: date_debut_prelevement
   end_param: date_fin_prelevement
   pagination:
     type: page_based
     page_size: 20000
     max_pages: null
-  default_params: {}
+  default_params:
+    format: json
+  records_path: $.data
 performance:
   parallelism: 5
   chunk_size: 10000

@@ -396,6 +396,12 @@ def build_slices(
         station_chunk_size = slicer_cfg.get("station_chunk_size", 10)
         station_param = slicer_cfg.get("station_param", "code_station")
 
+        # DEBUG LOG pour vérifier le chunk_size utilisé
+        import logging
+        logger = logging.getLogger(__name__)
+        resource_name = cfg.get('resource', {}).get('name', 'unknown')
+        logger.warning(f"DEBUG: {resource_name} using station_chunk_size={station_chunk_size}")
+
         # Paramètres temporels
         start_date = override_start or slicer_cfg.get("start_date")
         end_offset_days = slicer_cfg.get("end_offset_days", 1)

@@ -37,7 +37,9 @@ extraction:
     type: page_based
     page_size: 20000
     max_pages: null
-  default_params: {}
+  default_params:
+    format: json
+  records_path: $.data
 performance:
   parallelism: 5
   chunk_size: 10000

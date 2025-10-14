@@ -129,7 +129,7 @@ def hubeau_source(
 
         # Créer les slices selon le mode de slicing
         slices = list(build_slices(full_config))
-        logger.info(f"Created {len(slices)} slices with mode {slicer.get('mode', 'global')}")
+        logger.warning(f"DEBUG: Created {len(slices)} slices with mode {slicer.get('mode', 'global')} for {resource_config['name']}")
 
         # Stats pour logging
         total_records = 0
