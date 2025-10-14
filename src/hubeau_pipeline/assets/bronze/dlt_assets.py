@@ -75,10 +75,19 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
     """
     context.log.info(f"🔍 Récupération des stations {station_type} pour la partition {partition_date}")
 
+    # ✅ DEBUG: Vérifier quelle fonction est utilisée
+    context.log.warning(f"🔍 DEBUG: _extract_station_codes_from_minio function = {_extract_station_codes_from_minio}")
+
     # ✅ STRATÉGIE OPTIMISÉE AVEC FALLBACK AUTOMATIQUE:
     # 1. Récupérer TOUTES les stations depuis MinIO (référentiel complet)
-    all_stations = _extract_station_codes_from_minio(station_type)
-    context.log.info(f"📂 {len(all_stations)} stations total dans référentiel MinIO")
+    try:
+        all_stations = _extract_station_codes_from_minio(station_type)
+        context.log.info(f"📂 {len(all_stations)} stations total dans référentiel MinIO")
+    except Exception as e:
+        context.log.error(f"❌ Erreur lors de l'appel à _extract_station_codes_from_minio: {e}")
+        import traceback
+        context.log.error(f"   Traceback: {traceback.format_exc()}")
+        all_stations = []
 
     stations_data: Dict[str, List[str]] = {}
 
@@ -280,17 +289,35 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         source_name = cfg.get("source", {}).get("name", "unknown")
         dataset_name = cfg.get("dataset_name", f"{source_name}_api")
 
+        # ✅ NOUVEAU: Utiliser le module destinations.py pour respecter la config YAML
+        from src.dlt_pipeline.destinations import get_filesystem_destination
+
+        # Préparer la configuration filesystem depuis YAML
+        filesystem_config = cfg.get("destinations", {}).get("filesystem", {})
+
+        # Override/ajouter les credentials MinIO (priorité aux env vars)
+        filesystem_config["credentials"] = {
+            "aws_access_key_id": minio_user,
+            "aws_secret_access_key": minio_pass,
+            "endpoint_url": minio_endpoint,
+            "region_name": minio_region,
+        }
+
+        # Assurer un bucket_url par défaut si non spécifié dans YAML
+        if "bucket_url" not in filesystem_config:
+            filesystem_config["bucket_url"] = "s3://bronze"
+
+        # Log de la config pour debug
+        context.log.info(f"📦 Filesystem config: bucket={filesystem_config.get('bucket_url')}, "
+                        f"format={filesystem_config.get('file_format', 'parquet (default)')}, "
+                        f"layout={filesystem_config.get('layout', 'default')}")
+
+        # Créer la destination avec file_format, layout depuis YAML
+        destination = get_filesystem_destination(filesystem_config)
+
         pipeline = dlt.pipeline(
             pipeline_name="hubeau_pipeline",
-            destination=dlt.destinations.filesystem(
-                bucket_url="s3://bronze",
-                credentials={
-                    "aws_access_key_id": minio_user,
-                    "aws_secret_access_key": minio_pass,
-                    "endpoint_url": minio_endpoint,
-                    "region_name": minio_region,
-                }
-            ),
+            destination=destination,
             dataset_name=dataset_name
         )
 

@@ -143,11 +143,12 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
         s3 = _create_s3_filesystem()
 
         # Lister les fichiers parquet
+        # Note: minio_path contient déjà "bronze/" donc pas besoin de le préfixer
         try:
-            files = s3.get_file_info(pafs.FileSelector(f"bronze/{minio_path}", recursive=True))
-        except Exception:
-            # Si le path n'existe pas, essayer sans le prefix "bronze/"
             files = s3.get_file_info(pafs.FileSelector(minio_path, recursive=True))
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du listing des fichiers dans {minio_path}: {e}")
+            raise
 
         parquet_files = [f.path for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
 
@@ -228,10 +229,12 @@ def filter_active_stations_for_period(stations: List[str], partition_date: str, 
         s3 = _create_s3_filesystem()
 
         # Lister les fichiers parquet
+        # Note: minio_path contient déjà "bronze/" donc pas besoin de le préfixer
         try:
-            files = s3.get_file_info(pafs.FileSelector(f"bronze/{minio_path}", recursive=True))
-        except Exception:
             files = s3.get_file_info(pafs.FileSelector(minio_path, recursive=True))
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du listing des fichiers dans {minio_path}: {e}")
+            raise
 
         parquet_files = [f.path for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
 
