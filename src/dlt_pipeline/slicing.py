@@ -383,7 +383,15 @@ def build_slices(
         # ✅ OPTIMISATION: Ne génère que les slices pour les mois où les stations ont réellement des données
         stations = _resolve_reference_values(cfg, "stations")
         if not stations:
-            raise ValueError("station_month_chunked slicer requires stations")
+            # ✅ Gérer gracieusement le cas où aucune station n'est disponible
+            # Au lieu de crasher, retourner une liste vide de slices
+            import logging
+            logger = logging.getLogger(__name__)
+            resource_name = cfg.get('resource', {}).get('name', 'unknown')
+            logger.warning(f"No stations provided for {resource_name} with station_month_chunked mode")
+            logger.warning("This could indicate no active stations for this period or a configuration issue")
+            # Return empty list - pipeline will complete without errors but no data
+            return []
 
         station_chunk_size = slicer_cfg.get("station_chunk_size", 10)
         station_param = slicer_cfg.get("station_param", "code_station")

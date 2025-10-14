@@ -239,9 +239,9 @@ def filter_active_stations_for_period(
             },
             "piezometry": {
                 "base_url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
-                "path": "/chroniques",
-                "start_param": "date_debut_mesure",
-                "end_param": "date_fin_mesure",
+                "path": "/stations",  # ✅ Utiliser /stations au lieu de /chroniques (ne nécessite pas code_bss)
+                "start_param": "date_recherche",  # ✅ /stations utilise date_recherche
+                "end_param": None,  # ✅ /stations n'a pas de paramètre de fin
                 "station_field": "code_bss"
             },
             "quality_rivers": {
@@ -297,9 +297,18 @@ def filter_active_stations_for_period(
                 "format": "json",
                 "size": 20000,  # Taille maximale pour récupérer plus de stations
                 "page": page,
-                config["start_param"]: start_date,
-                config["end_param"]: end_date
             }
+
+            # ✅ Gestion spéciale pour piezometry: utiliser date_recherche avec milieu d'année
+            if station_type == "piezometry":
+                # Utiliser milieu d'année pour maximiser la couverture
+                mid_year_date = f"{year}-06-15"
+                params["date_recherche"] = mid_year_date
+            else:
+                # Pour les autres types, utiliser les paramètres start/end
+                params[config["start_param"]] = start_date
+                if config["end_param"] is not None:
+                    params[config["end_param"]] = end_date
 
             response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=30)
 
