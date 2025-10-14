@@ -120,7 +120,7 @@ def create_hubeau_paginator(pagination_config: Dict[str, Any]) -> PageNumberPagi
     Crée un paginator configuré pour Hub'Eau API.
 
     Hub'Eau utilise la pagination par numéro de page avec:
-    - Paramètre 'page' pour le numéro de page (commence à 1)
+    - Paramètre 'page' pour le numéro de page (commence à 1 par défaut)
     - Champ 'last_page' dans la réponse pour le nombre total de pages
 
     Args:
@@ -128,12 +128,17 @@ def create_hubeau_paginator(pagination_config: Dict[str, Any]) -> PageNumberPagi
 
     Returns:
         PageNumberPaginator configuré pour Hub'Eau
+    
+    Note:
+        Selon la documentation DLT, PageNumberPaginator ne supporte que:
+        - total_path: chemin JSON vers le nombre total de pages
+        - maximum_page: nombre maximum de pages (optionnel)
+        La page initiale est toujours 1 par défaut dans DLT.
     """
     total_path = pagination_config.get('total_path', 'last_page')
 
     return PageNumberPaginator(
-        total_path=total_path,
-        base_page=1
+        total_path=total_path
     )
 
 
