@@ -73,6 +73,6 @@ destinations:
   filesystem:
     bucket_url: s3://hubeau-bronze
     file_format: parquet
-    layout: '{table_name}/year={year}/{load_id}.parquet'
+    layout: '{table_name}/year={YYYY}/{load_id}.parquet'
   duckdb:
     database: data/piezometry.duckdb
