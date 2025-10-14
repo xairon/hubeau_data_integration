@@ -786,7 +786,20 @@ def create_chroniques_resource(
     """
     # Déterminer le champ de date pour incremental
     date_field = temporal_config.get('date_field', 'date_mesure')
-    start_date = temporal_config.get('start_date', '2020-01-01')
+    start_date_str = temporal_config.get('start_date', '2020-01-01')
+
+    # Convert initial value based on the field type
+    # timestamp_mesure is in milliseconds Unix timestamp format
+    if 'timestamp' in date_field.lower():
+        # Convert date string to Unix timestamp in milliseconds
+        start_dt = datetime.strptime(start_date_str, '%Y-%m-%d')
+        # Convert to Unix timestamp in milliseconds (like the API returns)
+        initial_value = int(start_dt.timestamp() * 1000)
+        logger.info(f"📅 Using timestamp incremental: field={date_field}, initial_value={initial_value} (from {start_date_str})")
+    else:
+        # For date fields, keep as string
+        initial_value = start_date_str
+        logger.info(f"📅 Using date incremental: field={date_field}, initial_value={initial_value}")
 
     @dlt.resource(
         name=resource_name,
@@ -794,7 +807,7 @@ def create_chroniques_resource(
         write_disposition=write_disposition
     )
     def chroniques_resource(
-        last_value=dlt.sources.incremental(date_field, initial_value=start_date)
+        last_value=dlt.sources.incremental(date_field, initial_value=initial_value)
     ) -> Iterator[Dict[str, Any]]:
         """Resource pour chroniques avec incremental loading natif"""
 
