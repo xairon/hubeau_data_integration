@@ -196,23 +196,36 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
             logger.error(f"   Traceback: {traceback.format_exc()}")
             raise
 
-        parquet_files = [f.path for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
-        logger.info(f"📊 Filtered to {len(parquet_files)} parquet files")
-        
-        if parquet_files:
-            logger.info(f"   First parquet file: {parquet_files[0]}")
+        parquet_files = [f for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
+        logger.info(f"📊 Found {len(parquet_files)} parquet files")
 
         if not parquet_files:
             logger.warning(f"⚠️ Aucun fichier parquet trouvé dans {full_path}")
             logger.warning(f"   Total files found: {len(files)}")
-            logger.warning(f"   Parquet files after filter: {len(parquet_files)}")
             return []
 
-        logger.info(f"📂 Trouvé {len(parquet_files)} fichiers parquet dans {full_path}")
+        # STRATEGY: With merge mode, DLT creates multiple files
+        # To get the complete dataset, we have TWO options:
+        # Option A: Read all files and deduplicate (accurate but slower)
+        # Option B: Read only the latest file (faster, assumes latest is most complete)
 
-        # Lire tous les fichiers parquet et extraire les codes de stations
-        all_stations = set()
-        for file_path in parquet_files:
+        # For station reference data, use Option A (read all files)
+        # This ensures we don't miss any stations even if data is split across files
+        logger.info(f"📂 Reading {len(parquet_files)} parquet files to get complete station list")
+
+        # Sort files by modification time (newest first) for debugging
+        parquet_files_sorted = sorted(parquet_files, key=lambda f: f.mtime if hasattr(f, 'mtime') else 0, reverse=True)
+
+        if len(parquet_files_sorted) > 1:
+            logger.info(f"   📅 Multiple files detected - will read all and deduplicate")
+            logger.info(f"   📅 Latest file: {parquet_files_sorted[0].path}")
+            logger.info(f"   📅 Oldest file: {parquet_files_sorted[-1].path}")
+
+        # Lire tous les fichiers parquet et extraire les codes de stations (avec déduplication)
+        all_stations = set()  # Using set for automatic deduplication
+        files_read = 0
+        for file_info in parquet_files_sorted:
+            file_path = file_info.path
             try:
                 table = pq.read_table(file_path, filesystem=s3)
                 df = table.to_pandas()
@@ -227,6 +240,8 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
                 else:
                     logger.warning(f"  ⚠️ Colonne {station_code_column} non trouvée dans {file_path}")
 
+                files_read += 1
+
             except Exception as e:
                 logger.error(f"  ❌ Erreur lors de la lecture de {file_path}: {e}")
                 # Check if it's a parquet corruption error
@@ -235,6 +250,7 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
                     logger.error(f"  💡 This file will be replaced during next ingestion")
                 continue
 
+        logger.info(f"✅ Lu {files_read} fichiers avec succès")
         logger.info(f"✅ Extrait {len(all_stations)} stations uniques depuis MinIO pour {station_type}")
         return sorted(list(all_stations))
 

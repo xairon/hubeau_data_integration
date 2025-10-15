@@ -252,7 +252,9 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
         config = api_configs[station_type]
         response = httpx.get(config["url"], params={"format": "json", "size": 1}, timeout=30)
 
-        if response.status_code != 200:
+        # Accept both 200 (OK) and 206 (Partial Content) as valid responses
+        # 206 is normal when requesting partial data with size parameter
+        if response.status_code not in [200, 206]:
             context.log.warning(f"⚠️ Erreur API ({response.status_code}), lancement de l'intégration par précaution")
             return True
 
@@ -261,14 +263,91 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
 
         context.log.info(f"📡 API: {api_count} stations disponibles")
 
-        # 3. Comparer et décider
-        if api_count == minio_count:
-            context.log.info(f"✅ MinIO à jour ({minio_count} stations), skip de l'intégration")
+        # 3. Comparer les counts
+        difference = api_count - minio_count
+
+        if difference == 0:
+            context.log.info(f"✅ Counts identiques ({minio_count} stations)")
+            context.log.info(f"✅ MinIO à jour, skip de l'intégration")
             return False
+
+        # 4. ADVANCED: Pour petites différences, analyser les vraies différences
+        if abs(difference) <= 100:  # Seuil pour analyse détaillée
+            context.log.info(f"🔍 Petite différence détectée ({difference:+d} stations)")
+            context.log.info(f"🔍 Analyse des différences réelles au niveau des codes...")
+
+            try:
+                # Obtenir tous les codes stations depuis l'API (juste les codes, pas les données complètes)
+                api_stations_response = httpx.get(
+                    config["url"],
+                    params={
+                        "format": "json",
+                        "size": api_count,
+                        "fields": config["station_field"]  # Ne récupérer que le code
+                    },
+                    timeout=120  # Timeout plus long pour récupérer tous les codes
+                )
+
+                if api_stations_response.status_code in [200, 206]:
+                    api_data = api_stations_response.json()
+                    api_station_codes = set([
+                        str(item.get(config["station_field"]))
+                        for item in api_data.get("data", [])
+                        if item.get(config["station_field"])
+                    ])
+
+                    minio_station_codes = set(minio_stations)
+
+                    # Calculer les différences réelles
+                    new_stations = api_station_codes - minio_station_codes
+                    deleted_stations = minio_station_codes - api_station_codes
+
+                    context.log.info(f"📊 Analyse détaillée:")
+                    context.log.info(f"   • Nouvelles stations: {len(new_stations)}")
+                    context.log.info(f"   • Stations supprimées: {len(deleted_stations)}")
+                    context.log.info(f"   • Stations communes: {len(api_station_codes & minio_station_codes)}")
+
+                    if len(new_stations) > 0:
+                        examples = list(new_stations)[:5]
+                        context.log.info(f"   • Exemples nouvelles: {examples}")
+
+                    if len(deleted_stations) > 0:
+                        examples = list(deleted_stations)[:5]
+                        context.log.warning(f"   • Exemples supprimées: {examples}")
+
+                    # Décision basée sur les différences réelles
+                    if len(new_stations) == 0 and len(deleted_stations) == 0:
+                        context.log.info(f"✅ Pas de différence réelle de codes stations")
+                        context.log.info(f"✅ Différence de count probablement due à données temporaires, skip")
+                        return False
+                    elif len(new_stations) > 0:
+                        context.log.info(f"📈 {len(new_stations)} nouvelles stations à intégrer")
+                        context.log.info(f"🔄 Lancement en mode MERGE (seules les nouvelles seront ajoutées)")
+                        return True
+                    elif len(deleted_stations) > 0:
+                        context.log.warning(f"📉 {len(deleted_stations)} stations supprimées de l'API")
+                        context.log.info(f"🔄 Lancement pour synchroniser (anciennes stations resteront dans MinIO)")
+                        return True
+
+                else:
+                    context.log.warning(f"⚠️ Impossible de récupérer les codes API (status {api_stations_response.status_code})")
+                    # Fallback sur décision basée count
+
+            except Exception as e:
+                context.log.warning(f"⚠️ Erreur lors de l'analyse détaillée: {e}")
+                import traceback
+                context.log.debug(f"   Traceback: {traceback.format_exc()}")
+                # Fallback sur décision basée count
+
+        # 5. Pour grandes différences ou si analyse échoue, décision basée sur count
+        if difference > 0:
+            context.log.info(f"📈 {difference} nouvelles stations détectées (basé sur count)")
+            context.log.info(f"🔄 Lancement de l'intégration en mode MERGE")
+            return True
         else:
-            difference = api_count - minio_count
-            context.log.warning(f"⚠️ Différence détectée: {difference:+d} stations ({api_count} API vs {minio_count} MinIO)")
-            context.log.info(f"🔄 Lancement de l'intégration pour mise à jour")
+            context.log.warning(f"📉 {abs(difference)} stations en moins dans l'API (basé sur count)")
+            context.log.warning(f"⚠️ Possible suppression de stations ou problème API temporaire")
+            context.log.info(f"🔄 Lancement de l'intégration pour synchroniser")
             return True
 
     except Exception as e:
@@ -278,6 +357,121 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
         context.log.error(f"📋 Traceback complet:\n{traceback.format_exc()}")
         context.log.info(f"🔄 Lancement de l'intégration par précaution")
         return True
+
+
+def consolidate_parquet_files(
+    context: AssetExecutionContext,
+    source_name: str,
+    resource_name: str,
+    bucket_url: str,
+    credentials: Dict
+):
+    """
+    Consolidate multiple parquet files into a single file.
+
+    This prevents accumulation of files when using merge write_disposition.
+    Reads all parquet files in the directory, deduplicates, and writes back as single file.
+
+    Args:
+        context: Dagster execution context
+        source_name: Source name (e.g., "piezometry")
+        resource_name: Resource name (e.g., "piezometry_stations")
+        bucket_url: MinIO bucket URL
+        credentials: MinIO credentials
+    """
+    import pyarrow.parquet as pq
+    import pyarrow as pa
+    import pyarrow.fs as pafs
+    from datetime import datetime
+
+    dataset_name = f"{source_name}_api"
+    path = f"{bucket_url.replace('s3://', '')}/{dataset_name}/{resource_name}/"
+
+    context.log.info(f"🔄 Consolidating parquet files in {path}")
+
+    # Create S3 filesystem
+    endpoint = credentials["endpoint_url"].replace("http://", "").replace("https://", "")
+    s3 = pafs.S3FileSystem(
+        access_key=credentials["aws_access_key_id"],
+        secret_key=credentials["aws_secret_access_key"],
+        endpoint_override=endpoint,
+        scheme="http"
+    )
+
+    try:
+        # List all parquet files
+        files = s3.get_file_info(pafs.FileSelector(path, recursive=True))
+        parquet_files = [f for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
+
+        if len(parquet_files) <= 1:
+            context.log.info(f"✅ Only {len(parquet_files)} file(s), no consolidation needed")
+            return
+
+        context.log.info(f"📚 Found {len(parquet_files)} parquet files to consolidate")
+
+        # Read all files into a single table
+        tables = []
+        for file_info in parquet_files:
+            try:
+                table = pq.read_table(file_info.path, filesystem=s3)
+                tables.append(table)
+                context.log.debug(f"   Read {file_info.path}: {table.num_rows} rows")
+            except Exception as e:
+                context.log.warning(f"   ⚠️ Could not read {file_info.path}: {e}")
+
+        if not tables:
+            context.log.warning(f"⚠️ No tables could be read, skipping consolidation")
+            return
+
+        # Concatenate all tables
+        combined_table = pa.concat_tables(tables)
+        initial_rows = combined_table.num_rows
+
+        context.log.info(f"📊 Combined {len(tables)} tables: {initial_rows} total rows")
+
+        # Deduplicate based on primary key (if exists in schema)
+        # For station data, this would be code_station or code_bss
+        schema = combined_table.schema
+        primary_key_candidates = ["code_station", "code_bss", "code_ouvrage"]
+        primary_key = None
+
+        for pk in primary_key_candidates:
+            if pk in schema.names:
+                primary_key = pk
+                break
+
+        if primary_key:
+            # Convert to pandas for easy deduplication
+            df = combined_table.to_pandas()
+            df_dedup = df.drop_duplicates(subset=[primary_key], keep='last')
+            combined_table = pa.Table.from_pandas(df_dedup)
+
+            rows_removed = initial_rows - combined_table.num_rows
+            context.log.info(f"🧹 Deduplicated by '{primary_key}': removed {rows_removed} duplicate rows")
+
+        # Write consolidated file with timestamp
+        timestamp = datetime.now().timestamp()
+        consolidated_path = f"{path}{timestamp}.parquet"
+
+        pq.write_table(combined_table, consolidated_path, filesystem=s3)
+        context.log.info(f"✅ Wrote consolidated file: {consolidated_path}")
+        context.log.info(f"   Final row count: {combined_table.num_rows}")
+
+        # Delete old files
+        for file_info in parquet_files:
+            try:
+                s3.delete_file(file_info.path)
+                context.log.debug(f"   🗑️ Deleted old file: {file_info.path}")
+            except Exception as e:
+                context.log.warning(f"   ⚠️ Could not delete {file_info.path}: {e}")
+
+        context.log.info(f"✅ Consolidation complete: {len(parquet_files)} files → 1 file")
+
+    except Exception as e:
+        context.log.error(f"❌ Consolidation failed: {e}")
+        import traceback
+        context.log.error(f"   Traceback: {traceback.format_exc()}")
+        raise
 
 
 def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[Dict[str, List[str]]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
@@ -540,6 +734,22 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 
         # Exécuter le pipeline avec format explicite
         load_info = pipeline.run(source, loader_file_format=file_format)
+
+        # ✅ POST-INGESTION: Consolidate multiple parquet files into one
+        # This prevents accumulation of files with merge mode
+        if load_info and hasattr(load_info, 'load_packages') and len(load_info.load_packages) > 0:
+            try:
+                consolidate_parquet_files(
+                    context,
+                    source_name=source_name,
+                    resource_name=resource_name,
+                    bucket_url=filesystem_config.get("bucket_url", "s3://bronze"),
+                    credentials=filesystem_config["credentials"]
+                )
+            except Exception as consolidation_error:
+                context.log.warning(f"⚠️ File consolidation failed: {consolidation_error}")
+                context.log.warning(f"   Data is still valid but multiple files may accumulate")
+
     finally:
         # Restore original print function
         builtins.print = original_print
