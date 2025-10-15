@@ -229,6 +229,10 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
 
             except Exception as e:
                 logger.error(f"  ❌ Erreur lors de la lecture de {file_path}: {e}")
+                # Check if it's a parquet corruption error
+                if "magic bytes" in str(e).lower() or "corrupted" in str(e).lower():
+                    logger.error(f"  🚨 CORRUPTED FILE DETECTED: {file_path}")
+                    logger.error(f"  💡 This file will be replaced during next ingestion")
                 continue
 
         logger.info(f"✅ Extrait {len(all_stations)} stations uniques depuis MinIO pour {station_type}")

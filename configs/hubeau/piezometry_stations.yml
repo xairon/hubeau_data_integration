@@ -6,7 +6,7 @@ resource:
   endpoint: /stations
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
   primary_key: ["code_station"]
-  write_disposition: replace
+  write_disposition: merge
   columns:
     code_station:
       data_type: text
@@ -156,6 +156,6 @@ destinations:
   filesystem:
     bucket_url: s3://bronze
     file_format: parquet
-    layout: '{table_name}/year={YYYY}/{load_id}.parquet'
+    layout: '{table_name}/{load_id}.parquet'
   duckdb:
     database: data/piezometry.duckdb

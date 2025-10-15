@@ -231,7 +231,13 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
         context.log.info(f"🔍 DEBUG: Function reference: {_extract_station_codes_from_minio}")
         context.log.info(f"🔍 DEBUG: Function module: {_extract_station_codes_from_minio.__module__}")
 
-        minio_stations = _extract_station_codes_from_minio(station_type)
+        try:
+            minio_stations = _extract_station_codes_from_minio(station_type)
+        except Exception as read_error:
+            # Handle corrupted or unreadable parquet files
+            context.log.error(f"❌ Error reading MinIO data: {read_error}")
+            context.log.warning(f"🧹 Corrupted or unreadable data detected, forcing re-ingestion to rebuild")
+            return True  # Force re-ingestion to replace corrupted data
 
         context.log.info(f"🔍 DEBUG: _extract_station_codes_from_minio returned type={type(minio_stations)}, len={len(minio_stations)}")
         minio_count = len(minio_stations)
