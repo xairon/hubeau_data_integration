@@ -125,6 +125,9 @@ extraction:
     - "973"
     - "974"
     - "976"
+    - "975"
+    - "977"
+    - "978"
   pagination:
     type: page_based
     page_size: 5000  # Safe pour API Hub'Eau (limite 20k records par requête)

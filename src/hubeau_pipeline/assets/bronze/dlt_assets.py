@@ -357,6 +357,18 @@ def consolidate_parquet_files(
             context.log.warning(f"⚠️ No tables could be read, skipping consolidation")
             return
 
+        # ✅ FIX: Unify schemas before concatenation to handle nullable differences
+        # DLT may create different nullable constraints between runs
+        if len(tables) > 1:
+            # Create unified schema with all fields nullable
+            base_schema = tables[0].schema
+            unified_fields = [pa.field(f.name, f.type, nullable=True) for f in base_schema]
+            unified_schema = pa.schema(unified_fields)
+
+            # Cast all tables to unified schema
+            tables = [table.cast(unified_schema) for table in tables]
+            context.log.info(f"✅ Unified {len(tables)} schemas (all fields nullable)")
+
         # Concatenate all tables
         combined_table = pa.concat_tables(tables)
         initial_rows = combined_table.num_rows
