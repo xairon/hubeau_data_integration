@@ -1093,6 +1093,142 @@ def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
 
 
+# ====================================
+# DIAGNOSTIC ASSETS (temporary)
+# ====================================
+
+@asset(group_name="hubeau_diagnostic")
+def diagnose_piezometry_missing_stations(context: AssetExecutionContext) -> MaterializeResult:
+    """
+    Asset de diagnostic temporaire pour identifier les 3 stations manquantes.
+
+    Compare:
+    - Count API global (sans filtre)
+    - Count API par département (somme de tous les départements)
+    - Count MinIO (stations déjà extraites)
+
+    Permet d'identifier si les 3 stations manquantes sont des "orphelines"
+    (stations sans code_departement ou avec code_departement invalide).
+    """
+    import httpx
+    from src.hubeau_pipeline.utils.station_minio import extract_station_codes_from_minio
+
+    context.log.info("=" * 80)
+    context.log.info("🔍 DIAGNOSTIC: Identification des 3 stations manquantes")
+    context.log.info("=" * 80)
+
+    # 1. Count API global (sans filtre département)
+    context.log.info("\n📡 PHASE 1: Count API global")
+    try:
+        response = httpx.get(
+            "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
+            params={"format": "json", "size": 1},
+            timeout=30
+        )
+        api_total = response.json().get("count", 0)
+        context.log.info(f"   ✅ API count global: {api_total} stations")
+    except Exception as e:
+        context.log.error(f"   ❌ Erreur API global: {e}")
+        api_total = 0
+
+    # 2. Count par département
+    context.log.info("\n📊 PHASE 2: Count par département")
+    departments = [
+        "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+        "11", "12", "13", "14", "15", "16", "17", "18", "19",
+        "21", "22", "23", "24", "25", "26", "27", "28", "29", "2A", "2B",
+        "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+        "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
+        "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+        "60", "61", "62", "63", "64", "65", "66", "67", "68", "69",
+        "70", "71", "72", "73", "74", "75", "76", "77", "78", "79",
+        "80", "81", "82", "83", "84", "85", "86", "87", "88", "89",
+        "90", "91", "92", "93", "94", "95",
+        "971", "972", "973", "974", "976", "975", "977", "978"
+    ]
+
+    total_by_dept = 0
+    dept_counts = {}
+
+    for dept in departments:
+        try:
+            response = httpx.get(
+                "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
+                params={"format": "json", "size": 1, "code_departement": dept},
+                timeout=30
+            )
+            count = response.json().get("count", 0)
+            dept_counts[dept] = count
+            total_by_dept += count
+
+            if count > 0:
+                context.log.debug(f"   Dept {dept}: {count} stations")
+        except Exception as e:
+            context.log.warning(f"   ⚠️ Erreur dept {dept}: {e}")
+            dept_counts[dept] = 0
+
+    context.log.info(f"   ✅ Total par départements: {total_by_dept} stations")
+
+    # 3. Count MinIO
+    context.log.info("\n📂 PHASE 3: Count MinIO")
+    try:
+        minio_codes = extract_station_codes_from_minio("piezometry")
+        minio_count = len(minio_codes)
+        context.log.info(f"   ✅ MinIO count: {minio_count} stations")
+    except Exception as e:
+        context.log.error(f"   ❌ Erreur MinIO: {e}")
+        minio_count = 0
+
+    # 4. Analyse des résultats
+    context.log.info("\n" + "=" * 80)
+    context.log.info("📊 RÉSULTATS DU DIAGNOSTIC")
+    context.log.info("=" * 80)
+    context.log.info(f"API count global:        {api_total}")
+    context.log.info(f"API count par depts:     {total_by_dept}")
+    context.log.info(f"MinIO count:             {minio_count}")
+    context.log.info(f"")
+    context.log.info(f"Différence API - depts:  {api_total - total_by_dept}")
+    context.log.info(f"Différence API - MinIO:  {api_total - minio_count}")
+    context.log.info(f"Différence depts - MinIO: {total_by_dept - minio_count}")
+
+    # 5. Diagnostic
+    orphan_stations = api_total - total_by_dept
+
+    context.log.info("\n" + "=" * 80)
+    context.log.info("🔬 DIAGNOSTIC")
+    context.log.info("=" * 80)
+
+    if orphan_stations > 0:
+        context.log.warning(f"❌ {orphan_stations} stations 'orphelines' détectées")
+        context.log.warning(f"   Ces stations ne sont retournées par AUCUN filtre code_departement")
+        context.log.warning(f"   Elles ont probablement code_departement=NULL ou invalide")
+        context.log.warning(f"")
+        context.log.warning(f"💡 SOLUTION: Ajouter une requête 'catch-all' sans filtre département")
+        context.log.warning(f"   pour capturer ces {orphan_stations} stations orphelines")
+    elif api_total == total_by_dept == minio_count:
+        context.log.info(f"✅ Tout est cohérent! Aucune station manquante")
+    elif api_total == total_by_dept and minio_count < api_total:
+        context.log.warning(f"❌ Bug d'extraction: on récupère bien tous les départements")
+        context.log.warning(f"   mais seulement {minio_count}/{api_total} sont dans MinIO")
+        context.log.warning(f"")
+        context.log.warning(f"💡 SOLUTION: Vérifier la consolidation et la déduplication")
+    else:
+        context.log.warning(f"❓ Situation inattendue - analyse manuelle requise")
+
+    context.log.info("=" * 80)
+
+    return MaterializeResult(
+        metadata={
+            "api_total": api_total,
+            "api_by_dept": total_by_dept,
+            "minio_count": minio_count,
+            "orphan_stations": orphan_stations,
+            "missing_stations": api_total - minio_count,
+            "diagnostic": "orphan_stations" if orphan_stations > 0 else "extraction_bug" if minio_count < api_total else "ok"
+        }
+    )
+
+
 @asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS, deps=[temperature_stations_reference])
 def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature chroniques data using dlt with yearly partitions and automatic fallback."""
