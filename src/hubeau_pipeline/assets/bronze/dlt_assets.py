@@ -138,6 +138,100 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
 # - extract_station_codes_from_result, get_active_departments_for_stations -> station_api.py
 # - _extract_station_codes_from_minio, _filter_active_stations_for_period -> station_minio.py
 
+def check_stations_need_update(context: AssetExecutionContext, station_type: str) -> bool:
+    """
+    Vérifie si les stations de référence dans MinIO sont à jour avec l'API.
+    Compare le count de stations dans MinIO vs l'API.
+
+    Args:
+        context: Dagster execution context
+        station_type: Type de stations ("piezometry", "temperature", etc.)
+
+    Returns:
+        bool: True si une mise à jour est nécessaire, False sinon
+    """
+    import httpx
+
+    # Configuration des endpoints API
+    api_configs = {
+        "temperature": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/temperature/station",
+            "station_field": "code_station"
+        },
+        "hydrometry": {
+            "url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations",
+            "station_field": "code_station"
+        },
+        "piezometry": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
+            "station_field": "code_bss"
+        },
+        "quality_rivers": {
+            "url": "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/station_pc",
+            "station_field": "code_station"
+        },
+        "quality_groundwater": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/stations",
+            "station_field": "code_bss"
+        },
+        "ecoulement": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/ecoulement/stations",
+            "station_field": "code_station"
+        },
+        "hydrobio": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/hydrobio/stations_hydrobio",
+            "station_field": "code_station_hydrobio"
+        },
+        "prelevements": {
+            "url": "https://hubeau.eaufrance.fr/api/v1/prelevements/ouvrages",
+            "station_field": "code_ouvrage"
+        }
+    }
+
+    if station_type not in api_configs:
+        context.log.warning(f"⚠️ Type de station non supporté: {station_type}, lancement de l'intégration")
+        return True
+
+    try:
+        # 1. Vérifier le nombre de stations dans MinIO
+        minio_stations = extract_station_codes_from_minio(station_type, context.log)
+        minio_count = len(minio_stations)
+
+        if minio_count == 0:
+            context.log.info(f"📂 Aucune station dans MinIO, lancement de l'intégration complète")
+            return True
+
+        context.log.info(f"📂 MinIO: {minio_count} stations trouvées")
+
+        # 2. Obtenir le count depuis l'API
+        config = api_configs[station_type]
+        response = httpx.get(config["url"], params={"format": "json", "size": 1}, timeout=30)
+
+        if response.status_code != 200:
+            context.log.warning(f"⚠️ Erreur API ({response.status_code}), lancement de l'intégration par précaution")
+            return True
+
+        data = response.json()
+        api_count = data.get("count", 0)
+
+        context.log.info(f"📡 API: {api_count} stations disponibles")
+
+        # 3. Comparer et décider
+        if api_count == minio_count:
+            context.log.info(f"✅ MinIO à jour ({minio_count} stations), skip de l'intégration")
+            return False
+        else:
+            difference = api_count - minio_count
+            context.log.warning(f"⚠️ Différence détectée: {difference:+d} stations ({api_count} API vs {minio_count} MinIO)")
+            context.log.info(f"🔄 Lancement de l'intégration pour mise à jour")
+            return True
+
+    except Exception as e:
+        context.log.error(f"❌ Erreur lors de la vérification: {e}")
+        context.log.info(f"🔄 Lancement de l'intégration par précaution")
+        return True
+
+
 def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[Dict[str, List[str]]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
     """
     Generic function to run a dlt pipeline based on a YAML configuration file.
@@ -496,26 +590,36 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 @asset(group_name="hubeau_hydrometry")
 def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "hydrometry"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
 
 @asset(group_name="hubeau_piezometry")
 def piezometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "piezometry"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
 
 @asset(group_name="hubeau_quality_rivers")
 def quality_rivers_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "quality_rivers"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
 
 @asset(group_name="hubeau_quality_groundwater")
 def quality_groundwater_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality groundwater stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "quality_groundwater"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
 
 @asset(group_name="hubeau_ecoulement")
 def ecoulement_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "ecoulement"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
 
 @asset(group_name="hubeau_ecoulement")
@@ -525,6 +629,8 @@ def ecoulement_campagnes_reference(context: AssetExecutionContext) -> Dict[str, 
 @asset(group_name="hubeau_hydrobio")
 def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "hydrobio"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
 
 @asset(group_name="hubeau_prelevements")
@@ -535,6 +641,8 @@ def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str,
     Un ouvrage = installation technique de prélèvement (infrastructure).
     Utilisé par les chroniques (code_ouvrage).
     """
+    if not check_stations_need_update(context, "prelevements"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
 
 @asset(group_name="hubeau_prelevements")
@@ -545,11 +653,14 @@ def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, A
     Un point = emplacement spécifique de mesure sur un ouvrage.
     1 ouvrage peut avoir plusieurs points de prélèvement.
     """
+    # Pas de vérification pour les points car pas dans station_minio.py
     return ingest_dlt(context, "configs/hubeau/prelevements_points.yml")
 
 @asset(group_name="hubeau_temperature")
 def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature stations reference data using dlt (pas de partition)."""
+    if not check_stations_need_update(context, "temperature"):
+        return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
 
 # ====================================
