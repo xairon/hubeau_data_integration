@@ -5,7 +5,7 @@ import io
 import logging
 
 import dlt
-from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
+from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition, MaterializeResult
 from dlt.common.typing import TSecretValue
 import pyarrow.parquet as pq
 import pyarrow.fs as pafs
@@ -267,8 +267,10 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
         difference = api_count - minio_count
 
         if difference == 0:
-            context.log.info(f"✅ Counts identiques ({minio_count} stations)")
-            context.log.info(f"✅ MinIO à jour, skip de l'intégration")
+            context.log.info(f"✅ Counts identiques: {api_count} stations")
+            context.log.info(f"   📊 API count: {api_count}")
+            context.log.info(f"   📊 MinIO count: {minio_count}")
+            context.log.info(f"   ⏭️  L'asset sera SKIPPED (aucune ingestion nécessaire)")
             return False
 
         # 4. ADVANCED: Pour petites différences, analyser les vraies différences
@@ -317,8 +319,11 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
 
                     # Décision basée sur les différences réelles
                     if len(new_stations) == 0 and len(deleted_stations) == 0:
-                        context.log.info(f"✅ Pas de différence réelle de codes stations")
-                        context.log.info(f"✅ Différence de count probablement due à données temporaires, skip")
+                        context.log.info(f"✅ AUCUN changement réel détecté")
+                        context.log.info(f"   📊 API count: {api_count}")
+                        context.log.info(f"   📊 MinIO count: {minio_count}")
+                        context.log.info(f"   🎯 {minio_count} stations identiques entre API et MinIO")
+                        context.log.info(f"   ⏭️  L'asset sera SKIPPED (aucune ingestion nécessaire)")
                         return False
                     elif len(new_stations) > 0:
                         context.log.info(f"📈 {len(new_stations)} nouvelles stations à intégrer")
@@ -653,6 +658,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Exemple: source.name="piezometry" → dataset_name="piezometry_api"
         # Ça correspond aux paths dans station_minio.py (ex: "piezometry_api/piezometry_stations/")
         source_name = cfg.get("source", {}).get("name", "unknown")
+        resource_name = cfg.get("resource", {}).get("name", "unknown")
         dataset_name = cfg.get("dataset_name", f"{source_name}_api")
 
         # ✅ NOUVEAU: Utiliser le module destinations.py pour respecter la config YAML
@@ -852,71 +858,149 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 # ====================================
 
 @asset(group_name="hubeau_hydrometry")
-def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def hydrometry_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests hydrometry stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "hydrometry"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/hydrometry_api/hydrometry_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_piezometry")
-def piezometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def piezometry_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests piezometry stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "piezometry"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/piezometry_api/piezometry_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_quality_rivers")
-def quality_rivers_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def quality_rivers_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests quality rivers stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "quality_rivers"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/quality_api/quality_rivers_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_quality_groundwater")
-def quality_groundwater_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def quality_groundwater_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests quality groundwater stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "quality_groundwater"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/quality_api/quality_groundwater_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_ecoulement")
-def ecoulement_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def ecoulement_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests ecoulement stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "ecoulement"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/ecoulement_api/ecoulement_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_ecoulement")
 def ecoulement_campagnes_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement campaigns reference (utilisé pour caler les fenêtres d'observations)."""
     return ingest_dlt(context, "configs/hubeau/ecoulement_campagnes.yml")
 @asset(group_name="hubeau_hydrobio")
-def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def hydrobio_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests hydrobiology stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "hydrobio"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/hydrobio_api/hydrobio_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_prelevements")
-def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def prelevements_ouvrages_reference(context: AssetExecutionContext) -> MaterializeResult:
     """
     Ingestion du référentiel des OUVRAGES de prélèvement (~168k ouvrages).
 
@@ -927,8 +1011,21 @@ def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str,
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "prelevements"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/prelevements_api/prelevements_ouvrages/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 @asset(group_name="hubeau_prelevements")
 def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -942,14 +1039,27 @@ def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, A
     return ingest_dlt(context, "configs/hubeau/prelevements_points.yml")
 
 @asset(group_name="hubeau_temperature")
-def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+def temperature_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
     """Ingests temperature stations reference data using dlt (pas de partition)."""
     # ✅ Setup logging BEFORE checking MinIO
     _setup_station_minio_logging(context)
 
     if not check_stations_need_update(context, "temperature"):
-        return {"status": "skipped", "reason": "MinIO already up-to-date"}
-    return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
+        return MaterializeResult(
+            metadata={
+                "status": "skipped",
+                "reason": "Données inchangées - aucune ingestion nécessaire",
+                "minio_path": "bronze/temperature_api/temperature_stations/"
+            }
+        )
+
+    ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
+    return MaterializeResult(
+        metadata={
+            "status": "completed",
+            "info": "Ingestion terminée avec succès"
+        }
+    )
 
 # ====================================
 # NOUVEAUX ASSETS POUR ENDPOINTS MANQUANTS
