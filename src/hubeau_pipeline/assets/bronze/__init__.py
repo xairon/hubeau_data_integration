@@ -41,8 +41,6 @@ from .dlt_assets import (
     hydrobio_stations_reference,
     prelevements_ouvrages_reference,
     prelevements_points_reference,
-    # Asset de diagnostic
-    diagnose_piezometry_missing_stations,
 )
 
 # Sources externes (référentiels géographiques et thesaurus) - SUPPRIMÉS
@@ -79,9 +77,6 @@ hubeau_bronze_assets_dlt = [
     ecoulement_observations,
     prelevements_chroniques,
     temperature_chroniques,
-
-    # Assets de diagnostic (temporaires)
-    diagnose_piezometry_missing_stations,
 ]
 
 # Assets externes (référentiels complémentaires) - SUPPRIMÉS

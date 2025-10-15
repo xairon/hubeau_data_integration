@@ -173,8 +173,8 @@ def _setup_station_minio_logging(context: AssetExecutionContext):
 
 def check_stations_need_update(context: AssetExecutionContext, station_type: str) -> bool:
     """
-    Vérifie si les stations de référence dans MinIO sont à jour avec l'API.
-    Compare le count de stations dans MinIO vs l'API.
+    Vérifie si les stations de référence existent déjà dans MinIO.
+    Si des fichiers existent, on skip l'ingestion.
 
     Args:
         context: Dagster execution context
@@ -183,112 +183,66 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
     Returns:
         bool: True si une mise à jour est nécessaire, False sinon
     """
-    import httpx
+    import pyarrow.fs as pafs
+    import os
 
-    # Configuration des endpoints API
-    api_configs = {
-        "temperature": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/temperature/station",
-            "station_field": "code_station"
-        },
-        "hydrometry": {
-            "url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations",
-            "station_field": "code_station"
-        },
-        "piezometry": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
-            "station_field": "code_bss"
-        },
-        "quality_rivers": {
-            "url": "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/station_pc",
-            "station_field": "code_station"
-        },
-        "quality_groundwater": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/stations",
-            "station_field": "code_bss"
-        },
-        "ecoulement": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/ecoulement/stations",
-            "station_field": "code_station"
-        },
-        "hydrobio": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/hydrobio/stations_hydrobio",
-            "station_field": "code_station_hydrobio"
-        },
-        "prelevements": {
-            "url": "https://hubeau.eaufrance.fr/api/v1/prelevements/ouvrages",
-            "station_field": "code_ouvrage"
-        }
+    # Mapping des types vers les chemins MinIO
+    dataset_mapping = {
+        "piezometry": ("piezometry_api", "piezometry_stations"),
+        "hydrometry": ("hydrometry_api", "hydrometry_stations"),
+        "quality_rivers": ("quality_api", "quality_rivers_stations"),
+        "quality_groundwater": ("quality_api", "quality_groundwater_stations"),
+        "hydrobio": ("hydrobio_api", "hydrobio_stations"),
+        "ecoulement": ("ecoulement_api", "ecoulement_stations"),
+        "prelevements": ("prelevements_api", "prelevements_ouvrages"),
+        "temperature": ("temperature_api", "temperature_stations")
     }
 
-    if station_type not in api_configs:
+    if station_type not in dataset_mapping:
         context.log.warning(f"⚠️ Type de station non supporté: {station_type}, lancement de l'intégration")
         return True
 
     try:
-        # 1. Vérifier le nombre de stations dans MinIO
-        context.log.info(f"🔍 DEBUG: About to call _extract_station_codes_from_minio('{station_type}')")
-        context.log.info(f"🔍 DEBUG: Function reference: {_extract_station_codes_from_minio}")
-        context.log.info(f"🔍 DEBUG: Function module: {_extract_station_codes_from_minio.__module__}")
+        # Configuration S3/MinIO
+        minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://srv991054.hstgr.cloud:9000")
+        minio_user = os.getenv("MINIO_ROOT_USER", "minioadmin")
+        minio_pass = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
 
+        s3 = pafs.S3FileSystem(
+            endpoint_override=minio_endpoint.replace("http://", "").replace("https://", ""),
+            access_key=minio_user,
+            secret_key=minio_pass,
+            scheme="http" if "http://" in minio_endpoint else "https"
+        )
+
+        # Construire le chemin
+        source_name, resource_name = dataset_mapping[station_type]
+        path = f"bronze/{source_name}/{resource_name}/"
+
+        context.log.info(f"🔍 Checking for existing files in: {path}")
+
+        # Vérifier si des fichiers .parquet existent
         try:
-            minio_stations = _extract_station_codes_from_minio(station_type)
+            files = s3.get_file_info(pafs.FileSelector(path, recursive=False))
+            parquet_files = [f for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
+
+            if parquet_files:
+                context.log.info(f"✅ Fichiers trouvés dans MinIO: {len(parquet_files)} fichier(s)")
+                context.log.info(f"   ⏭️  L'asset sera SKIPPED (données déjà présentes)")
+                return False
+            else:
+                context.log.info(f"📂 Aucun fichier dans MinIO, lancement de l'intégration")
+                return True
+
         except Exception as read_error:
-            # Handle corrupted or unreadable parquet files
-            context.log.error(f"❌ Error reading MinIO data: {read_error}")
-            context.log.warning(f"🧹 Corrupted or unreadable data detected, forcing re-ingestion to rebuild")
-            return True  # Force re-ingestion to replace corrupted data
-
-        context.log.info(f"🔍 DEBUG: _extract_station_codes_from_minio returned type={type(minio_stations)}, len={len(minio_stations)}")
-        minio_count = len(minio_stations)
-
-        if minio_count == 0:
-            context.log.info(f"📂 Aucune station dans MinIO, lancement de l'intégration complète")
-            return True
-
-        context.log.info(f"📂 MinIO: {minio_count} stations trouvées")
-
-        # 2. Obtenir le count depuis l'API
-        config = api_configs[station_type]
-        response = httpx.get(config["url"], params={"format": "json", "size": 1}, timeout=30)
-
-        # Accept both 200 (OK) and 206 (Partial Content) as valid responses
-        # 206 is normal when requesting partial data with size parameter
-        if response.status_code not in [200, 206]:
-            context.log.warning(f"⚠️ Erreur API ({response.status_code}), lancement de l'intégration par précaution")
-            return True
-
-        data = response.json()
-        api_count = data.get("count", 0)
-
-        context.log.info(f"📡 API: {api_count} stations disponibles")
-
-        # 3. Comparer les counts
-        difference = api_count - minio_count
-
-        if difference == 0:
-            context.log.info(f"✅ Counts identiques: {api_count} stations")
-            context.log.info(f"   📊 API count: {api_count}")
-            context.log.info(f"   📊 MinIO count: {minio_count}")
-            context.log.info(f"   ⏭️  L'asset sera SKIPPED (aucune ingestion nécessaire)")
-            return False
-
-        # 4. Décision basée sur le count uniquement
-        if difference > 0:
-            context.log.info(f"📈 {difference} nouvelles stations détectées (basé sur count)")
-            context.log.info(f"🔄 Lancement de l'intégration en mode MERGE")
-            return True
-        else:
-            context.log.warning(f"📉 {abs(difference)} stations en moins dans l'API (basé sur count)")
-            context.log.warning(f"⚠️ Possible suppression de stations ou problème API temporaire")
-            context.log.info(f"🔄 Lancement de l'intégration pour synchroniser")
+            context.log.info(f"📂 Path n'existe pas dans MinIO: {path}")
+            context.log.info(f"   Lancement de l'intégration initiale")
             return True
 
     except Exception as e:
         context.log.error(f"❌ Erreur lors de la vérification: {e}")
-        context.log.error(f"❌ Type d'erreur: {type(e).__name__}")
         import traceback
-        context.log.error(f"📋 Traceback complet:\n{traceback.format_exc()}")
+        context.log.error(f"📋 Traceback: {traceback.format_exc()}")
         context.log.info(f"🔄 Lancement de l'intégration par précaution")
         return True
 
@@ -1091,142 +1045,6 @@ def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "prelevements", partition_date)
     return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
-
-
-# ====================================
-# DIAGNOSTIC ASSETS (temporary)
-# ====================================
-
-@asset(group_name="hubeau_diagnostic")
-def diagnose_piezometry_missing_stations(context: AssetExecutionContext) -> MaterializeResult:
-    """
-    Asset de diagnostic temporaire pour identifier les 3 stations manquantes.
-
-    Compare:
-    - Count API global (sans filtre)
-    - Count API par département (somme de tous les départements)
-    - Count MinIO (stations déjà extraites)
-
-    Permet d'identifier si les 3 stations manquantes sont des "orphelines"
-    (stations sans code_departement ou avec code_departement invalide).
-    """
-    import httpx
-    from src.hubeau_pipeline.utils.station_minio import extract_station_codes_from_minio
-
-    context.log.info("=" * 80)
-    context.log.info("🔍 DIAGNOSTIC: Identification des 3 stations manquantes")
-    context.log.info("=" * 80)
-
-    # 1. Count API global (sans filtre département)
-    context.log.info("\n📡 PHASE 1: Count API global")
-    try:
-        response = httpx.get(
-            "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
-            params={"format": "json", "size": 1},
-            timeout=30
-        )
-        api_total = response.json().get("count", 0)
-        context.log.info(f"   ✅ API count global: {api_total} stations")
-    except Exception as e:
-        context.log.error(f"   ❌ Erreur API global: {e}")
-        api_total = 0
-
-    # 2. Count par département
-    context.log.info("\n📊 PHASE 2: Count par département")
-    departments = [
-        "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
-        "11", "12", "13", "14", "15", "16", "17", "18", "19",
-        "21", "22", "23", "24", "25", "26", "27", "28", "29", "2A", "2B",
-        "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
-        "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
-        "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
-        "60", "61", "62", "63", "64", "65", "66", "67", "68", "69",
-        "70", "71", "72", "73", "74", "75", "76", "77", "78", "79",
-        "80", "81", "82", "83", "84", "85", "86", "87", "88", "89",
-        "90", "91", "92", "93", "94", "95",
-        "971", "972", "973", "974", "976", "975", "977", "978"
-    ]
-
-    total_by_dept = 0
-    dept_counts = {}
-
-    for dept in departments:
-        try:
-            response = httpx.get(
-                "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations",
-                params={"format": "json", "size": 1, "code_departement": dept},
-                timeout=30
-            )
-            count = response.json().get("count", 0)
-            dept_counts[dept] = count
-            total_by_dept += count
-
-            if count > 0:
-                context.log.debug(f"   Dept {dept}: {count} stations")
-        except Exception as e:
-            context.log.warning(f"   ⚠️ Erreur dept {dept}: {e}")
-            dept_counts[dept] = 0
-
-    context.log.info(f"   ✅ Total par départements: {total_by_dept} stations")
-
-    # 3. Count MinIO
-    context.log.info("\n📂 PHASE 3: Count MinIO")
-    try:
-        minio_codes = extract_station_codes_from_minio("piezometry")
-        minio_count = len(minio_codes)
-        context.log.info(f"   ✅ MinIO count: {minio_count} stations")
-    except Exception as e:
-        context.log.error(f"   ❌ Erreur MinIO: {e}")
-        minio_count = 0
-
-    # 4. Analyse des résultats
-    context.log.info("\n" + "=" * 80)
-    context.log.info("📊 RÉSULTATS DU DIAGNOSTIC")
-    context.log.info("=" * 80)
-    context.log.info(f"API count global:        {api_total}")
-    context.log.info(f"API count par depts:     {total_by_dept}")
-    context.log.info(f"MinIO count:             {minio_count}")
-    context.log.info(f"")
-    context.log.info(f"Différence API - depts:  {api_total - total_by_dept}")
-    context.log.info(f"Différence API - MinIO:  {api_total - minio_count}")
-    context.log.info(f"Différence depts - MinIO: {total_by_dept - minio_count}")
-
-    # 5. Diagnostic
-    orphan_stations = api_total - total_by_dept
-
-    context.log.info("\n" + "=" * 80)
-    context.log.info("🔬 DIAGNOSTIC")
-    context.log.info("=" * 80)
-
-    if orphan_stations > 0:
-        context.log.warning(f"❌ {orphan_stations} stations 'orphelines' détectées")
-        context.log.warning(f"   Ces stations ne sont retournées par AUCUN filtre code_departement")
-        context.log.warning(f"   Elles ont probablement code_departement=NULL ou invalide")
-        context.log.warning(f"")
-        context.log.warning(f"💡 SOLUTION: Ajouter une requête 'catch-all' sans filtre département")
-        context.log.warning(f"   pour capturer ces {orphan_stations} stations orphelines")
-    elif api_total == total_by_dept == minio_count:
-        context.log.info(f"✅ Tout est cohérent! Aucune station manquante")
-    elif api_total == total_by_dept and minio_count < api_total:
-        context.log.warning(f"❌ Bug d'extraction: on récupère bien tous les départements")
-        context.log.warning(f"   mais seulement {minio_count}/{api_total} sont dans MinIO")
-        context.log.warning(f"")
-        context.log.warning(f"💡 SOLUTION: Vérifier la consolidation et la déduplication")
-    else:
-        context.log.warning(f"❓ Situation inattendue - analyse manuelle requise")
-
-    context.log.info("=" * 80)
-
-    return MaterializeResult(
-        metadata={
-            "api_total": api_total,
-            "api_by_dept": total_by_dept,
-            "minio_count": minio_count,
-            "orphan_stations": orphan_stations,
-            "missing_stations": api_total - minio_count,
-            "diagnostic": "orphan_stations" if orphan_stations > 0 else "extraction_bug" if minio_count < api_total else "ok"
-        }
-    )
 
 
 @asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS, deps=[temperature_stations_reference])
