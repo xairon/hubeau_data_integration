@@ -273,78 +273,7 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
             context.log.info(f"   ⏭️  L'asset sera SKIPPED (aucune ingestion nécessaire)")
             return False
 
-        # 4. ADVANCED: Pour petites différences, analyser les vraies différences
-        if abs(difference) <= 100:  # Seuil pour analyse détaillée
-            context.log.info(f"🔍 Petite différence détectée ({difference:+d} stations)")
-            context.log.info(f"🔍 Analyse des différences réelles au niveau des codes...")
-
-            try:
-                # Obtenir tous les codes stations depuis l'API (juste les codes, pas les données complètes)
-                api_stations_response = httpx.get(
-                    config["url"],
-                    params={
-                        "format": "json",
-                        "size": api_count,
-                        "fields": config["station_field"]  # Ne récupérer que le code
-                    },
-                    timeout=120  # Timeout plus long pour récupérer tous les codes
-                )
-
-                if api_stations_response.status_code in [200, 206]:
-                    api_data = api_stations_response.json()
-                    api_station_codes = set([
-                        str(item.get(config["station_field"]))
-                        for item in api_data.get("data", [])
-                        if item.get(config["station_field"])
-                    ])
-
-                    minio_station_codes = set(minio_stations)
-
-                    # Calculer les différences réelles
-                    new_stations = api_station_codes - minio_station_codes
-                    deleted_stations = minio_station_codes - api_station_codes
-
-                    context.log.info(f"📊 Analyse détaillée:")
-                    context.log.info(f"   • Nouvelles stations: {len(new_stations)}")
-                    context.log.info(f"   • Stations supprimées: {len(deleted_stations)}")
-                    context.log.info(f"   • Stations communes: {len(api_station_codes & minio_station_codes)}")
-
-                    if len(new_stations) > 0:
-                        examples = list(new_stations)[:5]
-                        context.log.info(f"   • Exemples nouvelles: {examples}")
-
-                    if len(deleted_stations) > 0:
-                        examples = list(deleted_stations)[:5]
-                        context.log.warning(f"   • Exemples supprimées: {examples}")
-
-                    # Décision basée sur les différences réelles
-                    if len(new_stations) == 0 and len(deleted_stations) == 0:
-                        context.log.info(f"✅ AUCUN changement réel détecté")
-                        context.log.info(f"   📊 API count: {api_count}")
-                        context.log.info(f"   📊 MinIO count: {minio_count}")
-                        context.log.info(f"   🎯 {minio_count} stations identiques entre API et MinIO")
-                        context.log.info(f"   ⏭️  L'asset sera SKIPPED (aucune ingestion nécessaire)")
-                        return False
-                    elif len(new_stations) > 0:
-                        context.log.info(f"📈 {len(new_stations)} nouvelles stations à intégrer")
-                        context.log.info(f"🔄 Lancement en mode MERGE (seules les nouvelles seront ajoutées)")
-                        return True
-                    elif len(deleted_stations) > 0:
-                        context.log.warning(f"📉 {len(deleted_stations)} stations supprimées de l'API")
-                        context.log.info(f"🔄 Lancement pour synchroniser (anciennes stations resteront dans MinIO)")
-                        return True
-
-                else:
-                    context.log.warning(f"⚠️ Impossible de récupérer les codes API (status {api_stations_response.status_code})")
-                    # Fallback sur décision basée count
-
-            except Exception as e:
-                context.log.warning(f"⚠️ Erreur lors de l'analyse détaillée: {e}")
-                import traceback
-                context.log.debug(f"   Traceback: {traceback.format_exc()}")
-                # Fallback sur décision basée count
-
-        # 5. Pour grandes différences ou si analyse échoue, décision basée sur count
+        # 4. Décision basée sur le count uniquement
         if difference > 0:
             context.log.info(f"📈 {difference} nouvelles stations détectées (basé sur count)")
             context.log.info(f"🔄 Lancement de l'intégration en mode MERGE")
