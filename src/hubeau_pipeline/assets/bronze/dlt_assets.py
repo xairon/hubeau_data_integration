@@ -534,8 +534,12 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             partition_date=partition_date
         )
 
-        # Exécuter le pipeline
-        load_info = pipeline.run(source)
+        # Extract file format from config (default to parquet)
+        file_format = cfg.get("destinations", {}).get("filesystem", {}).get("file_format", "parquet")
+        context.log.info(f"🗂️ Using file format: {file_format}")
+
+        # Exécuter le pipeline avec format explicite
+        load_info = pipeline.run(source, loader_file_format=file_format)
     finally:
         # Restore original print function
         builtins.print = original_print

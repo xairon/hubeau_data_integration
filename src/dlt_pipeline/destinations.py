@@ -140,18 +140,14 @@ def get_filesystem_destination(config: Dict = None) -> Any:
         # Filesystem local
         credentials = {}
 
-    # Layout de partitionnement
-    layout = config.get("layout", "{table_name}/year={year}/month={month}/{load_id}.parquet")
-
-    # Format de fichier
-    file_format = config.get("file_format", "parquet")
+    # Note: layout should be passed through config, not as explicit parameter
+    # Note: file_format is NOT a valid parameter for dlt.destinations.filesystem()
+    # It should be set via loader_file_format in pipeline.run() instead
 
     return dlt.destinations.filesystem(
         bucket_url=bucket_url,
         credentials=credentials,
-        layout=layout,
-        file_format=file_format,
-        **{k: v for k, v in config.items() if k not in ["bucket_url", "credentials", "layout", "file_format"]}
+        **{k: v for k, v in config.items() if k not in ["bucket_url", "credentials", "file_format"]}
     )
 
 
