@@ -76,8 +76,9 @@ def _get_minio_path(station_type: str) -> tuple[str, str]:
         Tuple (bucket, path) pour MinIO (ex: ("bronze", "piezometry_api/piezometry_stations/"))
     """
     # Mapping des types de stations vers les noms de datasets
+    # ✅ CORRECTION: Utiliser les vrais noms de paths dans MinIO
     dataset_mapping = {
-        "piezometry": ("piezometry_api", "piezometry_stations"),
+        "piezometry": ("piezo", "piezo stations"),  # Fixed: actual MinIO path
         "hydrometry": ("hydrometry_api", "hydrometry_stations"),
         "quality_rivers": ("quality_rivers_api", "quality_rivers_stations"),
         "quality_groundwater": ("quality_groundwater_api", "quality_groundwater_stations"),
@@ -169,13 +170,25 @@ def extract_station_codes_from_minio(station_type: str) -> List[str]:
             logger.info(f"📂 Listing files in: {full_path}")
             files = s3.get_file_info(pafs.FileSelector(full_path, recursive=True))
             logger.info(f"✅ get_file_info returned {len(files)} items")
-            
-            # Debug: afficher tous les fichiers trouvés
-            for f in files[:10]:  # Limiter à 10 pour ne pas spammer
-                logger.info(f"   File: {f.path}, type={f.type}, size={f.size}")
-            if len(files) > 10:
-                logger.info(f"   ... and {len(files) - 10} more files")
-                
+
+            # Debug: afficher TOUS les fichiers trouvés avec plus de détails
+            if len(files) > 0:
+                logger.info(f"📋 ALL FILES FOUND IN {full_path}:")
+                for i, f in enumerate(files):
+                    logger.info(f"   [{i+1}] path='{f.path}' type={f.type} size={f.size}")
+            else:
+                logger.warning(f"⚠️ NO FILES FOUND - directory might not exist or be empty")
+                # Try listing parent directory to help debug
+                parent_path = "/".join(full_path.rstrip("/").split("/")[:-1]) + "/"
+                logger.info(f"🔍 Trying to list parent directory: {parent_path}")
+                try:
+                    parent_files = s3.get_file_info(pafs.FileSelector(parent_path, recursive=False))
+                    logger.info(f"📋 PARENT DIRECTORY CONTENTS ({len(parent_files)} items):")
+                    for pf in parent_files[:20]:
+                        logger.info(f"   - {pf.path} (type={pf.type})")
+                except Exception as pe:
+                    logger.error(f"❌ Could not list parent directory: {pe}")
+
         except Exception as e:
             logger.error(f"❌ Erreur lors du listing des fichiers dans {full_path}: {e}")
             import traceback
