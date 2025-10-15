@@ -48,6 +48,11 @@ except ImportError as e:
         """Fallback: retourne toutes les stations si module non disponible"""
         return stations
 
+# ✅ DEBUG: Vérifier quelle fonction est importée
+import sys
+sys.stderr.write(f"🔍 DEBUG IMPORT: _extract_station_codes_from_minio = {_extract_station_codes_from_minio}\n")
+sys.stderr.write(f"🔍 DEBUG IMPORT: _extract_station_codes_from_minio module = {_extract_station_codes_from_minio.__module__}\n")
+
 # Partitions pour les données historiques (annuelles depuis 2020)
 YEARLY_PARTITIONS = StaticPartitionsDefinition(
     [str(year) for year in range(2020, 2026)]  # 2020-2025
@@ -194,7 +199,13 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
 
     try:
         # 1. Vérifier le nombre de stations dans MinIO
+        context.log.info(f"🔍 DEBUG: About to call _extract_station_codes_from_minio('{station_type}')")
+        context.log.info(f"🔍 DEBUG: Function reference: {_extract_station_codes_from_minio}")
+        context.log.info(f"🔍 DEBUG: Function module: {_extract_station_codes_from_minio.__module__}")
+
         minio_stations = _extract_station_codes_from_minio(station_type)
+
+        context.log.info(f"🔍 DEBUG: _extract_station_codes_from_minio returned type={type(minio_stations)}, len={len(minio_stations)}")
         minio_count = len(minio_stations)
 
         if minio_count == 0:
@@ -228,6 +239,9 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
 
     except Exception as e:
         context.log.error(f"❌ Erreur lors de la vérification: {e}")
+        context.log.error(f"❌ Type d'erreur: {type(e).__name__}")
+        import traceback
+        context.log.error(f"📋 Traceback complet:\n{traceback.format_exc()}")
         context.log.info(f"🔄 Lancement de l'intégration par précaution")
         return True
 
