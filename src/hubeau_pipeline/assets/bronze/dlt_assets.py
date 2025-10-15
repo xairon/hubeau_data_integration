@@ -92,11 +92,15 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
     stations_data: Dict[str, List[str]] = {}
 
     if all_stations:
-        # 2. Filtrer pour ne garder que les stations actives dans la partition
-        filtered_stations = _filter_active_stations_for_period(all_stations, partition_date, station_type)
+        # ✅ Filtrer les stations basé sur les métadonnées MinIO (dates de mesure)
+        # Au lieu d'appeler l'API, on utilise les champs date_debut/fin_mesure du référentiel
+        context.log.info(f"📂 {len(all_stations)} stations trouvées dans MinIO")
+
+        # Filtrer pour ne garder que les stations actives dans la partition
+        filtered_stations = filter_active_stations_for_period(all_stations, partition_date, station_type, context.log)
         context.log.info(f"✅ {len(filtered_stations)} stations actives pour partition {partition_date}")
 
-        # 3. Convertir en dict avec tous les mois de l'année
+        # 2. Convertir en dict avec tous les mois de l'année
         from datetime import datetime
         year = datetime.strptime(partition_date, "%Y-%m-%d").year
         all_months = [f"{year}-{m:02d}" for m in range(1, 13)]

@@ -198,6 +198,7 @@ def filter_active_stations_for_period(
 ) -> List[str]:
     """
     Filtre les stations pour ne garder que celles qui ont des données pour la période donnée.
+    Utilise les métadonnées (dates) depuis MinIO au lieu d'appeler l'API.
 
     Args:
         stations: Liste des codes de stations
@@ -206,7 +207,7 @@ def filter_active_stations_for_period(
         logger: Optional logger instance. If not provided, uses the module logger.
 
     Returns:
-        List[str]: Liste filtrée des stations actives
+        List[str]: Liste filtrée des stations actives pour la période
     """
     # Use provided logger or create a module-level one
     if logger is None:
@@ -215,140 +216,153 @@ def filter_active_stations_for_period(
     try:
         # Construire la période (année complète)
         year = datetime.strptime(partition_date, "%Y-%m-%d").year
-        start_date = f"{year}-01-01"
-        end_date = f"{year}-12-31"
+        start_date_year = date(year, 1, 1)
+        end_date_year = date(year, 12, 31)
 
-        logger.info(f"🔍 Test des stations pour la période {start_date} à {end_date}")
+        logger.info(f"🔍 Filtrage des stations pour l'année {year} basé sur métadonnées MinIO")
 
-        # Configuration des endpoints par type
-        api_configs = {
-            "temperature": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/temperature",
-                # Utiliser l'endpoint stations pour détecter l'activité sans risque de troncature sur les données
-                "path": "/station",
-                "start_param": "date_debut_mesure",
-                "end_param": "date_fin_mesure",
-                "station_field": "code_station"
-            },
-            "hydrometry": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v2/hydrometrie",
-                "path": "/obs_elab",
-                "start_param": "date_debut_obs_elab",
-                "end_param": "date_fin_obs_elab",
-                "station_field": "code_station"
-            },
-            "piezometry": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes",
-                "path": "/stations",  # ✅ Utiliser /stations au lieu de /chroniques (ne nécessite pas code_bss)
-                "start_param": "date_recherche",  # ✅ /stations utilise date_recherche
-                "end_param": None,  # ✅ /stations n'a pas de paramètre de fin
-                "station_field": "code_bss"
-            },
-            "quality_rivers": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v2/qualite_rivieres",
-                "path": "/station_pc",  # ✅ Utiliser /station_pc au lieu de /analyse_pc (pas de limite 20K)
-                "start_param": "date_debut_prelevement",
-                "end_param": "date_fin_prelevement",
-                "station_field": "code_station"
-            },
-            "quality_groundwater": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/qualite_nappes",
-                "path": "/analyses",
-                "start_param": "date_debut_prelevement",
-                "end_param": "date_fin_prelevement",
-                "station_field": "code_bss"
-            },
-            "ecoulement": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/ecoulement",
-                "path": "/observations",
-                "start_param": "date_debut_obs",
-                "end_param": "date_fin_obs",
-                "station_field": "code_station"
-            },
-            "hydrobio": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/indicateurs_services",
-                "path": "/indices",
-                "start_param": "date_debut_campagne",
-                "end_param": "date_fin_campagne",
-                "station_field": "code_station_hydrobio"
-            },
-            "prelevements": {
-                "base_url": "https://hubeau.eaufrance.fr/api/v1/prelevements",
-                "path": "/chroniques",
-                "start_param": "annee_min",
-                "end_param": "annee_max",
-                "station_field": "code_ouvrage"  # ⚠️ Chroniques utilisent code_ouvrage, pas code_point_prelevement
-            }
+        # Configuration MinIO depuis les variables d'environnement
+        minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+        minio_user = os.getenv("MINIO_USER", "minioadmin")
+        minio_pass = os.getenv("MINIO_PASS", "minioadmin")
+        bucket_name = os.getenv("MINIO_BRONZE_BUCKET", "bronze")
+
+        # Client S3 pour MinIO
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=minio_endpoint,
+            aws_access_key_id=minio_user,
+            aws_secret_access_key=minio_pass,
+            region_name='us-east-1'
+        )
+
+        # Déterminer le préfixe selon le type de stations
+        station_prefixes = {
+            "temperature": "temperature_api/temperature_stations/",
+            "hydrometry": "hydrometry_api/hydrometry_stations/",
+            "piezometry": "piezometry_api/piezometry_stations/",
+            "quality_rivers": "quality_rivers_api/quality_rivers_stations/",
+            "quality_groundwater": "quality_groundwater_api/quality_groundwater_stations/",
+            "ecoulement": "ecoulement_api/ecoulement_stations/",
+            "hydrobio": "hydrobio_api/hydrobio_stations/",
+            "prelevements": "prelevements_api/prelevements_ouvrages/"
         }
 
-        if station_type not in api_configs:
-            logger.warning(f"⚠️ Type de station non supporté pour le filtrage: {station_type}")
+        prefix = station_prefixes.get(station_type, f"{station_type}_api/{station_type}_stations/")
+
+        # Chercher les fichiers de stations
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=prefix
+        )
+
+        if 'Contents' not in response:
+            logger.warning(f"⚠️ Aucun fichier trouvé dans {prefix}, retour de toutes les stations")
             return stations
 
-        config = api_configs[station_type]
+        # Filtrer pour ne prendre que les fichiers Parquet
+        parquet_files = [f for f in response['Contents'] if f['Key'].endswith('.parquet')]
 
-        # ✅ CORRECTIF: Récupérer TOUTES les stations actives avec pagination
-        active_stations = set()
-        page = 1
-        max_pages = 500  # Limite augmentée (quality_groundwater: 8.5M÷20K=425 pages)
+        if not parquet_files:
+            logger.warning(f"⚠️ Aucun fichier Parquet trouvé, retour de toutes les stations")
+            return stations
 
-        while page <= max_pages:
-            params = {
-                "format": "json",
-                "size": 20000,  # Taille maximale pour récupérer plus de stations
-                "page": page,
-            }
+        # Prendre le fichier le plus récent
+        latest_file = max(parquet_files, key=lambda x: x['LastModified'])
+        file_key = latest_file['Key']
 
-            # ✅ Gestion spéciale pour piezometry: utiliser date_recherche avec milieu d'année
-            if station_type == "piezometry":
-                # Utiliser milieu d'année pour maximiser la couverture
-                mid_year_date = f"{year}-06-15"
-                params["date_recherche"] = mid_year_date
-            else:
-                # Pour les autres types, utiliser les paramètres start/end
-                params[config["start_param"]] = start_date
-                if config["end_param"] is not None:
-                    params[config["end_param"]] = end_date
+        logger.info(f"📂 Lecture des métadonnées depuis: {file_key}")
 
-            response = httpx.get(f"{config['base_url']}{config['path']}", params=params, timeout=30)
+        # Déterminer le champ de clé selon le type de stations
+        station_key_fields = {
+            "temperature": "code_station",
+            "hydrometry": "code_station",
+            "piezometry": "code_bss",
+            "quality_rivers": "code_station",
+            "quality_groundwater": "code_bss",
+            "ecoulement": "code_station",
+            "hydrobio": "code_station_hydrobio",
+            "prelevements": "code_ouvrage"
+        }
 
-            if response.status_code not in [200, 206]:
-                logger.warning(f"⚠️ Erreur API lors du filtrage (page {page}): {response.status_code}")
+        key_field = station_key_fields.get(station_type, "code_station")
+
+        # Créer un filesystem S3 pour pyarrow (compatible MinIO)
+        endpoint_host = minio_endpoint.replace('http://', '').replace('https://', '')
+        scheme = 'http' if minio_endpoint.startswith('http://') else 'https'
+
+        s3_fs = pafs.S3FileSystem(
+            access_key=minio_user,
+            secret_key=minio_pass,
+            endpoint_override=endpoint_host,
+            scheme=scheme
+        )
+
+        # Construire le chemin S3 complet
+        s3_path = f"{bucket_name}/{file_key}"
+
+        # Lire le Parquet directement via le filesystem S3
+        table = pq.read_table(s3_path, filesystem=s3_fs)
+        df = table.to_pandas()
+
+        logger.info(f"📊 {len(df)} stations dans le référentiel MinIO")
+
+        # Filtrer selon les dates de mesure
+        # Les champs de dates varient selon l'API
+        date_debut_fields = ["date_debut_mesure", "date_debut_obs", "date_debut_service"]
+        date_fin_fields = ["date_fin_mesure", "date_fin_obs", "date_fin_service"]
+
+        # Trouver les champs de dates présents
+        debut_field = None
+        fin_field = None
+
+        for field in date_debut_fields:
+            if field in df.columns:
+                debut_field = field
                 break
 
-            data = response.json()
-            records = data.get("data", [])
-
-            if not records:
-                # Plus de données
+        for field in date_fin_fields:
+            if field in df.columns:
+                fin_field = field
                 break
 
-            # Extraire les stations qui ont des données
-            station_field = config["station_field"]
-            for record in records:
-                if station_field in record:
-                    active_stations.add(record[station_field])
+        if not debut_field or not fin_field:
+            logger.warning(f"⚠️ Champs de dates non trouvés (colonnes: {df.columns.tolist()}), retour de toutes les stations")
+            return stations
 
-            logger.info(f"🔍 Page {page}: {len(records)} records, {len(active_stations)} stations uniques trouvées")
+        logger.info(f"📅 Utilisation des champs: {debut_field}, {fin_field}")
 
-            # ✅ Continuer tant que l'API fournit un lien next
-            next_link = data.get("next")
-            if next_link is None:
-                logger.info(f"✅ Dernière page atteinte (next=None)")
-                break
+        # Convertir les dates en format datetime
+        df[debut_field] = pd.to_datetime(df[debut_field], errors='coerce')
+        df[fin_field] = pd.to_datetime(df[fin_field], errors='coerce')
 
-            page += 1
+        # Filtrer les stations actives pour l'année demandée
+        # Une station est active si:
+        # - date_debut_mesure <= end_date_year (a commencé avant ou pendant l'année)
+        # - ET (date_fin_mesure >= start_date_year OU date_fin_mesure est NULL) (est toujours active ou s'est arrêtée après le début de l'année)
+        df_active = df[
+            (df[debut_field] <= pd.Timestamp(end_date_year)) &
+            ((df[fin_field].isna()) | (df[fin_field] >= pd.Timestamp(start_date_year)))
+        ]
 
-        # Filtrer la liste originale pour ne garder que les stations actives
-        filtered_stations = [station for station in stations if station in active_stations]
+        # Extraire les codes des stations actives
+        if key_field in df_active.columns:
+            active_station_codes = set(df_active[key_field].dropna().unique().tolist())
+        else:
+            logger.warning(f"⚠️ Champ {key_field} non trouvé, retour de toutes les stations")
+            return stations
 
-        logger.info(f"📊 Résultat du filtrage: {len(filtered_stations)} stations actives sur {len(stations)} total")
-        logger.info(f"📊 Stations actives trouvées dans l'API: {len(active_stations)}")
+        # Filtrer la liste originale
+        filtered_stations = [s for s in stations if s in active_station_codes]
+
+        logger.info(f"✅ {len(filtered_stations)} stations actives pour {year} (sur {len(stations)} total)")
 
         return filtered_stations
 
     except Exception as e:
-        logger.error(f"⚠️ Erreur lors du filtrage des stations: {e}")
+        logger.error(f"⚠️ Erreur lors du filtrage basé sur métadonnées MinIO: {e}")
+        logger.error(traceback.format_exc())
+        logger.warning("⚠️ Retour de toutes les stations sans filtrage")
         return stations  # En cas d'erreur, retourner toutes les stations
 
 
