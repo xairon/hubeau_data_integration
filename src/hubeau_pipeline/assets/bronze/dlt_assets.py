@@ -143,6 +143,34 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
 # - extract_station_codes_from_result, get_active_departments_for_stations -> station_api.py
 # - _extract_station_codes_from_minio, _filter_active_stations_for_period -> station_minio.py
 
+def _setup_station_minio_logging(context: AssetExecutionContext):
+    """
+    Configure le logger station_minio pour capturer les logs dans Dagster.
+    Doit être appelé avant check_stations_need_update().
+    """
+    import logging
+
+    class DagsterLogHandler(logging.Handler):
+        def emit(self, record):
+            msg = self.format(record)
+            # Use warning level to ensure visibility
+            context.log.warning(f"MINIO [{record.levelname}]: {msg}")
+
+    handler = DagsterLogHandler()
+    handler.setLevel(logging.DEBUG)
+
+    # Configure station_minio logger
+    station_minio_logger = logging.getLogger('src.hubeau_pipeline.utils.station_minio')
+    station_minio_logger.setLevel(logging.DEBUG)
+
+    # Remove existing handlers to avoid duplicates
+    station_minio_logger.handlers.clear()
+
+    # Add our Dagster handler
+    station_minio_logger.addHandler(handler)
+
+    return handler
+
 def check_stations_need_update(context: AssetExecutionContext, station_type: str) -> bool:
     """
     Vérifie si les stations de référence dans MinIO sont à jour avec l'API.
@@ -408,10 +436,12 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     hubeau_source_logger2.setLevel(logging.DEBUG)
     hubeau_source_logger2.addHandler(dagster_handler)
     
-    # ✅ Capturer les logs de station_minio.py
+    # ✅ Capturer les logs de station_minio.py (si pas déjà configuré)
     station_minio_logger = logging.getLogger('src.hubeau_pipeline.utils.station_minio')
     station_minio_logger.setLevel(logging.DEBUG)
-    station_minio_logger.addHandler(dagster_handler)
+    # Only add handler if not already present (may have been set up in asset function)
+    if dagster_handler not in station_minio_logger.handlers:
+        station_minio_logger.addHandler(dagster_handler)
     
     try:
         # Execute DLT pipeline with monkey-patched print
@@ -604,6 +634,9 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 @asset(group_name="hubeau_hydrometry")
 def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "hydrometry"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
@@ -611,6 +644,9 @@ def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, A
 @asset(group_name="hubeau_piezometry")
 def piezometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "piezometry"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
@@ -618,6 +654,9 @@ def piezometry_stations_reference(context: AssetExecutionContext) -> Dict[str, A
 @asset(group_name="hubeau_quality_rivers")
 def quality_rivers_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "quality_rivers"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
@@ -625,6 +664,9 @@ def quality_rivers_stations_reference(context: AssetExecutionContext) -> Dict[st
 @asset(group_name="hubeau_quality_groundwater")
 def quality_groundwater_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality groundwater stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "quality_groundwater"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
@@ -632,6 +674,9 @@ def quality_groundwater_stations_reference(context: AssetExecutionContext) -> Di
 @asset(group_name="hubeau_ecoulement")
 def ecoulement_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "ecoulement"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
@@ -643,6 +688,9 @@ def ecoulement_campagnes_reference(context: AssetExecutionContext) -> Dict[str, 
 @asset(group_name="hubeau_hydrobio")
 def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "hydrobio"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
@@ -655,6 +703,9 @@ def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str,
     Un ouvrage = installation technique de prélèvement (infrastructure).
     Utilisé par les chroniques (code_ouvrage).
     """
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "prelevements"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
@@ -673,6 +724,9 @@ def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, A
 @asset(group_name="hubeau_temperature")
 def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature stations reference data using dlt (pas de partition)."""
+    # ✅ Setup logging BEFORE checking MinIO
+    _setup_station_minio_logging(context)
+
     if not check_stations_need_update(context, "temperature"):
         return {"status": "skipped", "reason": "MinIO already up-to-date"}
     return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
