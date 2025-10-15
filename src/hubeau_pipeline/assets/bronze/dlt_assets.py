@@ -194,7 +194,7 @@ def check_stations_need_update(context: AssetExecutionContext, station_type: str
 
     try:
         # 1. Vérifier le nombre de stations dans MinIO
-        minio_stations = _extract_station_codes_from_minio(station_type, logger=context.log)
+        minio_stations = _extract_station_codes_from_minio(station_type)
         minio_count = len(minio_stations)
 
         if minio_count == 0:
