@@ -76,12 +76,13 @@ def _get_minio_path(station_type: str) -> tuple[str, str]:
         Tuple (bucket, path) pour MinIO (ex: ("bronze", "piezometry_api/piezometry_stations/"))
     """
     # Mapping des types de stations vers les noms de datasets
-    # ✅ CORRECTION: Utiliser les vrais noms de paths dans MinIO
+    # Ces paths correspondent à la structure: bronze/{dataset_name}/{resource_name}/
+    # dataset_name est construit comme {source.name}_api dans dlt_assets.py
     dataset_mapping = {
-        "piezometry": ("piezo", "piezo stations"),  # Fixed: actual MinIO path
+        "piezometry": ("piezometry_api", "piezometry_stations"),
         "hydrometry": ("hydrometry_api", "hydrometry_stations"),
-        "quality_rivers": ("quality_rivers_api", "quality_rivers_stations"),
-        "quality_groundwater": ("quality_groundwater_api", "quality_groundwater_stations"),
+        "quality_rivers": ("quality_api", "quality_rivers_stations"),  # source.name="quality"
+        "quality_groundwater": ("quality_api", "quality_groundwater_stations"),  # source.name="quality"
         "hydrobio": ("hydrobio_api", "hydrobio_stations"),
         "ecoulement": ("ecoulement_api", "ecoulement_stations"),
         "prelevements": ("prelevements_api", "prelevements_ouvrages"),
