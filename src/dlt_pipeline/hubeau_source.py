@@ -888,7 +888,7 @@ def slice_by_dept_datetime(
             while True:
                 page_params = {**params, 'page': page}
 
-                logger.info(f"📡 HTTP GET {client.base_url}{endpoint} slice={slice_index} page={page}")
+                logger.info(f"📡 HTTP GET {client.base_url}{endpoint} slice={slice_index} page={page} params={page_params}")
                 response = client.get(endpoint, params=page_params)
                 logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
 

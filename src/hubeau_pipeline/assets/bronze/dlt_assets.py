@@ -210,6 +210,16 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
                     cfg["temporal_filter"]["end_date"] = f"{year}-12-31"
             context.log.info(f"🗓️ Filtre temporel mis à jour pour l'année {year}")
 
+        # ✅ FIX: Update extraction.start_date aussi (pour dept_datetime mode)
+        if cfg.get("extraction") and len(partition_key) == 4 and partition_key.isdigit():
+            year = int(partition_key)
+            if "start_date" in cfg["extraction"]:
+                cfg["extraction"]["start_date"] = f"{year}-01-01"
+                context.log.info(f"🗓️ Extraction start_date mis à jour: {year}-01-01")
+            if "end_date" in cfg["extraction"]:
+                cfg["extraction"]["end_date"] = f"{year}-12-31"
+                context.log.info(f"🗓️ Extraction end_date mis à jour: {year}-12-31")
+
     # Simple logging without accessing nested config fields
     # (DLT will handle the nested config structure internally)
     context.log.info(f"🚀 Starting DLT ingestion...")
