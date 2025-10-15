@@ -778,6 +778,161 @@ def slice_by_datetime(
     logger.info(f"🏁 DATETIME slicing completed: {total_records_all} total records extracted across {period_index} periods")
 
 
+def slice_by_dept_datetime(
+    client: RESTClient,
+    endpoint: str,
+    extraction_config: Dict[str, Any]
+) -> Iterator[Dict[str, Any]]:
+    """
+    Stratégie dept_datetime: chunking par département + fenêtres temporelles.
+
+    Combine le découpage départemental (en chunks) avec des fenêtres temporelles mensuelles.
+    Optimisé pour éviter la truncation tout en minimisant le nombre de requêtes.
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        extraction_config: Configuration avec dept_list, dept_chunk_size, dates, etc.
+
+    Yields:
+        Records extraits avec métadonnées _slice_dept_chunk et _slice_period
+    """
+    import calendar
+    from datetime import datetime, timedelta
+
+    # Configuration départements
+    dept_list = extraction_config.get('dept_list', [])
+    dept_chunk_size = extraction_config.get('dept_chunk_size', 8)
+    dept_param = extraction_config.get('dept_param', 'code_departement')
+
+    # Configuration temporelle
+    start_date_str = extraction_config.get('start_date', '2020-01-01')
+    end_offset_days = extraction_config.get('end_offset_days', 0)
+    window_days = extraction_config.get('window_days', 30)
+    start_param = extraction_config.get('start_param', 'date_debut')
+    end_param = extraction_config.get('end_param', 'date_fin')
+
+    # Pagination
+    pagination_config = extraction_config.get('pagination', {})
+    page_size = pagination_config.get('page_size', 5000)
+
+    # Calculer dates de début et fin
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    end_date = date.today() - timedelta(days=end_offset_days)
+
+    # Si start_date est une partition annuelle (ex: 2024-01-01), limiter à la fin de l'année
+    if start_date.month == 1 and start_date.day == 1:
+        end_of_year = date(start_date.year, 12, 31)
+        end_date = min(end_date, end_of_year)
+
+    logger.info(f"🗺️📅 Starting DEPT_DATETIME slicing for endpoint: {endpoint}")
+    logger.info(f"📍 {len(dept_list)} departments in {(len(dept_list) + dept_chunk_size - 1) // dept_chunk_size} chunks of {dept_chunk_size}")
+    logger.info(f"🗓️ Date range: {start_date} to {end_date} ({(end_date - start_date).days} days)")
+    logger.info(f"⏱️ Window size: {window_days} days, page_size: {page_size}")
+
+    # Générer les fenêtres mensuelles
+    def month_windows(start: date, end: date) -> Iterator[tuple[date, date]]:
+        """Génère des fenêtres mensuelles exactes"""
+        cursor = date(start.year, start.month, 1)
+        final = date(end.year, end.month, calendar.monthrange(end.year, end.month)[1])
+        while cursor <= final:
+            last_day = calendar.monthrange(cursor.year, cursor.month)[1]
+            period_end = date(cursor.year, cursor.month, last_day)
+            yield cursor, min(period_end, final)
+            if cursor.month == 12:
+                cursor = date(cursor.year + 1, 1, 1)
+            else:
+                cursor = date(cursor.year, cursor.month + 1, 1)
+
+    # Calculer nombre total de chunks et périodes
+    num_dept_chunks = (len(dept_list) + dept_chunk_size - 1) // dept_chunk_size
+    periods = list(month_windows(start_date, end_date))
+    num_periods = len(periods)
+    total_slices = num_dept_chunks * num_periods
+
+    logger.info(f"📊 Total slices: {num_dept_chunks} dept chunks × {num_periods} periods = {total_slices} slices")
+
+    total_records_all = 0
+    slice_index = 0
+
+    # Chunker les départements
+    for dept_chunk_idx in range(0, len(dept_list), dept_chunk_size):
+        dept_chunk = dept_list[dept_chunk_idx:dept_chunk_idx + dept_chunk_size]
+        dept_chunk_str = ",".join(dept_chunk)
+
+        logger.info(f"🏛️ Processing dept chunk {dept_chunk_idx // dept_chunk_size + 1}/{num_dept_chunks}: {dept_chunk}")
+
+        # Pour chaque fenêtre mensuelle
+        for period_idx, (period_start, period_end) in enumerate(periods, 1):
+            slice_index += 1
+
+            logger.info(f"📆 Slice {slice_index}/{total_slices}: Depts [{dept_chunk[0]}...{dept_chunk[-1]}] × Period {period_start} to {period_end}")
+
+            # Construire les paramètres
+            params = {
+                'format': 'json',
+                'size': page_size,
+                dept_param: dept_chunk_str,
+                start_param: period_start.isoformat(),
+                end_param: period_end.isoformat()
+            }
+
+            # Ajouter paramètres par défaut
+            default_params = extraction_config.get('default_params', {})
+            params.update(default_params)
+
+            # Pagination manuelle pour cette slice
+            page = 1
+            slice_total_records = 0
+
+            while True:
+                page_params = {**params, 'page': page}
+
+                logger.info(f"📡 HTTP GET {client.base_url}{endpoint} slice={slice_index} page={page}")
+                response = client.get(endpoint, params=page_params)
+                logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
+                page_data = response.json()
+
+                # Extraire records
+                records = extract_records(page_data, extraction_config)
+                record_count = len(records)
+                slice_total_records += record_count
+
+                if not records:
+                    logger.info(f"⚠️ No records on page {page}, moving to next slice")
+                    break
+
+                logger.info(f"📊 Extracted {record_count} records from page {page}")
+
+                # Yield records avec métadonnées
+                for record in records:
+                    record['_slice_dept_chunk'] = dept_chunk_str
+                    record['_slice_period_start'] = period_start.isoformat()
+                    record['_slice_period_end'] = period_end.isoformat()
+                    yield record
+
+                # Vérifier dernière page
+                last_page = page_data.get('last_page', page_data.get('count', 1))
+                logger.info(f"📖 Page {page}/{last_page} completed ({record_count} records)")
+
+                if page >= last_page:
+                    logger.info(f"✅ Reached last page ({last_page})")
+                    break
+
+                # ⚠️ Détection de truncation
+                if slice_total_records >= 20000:
+                    logger.warning(f"⚠️ WARNING: Slice reached 20k records limit! Consider reducing chunk size or window.")
+                    break
+
+                page += 1
+
+            total_records_all += slice_total_records
+            logger.info(f"✅ Slice {slice_index}/{total_slices} completed: {slice_total_records} records")
+
+    logger.info(f"🏁 DEPT_DATETIME slicing completed: {total_records_all} total records across {slice_index} slices")
+
+
 # ============================================
 # FACTORIES DE RESOURCES DLT
 # ============================================
@@ -842,6 +997,7 @@ def create_chroniques_resource(
     Crée une resource DLT pour les chroniques avec incremental loading.
 
     Supporte les stratégies de slicing:
+    - dept_datetime: chunking par département + fenêtres temporelles (recommandé)
     - station_month_chunked: découpage par stations + mois (avec chunks)
     - datetime: découpage temporel par période
     - global: requête unique (fallback)
@@ -889,7 +1045,11 @@ def create_chroniques_resource(
 
         slicing_mode = extraction_config.get('slicing_mode', 'global')
 
-        if slicing_mode == 'station_month_chunked' and stations_data:
+        if slicing_mode == 'dept_datetime':
+            yield from slice_by_dept_datetime(
+                client, endpoint, extraction_config
+            )
+        elif slicing_mode == 'station_month_chunked' and stations_data:
             yield from slice_by_station_month(
                 client, endpoint, extraction_config,
                 stations_data, last_value

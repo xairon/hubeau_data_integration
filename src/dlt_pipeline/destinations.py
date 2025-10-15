@@ -113,8 +113,10 @@ def get_filesystem_destination(config: Dict = None) -> Any:
     # Déterminer le type de filesystem
     bucket_url = config.get("bucket_url", os.getenv("MINIO_BUCKET_URL", "s3://bronze"))
 
-    # Configuration selon le protocole
-    if bucket_url.startswith("s3://"):
+    # ✅ FIX: Utiliser config["credentials"] si fourni (priorité), sinon env vars
+    if "credentials" in config:
+        credentials = config["credentials"]
+    elif bucket_url.startswith("s3://"):
         # Configuration MinIO/S3
         credentials = {
             "aws_access_key_id": os.getenv("MINIO_USER", os.getenv("AWS_ACCESS_KEY_ID")),
