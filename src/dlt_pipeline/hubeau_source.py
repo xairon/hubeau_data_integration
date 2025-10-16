@@ -492,6 +492,110 @@ def slice_by_datetime(
     logger.info(f"🏁 DATETIME slicing completed: {total_records_all} total records extracted across {period_index} periods")
 
 
+def slice_global_chunked(
+    client: RESTClient,
+    endpoint: str,
+    extraction_config: Dict[str, Any],
+    stations_data: Optional[Dict[str, List[str]]] = None
+) -> Iterator[Dict[str, Any]]:
+    """
+    Stratégie global_chunked: découpage par chunks de stations.
+
+    Utilisé pour les endpoints qui NÉCESSITENT des codes de stations
+    (ex: piézométrie chroniques avec code_bss, hydrométrie obs_elab avec code_station).
+
+    Découpe la liste de stations en chunks et pagine chaque chunk.
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        extraction_config: Configuration d'extraction
+        stations_data: Dict {station_code: [months]} fourni par l'asset
+
+    Yields:
+        Records extraits avec métadonnées de chunking
+    """
+    if not stations_data:
+        logger.warning(f"⚠️ No stations_data provided for global_chunked mode - no data will be extracted")
+        return
+
+    station_param = extraction_config.get('station_param', 'code_bss')
+    chunk_size = extraction_config.get('station_chunk_size', 50)
+
+    # Extraire la liste unique de stations
+    all_stations = list(stations_data.keys())
+    total_stations = len(all_stations)
+
+    logger.info(f"📦 Starting GLOBAL_CHUNKED slicing for endpoint: {endpoint}")
+    logger.info(f"🔢 Total stations: {total_stations}, chunk_size: {chunk_size}")
+    logger.info(f"🔑 Station parameter: {station_param}")
+
+    # Découper en chunks
+    total_chunks = (total_stations + chunk_size - 1) // chunk_size
+    total_records_all = 0
+
+    for chunk_index in range(0, total_stations, chunk_size):
+        chunk_stations = all_stations[chunk_index:chunk_index + chunk_size]
+        chunk_num = (chunk_index // chunk_size) + 1
+
+        logger.info(f"📦 Chunk {chunk_num}/{total_chunks}: {len(chunk_stations)} stations")
+        logger.info(f"   Stations: {', '.join(chunk_stations[:5])}{'...' if len(chunk_stations) > 5 else ''}")
+
+        # Construire les paramètres avec la liste de stations
+        params = {
+            'format': 'json',
+            station_param: ','.join(chunk_stations)  # Joindre avec des virgules
+        }
+
+        # Ajouter les paramètres par défaut
+        default_params = extraction_config.get('default_params', {})
+        params.update(default_params)
+
+        # Pagination manuelle pour ce chunk
+        page = 1
+        chunk_total_records = 0
+
+        while True:
+            page_params = {**params, 'page': page}
+
+            logger.info(f"📡 HTTP GET {client.base_url}{endpoint} chunk={chunk_num} page={page} stations={len(chunk_stations)}")
+            response = client.get(endpoint, params=page_params)
+            logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
+
+            page_data = response.json()
+
+            records = extract_records(page_data, extraction_config)
+            record_count = len(records)
+            chunk_total_records += record_count
+
+            if not records:
+                logger.info(f"⚠️ No records on page {page} for chunk {chunk_num}, moving to next chunk")
+                break
+
+            logger.info(f"📊 Extracted {record_count} records from page {page} for chunk {chunk_num}")
+
+            # Yield records avec métadonnées
+            for record in records:
+                record['_slice_mode'] = 'global_chunked'
+                record['_chunk_index'] = chunk_num
+                record['_chunk_size'] = len(chunk_stations)
+                yield record
+
+            # Vérifier dernière page
+            last_page = page_data.get('last_page', page_data.get('count', 1))
+            logger.info(f"📖 Page {page}/{last_page} completed for chunk {chunk_num} ({record_count} records)")
+
+            if page >= last_page:
+                logger.info(f"✅ Reached last page ({last_page}) for chunk {chunk_num}")
+                break
+
+            page += 1
+
+        total_records_all += chunk_total_records
+        logger.info(f"✅ Chunk {chunk_num}/{total_chunks} completed: {chunk_total_records} records extracted")
+
+    logger.info(f"🏁 GLOBAL_CHUNKED slicing completed: {total_records_all} total records extracted across {total_chunks} chunks")
+
 
 @dlt.source(name="hubeau")
 def hubeau_rest_source(
@@ -636,6 +740,7 @@ def create_chroniques_resource(
     Crée une resource DLT pour les chroniques avec incremental loading.
 
     Supporte les stratégies de slicing:
+    - global_chunked: découpage par chunks de stations (requis pour piézométrie)
     - datetime: découpage temporel par période
     - global: requête unique (fallback)
 
@@ -682,7 +787,11 @@ def create_chroniques_resource(
 
         slicing_mode = extraction_config.get('slicing_mode', 'global')
 
-        if slicing_mode == 'datetime':
+        if slicing_mode == 'global_chunked':
+            yield from slice_global_chunked(
+                client, endpoint, extraction_config, stations_data
+            )
+        elif slicing_mode == 'datetime':
             yield from slice_by_datetime(
                 client, endpoint, extraction_config,
                 temporal_config, last_value
@@ -708,6 +817,7 @@ def create_observations_resource(
     Crée une resource DLT pour les observations/analyses.
 
     Supporte les stratégies de slicing:
+    - global_chunked: découpage par chunks de stations (requis pour hydrométrie obs_elab)
     - datetime: découpage temporel par période
     - global: requête unique (fallback)
 
@@ -736,7 +846,11 @@ def create_observations_resource(
 
         slicing_mode = extraction_config.get('slicing_mode', 'global')
 
-        if slicing_mode == 'datetime':
+        if slicing_mode == 'global_chunked':
+            yield from slice_global_chunked(
+                client, endpoint, extraction_config, stations_data
+            )
+        elif slicing_mode == 'datetime':
             yield from slice_by_datetime(
                 client, endpoint, extraction_config,
                 temporal_config, None
