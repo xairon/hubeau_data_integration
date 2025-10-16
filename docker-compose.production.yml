@@ -19,14 +19,57 @@ services:
     mem_limit: 512m
     cpus: 0.2
 
+  dlt_worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    image: hubeau-worker:latest
+    container_name: brgm-dlt-worker
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      PYTHONPATH: /app/src:/app
+      # Database credentials
+      PG_PASSWORD: ${PG_PASSWORD}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      # MinIO/S3 credentials
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      # AWS compatibility
+      AWS_ACCESS_KEY_ID: ${MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./src:/app/src
+      - ./configs:/app/configs:ro
+      - ./scripts:/app/scripts:ro
+      - ./dagster_home:/app/dagster_home:ro
+    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline"]
+    expose:
+      - "4000"  # GRPC API (internal)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 4000)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 0.7
+
   dagster_webserver:
     build:
       context: .
-      dockerfile: docker/dagster/Dockerfile
-    image: hubeau-dagster:latest
+      dockerfile: docker/orchestrator/Dockerfile
+    image: hubeau-orchestrator:latest
     container_name: brgm-dagster-webserver
     depends_on:
       dagster_postgres:
+        condition: service_healthy
+      dlt_worker:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
@@ -34,23 +77,10 @@ services:
       DAGSTER_PG_DB: dagster
       DAGSTER_PG_USER: postgres
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
-      PYTHONPATH: /app/src:/app
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_BRONZE_BUCKET: bronze
-      MINIO_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: ${MINIO_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      AWS_ENDPOINT_URL: http://minio:9000
-      AWS_DEFAULT_REGION: us-east-1
+      PYTHONPATH: /app
     volumes:
       - ./dagster_home:/app/dagster_home
-      - ./dagster:/app/dagster
-      - ./src:/app/src
-      - ./pipelines:/app/pipelines
       - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
-      - ./.dlt:/app/.dlt:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
     ports:
       - "8080:3000"
@@ -59,37 +89,24 @@ services:
     cpus: 0.3
 
   dagster_daemon:
-    image: hubeau-dagster:latest
+    image: hubeau-orchestrator:latest
     container_name: brgm-dagster-daemon
     depends_on:
       dagster_postgres:
         condition: service_healthy
-      dagster_webserver:
-        condition: service_started
+      dlt_worker:
+        condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: dagster_postgres
       DAGSTER_PG_DB: dagster
       DAGSTER_PG_USER: postgres
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
-      PYTHONPATH: /app/src:/app
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_BRONZE_BUCKET: bronze
-      MINIO_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: ${MINIO_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      AWS_ENDPOINT_URL: http://minio:9000
-      AWS_DEFAULT_REGION: us-east-1
+      PYTHONPATH: /app
     volumes:
       - ./dagster_home:/app/dagster_home
-      - ./dagster:/app/dagster
-      - ./src:/app/src
-      - ./pipelines:/app/pipelines
       - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
-      - ./.dlt:/app/.dlt:ro
-    command: ["dagster-daemon","run","-m","hubeau_pipeline"]
+    command: ["dagster-daemon","run"]
     restart: unless-stopped
     mem_limit: 2g
     cpus: 0.7

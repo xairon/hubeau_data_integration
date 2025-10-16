@@ -11,7 +11,7 @@ variables:
   PROJECT_DIR: /srv/brgm
   # Portainer accessible sur https://srv991054.hstgr.cloud:9443 après déploiement
 
-# Stage 1: Build de l'image Docker (automatique sur chaque push)
+# Stage 1: Build des images Docker (automatique sur chaque push)
 build:image:
   stage: build
   image: docker:24-cli
@@ -22,11 +22,15 @@ build:image:
     - echo "📦 Synchronisation des fichiers vers /srv/brgm..."
     # Le runner GitLab clone dans /builds/, on copie vers /srv/brgm
     - rsync -av --delete --exclude='.git' --exclude='dagster_home/history' --exclude='dagster_home/storage' --exclude='__pycache__' ./ /srv/brgm/
-    - echo "🏗️ Build de l'image Docker..."
+    - echo "🏗️ Build de l'image Orchestrator..."
     - cd /srv/brgm
-    - docker build -f docker/dagster/Dockerfile -t hubeau-dagster:$CI_COMMIT_SHORT_SHA .
-    - docker tag hubeau-dagster:$CI_COMMIT_SHORT_SHA hubeau-dagster:latest
-    - echo "✅ Image buildée hubeau-dagster latest (tag $CI_COMMIT_SHORT_SHA)"
+    - docker build -f docker/orchestrator/Dockerfile -t hubeau-orchestrator:$CI_COMMIT_SHORT_SHA .
+    - docker tag hubeau-orchestrator:$CI_COMMIT_SHORT_SHA hubeau-orchestrator:latest
+    - echo "✅ Image hubeau-orchestrator:latest buildée (tag $CI_COMMIT_SHORT_SHA)"
+    - echo "🏗️ Build de l'image Worker..."
+    - docker build -f docker/worker/Dockerfile -t hubeau-worker:$CI_COMMIT_SHORT_SHA .
+    - docker tag hubeau-worker:$CI_COMMIT_SHORT_SHA hubeau-worker:latest
+    - echo "✅ Image hubeau-worker:latest buildée (tag $CI_COMMIT_SHORT_SHA)"
   only:
     - main
   tags:
@@ -46,10 +50,14 @@ deploy:production:
       cat > .env.production << EOF
       # Fichier généré automatiquement par le pipeline GitLab CI/CD
       # NE PAS ÉDITER MANUELLEMENT - Les changements seront écrasés
-      
+
       # Dagster PostgreSQL
       DAGSTER_PG_PASSWORD=${DAGSTER_PG_PASSWORD}
-      
+
+      # Databases
+      PG_PASSWORD=${PG_PASSWORD}
+      NEO4J_PASSWORD=${NEO4J_PASSWORD}
+
       # MinIO
       MINIO_USER=${MINIO_USER}
       MINIO_PASS=${MINIO_PASS}
