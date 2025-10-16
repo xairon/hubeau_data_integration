@@ -71,4 +71,4 @@ destinations:
   filesystem:
     bucket_url: s3://bronze
     file_format: parquet
-    layout: '{table_name}/year={YYYY}/{load_id}.parquet'
+    layout: '{table_name}/year={YYYY}/data.parquet'

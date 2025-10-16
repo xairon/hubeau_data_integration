@@ -52,6 +52,6 @@ destinations:
   filesystem:
     bucket_url: s3://bronze
     file_format: parquet
-    layout: '{table_name}/{load_id}.parquet'
+    layout: '{table_name}/data.parquet'
   duckdb:
     database: data/piezometry.duckdb
