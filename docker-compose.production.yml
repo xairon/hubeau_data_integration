@@ -29,23 +29,32 @@ services:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
       # Database credentials
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-postgres}
+      PG_USER: ${PG_USER:-postgres}
       PG_PASSWORD: ${PG_PASSWORD}
+      POSTGIS_HOST: ${POSTGIS_HOST:-postgis}
+      POSTGIS_PORT: ${POSTGIS_PORT:-5432}
+      POSTGIS_DB: ${POSTGIS_DB:-postgres}
+      POSTGIS_USER: ${POSTGIS_USER:-postgres}
+      POSTGIS_PASSWORD: ${PG_PASSWORD}
       # MinIO/S3 credentials (used by app code)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_USER: ${MINIO_USER}
       MINIO_PASS: ${MINIO_PASS}
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
       # AWS compatibility (used by boto3/s3fs)
       AWS_ACCESS_KEY_ID: ${MINIO_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      AWS_ENDPOINT_URL: http://minio:9000
-      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      AWS_DEFAULT_REGION: ${MINIO_REGION:-us-east-1}
       # DLT filesystem destination credentials (DLT-specific env vars)
       DESTINATION__FILESYSTEM__CREDENTIALS__AWS_ACCESS_KEY_ID: ${MINIO_USER}
       DESTINATION__FILESYSTEM__CREDENTIALS__AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      DESTINATION__FILESYSTEM__CREDENTIALS__ENDPOINT_URL: http://minio:9000
-      DESTINATION__FILESYSTEM__CREDENTIALS__REGION_NAME: us-east-1
+      DESTINATION__FILESYSTEM__CREDENTIALS__ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
+      DESTINATION__FILESYSTEM__CREDENTIALS__REGION_NAME: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./src:/app/src
       - ./configs:/app/configs:ro
@@ -77,9 +86,10 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
-      DAGSTER_PG_HOST: dagster_postgres
-      DAGSTER_PG_DB: dagster
-      DAGSTER_PG_USER: postgres
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
       PYTHONPATH: /app
     volumes:
@@ -102,9 +112,10 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
-      DAGSTER_PG_HOST: dagster_postgres
-      DAGSTER_PG_DB: dagster
-      DAGSTER_PG_USER: postgres
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
       PYTHONPATH: /app
     volumes:
