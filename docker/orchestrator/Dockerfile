@@ -17,14 +17,14 @@ WORKDIR /app
 # Install uv (ultra-fast Python package installer)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy project files
-COPY pyproject.toml /app/pyproject.toml
+# Copy project files (need README.md for package metadata)
+COPY pyproject.toml README.md /app/
 
 # Install dependencies using uv (100x faster than pip!)
 # --no-cache: Don't cache packages (smaller image)
 # --system: Install to system Python (not venv)
-# --extra orchestrator: Install orchestrator-only dependencies
-RUN uv pip install --no-cache --system --extra orchestrator .
+# .[orchestrator]: Install orchestrator-only dependencies
+RUN uv pip install --no-cache --system ".[orchestrator]"
 
 # Copy only orchestrator configuration (pas le code métier)
 COPY dagster_home /app/dagster_home

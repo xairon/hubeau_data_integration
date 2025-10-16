@@ -25,17 +25,17 @@ WORKDIR /app
 # Install uv (ultra-fast Python package installer)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy project files
-COPY pyproject.toml /app/pyproject.toml
+# Copy project files needed for installation
+COPY pyproject.toml README.md /app/
+COPY src /app/src
 
 # Install dependencies using uv (100x faster than pip!)
 # --no-cache: Don't cache packages (smaller image)
 # --system: Install to system Python (not venv)
-# --extra worker: Install full worker dependencies
-RUN uv pip install --no-cache --system --extra worker .
+# .[worker]: Install with worker extra dependencies
+RUN uv pip install --no-cache --system ".[worker]"
 
-# Copy application code
-COPY src /app/src
+# Copy remaining application code
 COPY configs /app/configs
 COPY scripts /app/scripts
 
