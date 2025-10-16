@@ -1,6 +1,7 @@
 # Dagster Orchestrator - Image LÉGÈRE
 # Responsabilités : UI, scheduling, coordination
 # Taille cible : ~500MB
+# Uses uv for ultra-fast dependency installation (100x faster than pip)
 
 FROM python:3.11-slim
 
@@ -13,10 +14,17 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install Python dependencies (LÉGER - pas de GDAL/GEOS)
-COPY requirements-orchestrator.txt /app/requirements-orchestrator.txt
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /app/requirements-orchestrator.txt
+# Install uv (ultra-fast Python package installer)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy project files
+COPY pyproject.toml /app/pyproject.toml
+
+# Install dependencies using uv (100x faster than pip!)
+# --no-cache: Don't cache packages (smaller image)
+# --system: Install to system Python (not venv)
+# --extra orchestrator: Install orchestrator-only dependencies
+RUN uv pip install --no-cache --system --extra orchestrator .
 
 # Copy only orchestrator configuration (pas le code métier)
 COPY dagster_home /app/dagster_home

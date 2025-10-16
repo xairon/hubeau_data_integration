@@ -1,6 +1,7 @@
 # DLT Worker - Image COMPLÈTE
 # Responsabilités : Extraction, transformation, chargement
 # Taille cible : ~2GB (avec GDAL/GEOS)
+# Uses uv for ultra-fast dependency installation (100x faster than pip)
 
 FROM python:3.11-slim
 
@@ -21,10 +22,17 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install Python dependencies (COMPLET - toutes destinations DLT)
-COPY requirements-worker.txt /app/requirements-worker.txt
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /app/requirements-worker.txt
+# Install uv (ultra-fast Python package installer)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy project files
+COPY pyproject.toml /app/pyproject.toml
+
+# Install dependencies using uv (100x faster than pip!)
+# --no-cache: Don't cache packages (smaller image)
+# --system: Install to system Python (not venv)
+# --extra worker: Install full worker dependencies
+RUN uv pip install --no-cache --system --extra worker .
 
 # Copy application code
 COPY src /app/src
