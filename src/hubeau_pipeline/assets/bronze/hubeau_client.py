@@ -98,18 +98,24 @@ class HubeauObservation(BaseModel):
 # ====================================
 
 class HubeauEndpointConfig(BaseModel):
-    """Configuration d'un endpoint Hub'Eau"""
+    """
+    Configuration d'un endpoint Hub'Eau
+
+    ✅ EXPLOITATION BUG API: Pagination illimitée sans paramètre 'size'
+    L'API Hub'Eau permet de paginer indéfiniment avec page=N si on omet 'size'.
+    Cela contourne la limite officielle de 20k records.
+
+    WARNING: Cette approche repose sur un bug non documenté qui pourrait être corrigé.
+    """
     path: str
     temporal_params: Optional[Dict[str, str]] = None
-    spatial_params: Optional[Dict[str, str]] = None
-    page_size: int = 1000
-    max_pages: Optional[int] = 100  # ✅ Optional[int] pour permettre None (sans limite)
     supports_cursor: bool = False
-    requires_spatial_filter: bool = False
     cache_duration: int = 30  # Jours de cache
     realtime_cache_duration: int = 15  # Minutes pour données temps réel
-    depth_limit: Optional[int] = None  # Limite de profondeur pour éviter troncature (None = sans limite)
     end_offset_days: int = 0  # Offset pour borne fin exclusive (ex. Hydrobiologie: +1 jour)
+
+    # ❌ REMOVED: page_size, max_pages, depth_limit (no longer needed with unlimited pagination)
+    # ❌ REMOVED: spatial_params, requires_spatial_filter (no more dept/spatial chunking)
 
 class HubeauApiConfig(BaseModel):
     """Configuration complète d'une API Hub'Eau"""
@@ -209,121 +215,118 @@ class HubeauClient:
                     return HubeauApiResponse(**data)
     
     async def get_stations(self, endpoint_name: str = "stations") -> List[Dict[str, Any]]:
-        """Récupère toutes les stations de TOUT LE TERRITOIRE FRANÇAIS"""
+        """
+        ✅ Récupère TOUTES les stations via pagination simple
+
+        Plus besoin de chunking départemental grâce au bug API Hub'Eau
+        qui permet une pagination illimitée sans paramètre 'size'.
+
+        Args:
+            endpoint_name: Nom de l'endpoint stations dans la config
+
+        Returns:
+            Liste complète de toutes les stations
+        """
         endpoint_config = self.config.endpoints[endpoint_name]
-        all_data = []
-        
-        # Si pas de filtre spatial requis, récupérer toutes les données
-        if not endpoint_config.requires_spatial_filter:
-            return await self._fetch_all_pages(endpoint_config, {"format": "json", "size": endpoint_config.page_size})
-        
-        # Traiter TOUT LE TERRITOIRE FRANÇAIS par chunks adaptatifs (inspiré du legacy)
-        all_departments = self._get_french_departments()
-        
-        # Chunking adaptatif selon la profondeur limite (legacy strategy)
-        depth_limit = getattr(endpoint_config, 'depth_limit', None)
-        
-        # ✅ CORRECTIF: Gestion spéciale pour prélèvements (sans limite)
-        if endpoint_config.path == "referentiel/points_prelevement":
-            chunk_size = 1  # 1 département (API sensible)
-        elif self.config.name == "prelevements":
-            chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
-        elif depth_limit is not None and depth_limit <= 10000:
-            chunk_size = 1  # 1 département pour les APIs avec limite 10k (Hydrobiologie)
-        else:
-            chunk_size = 5  # 5 départements pour les autres APIs (ou sans limite)
-        
-        dept_chunks = [all_departments[i:i + chunk_size] for i in range(0, len(all_departments), chunk_size)]
-        
-        self.logger.info(f"🌍 Récupération stations {endpoint_name} pour TOUT LE TERRITOIRE FRANÇAIS")
-        self.logger.info(f"📊 Découpage spatial: {len(all_departments)} départements en {len(dept_chunks)} groupes (chunk_size={chunk_size})")
-        
-        spatial_param_key = self._resolve_spatial_param(endpoint_config)
 
-        for i, dept_chunk in enumerate(dept_chunks):
-            self.logger.info(f"🌍 Groupe {i+1}/{len(dept_chunks)}: départements {dept_chunk}")
+        self.logger.info(f"🌍 Récupération stations {endpoint_name} (pagination illimitée)")
 
-            # Paramètres pour ce chunk
-            params = {
-                "format": "json",
-                "size": endpoint_config.page_size,
-                spatial_param_key: ",".join(dept_chunk)
-            }
-            
-            # Récupérer toutes les pages pour ce chunk
-            chunk_data = await self._fetch_all_pages(endpoint_config, params)
-            all_data.extend(chunk_data)
-            
-            # ✅ CORRECTIF D: Mise à jour métriques
-            self.metrics.departements_traites += len(dept_chunk)
-            self.metrics.stations_total = len(all_data)
-            
-            self.logger.info(f"✅ Groupe {i+1}: {len(chunk_data)} stations (total: {len(all_data)})")
-            
-            # Vérifier la profondeur limite par endpoint (pas de cap global)
-            if depth_limit is not None and len(all_data) >= depth_limit:
-                self.logger.warning(f"⚠️ Profondeur atteinte ({depth_limit}) pour {endpoint_name}")
-                break
-        
-        self.logger.info(f"🎯 TOTAL stations récupérées ({endpoint_name}): {len(all_data)} sur TOUT LE TERRITOIRE")
-        return all_data
+        # ✅ Simple: pas de 'size', pas de filtrage spatial
+        stations = await self._fetch_all_pages(
+            endpoint_config,
+            {"format": "json"}
+        )
+
+        self.logger.info(f"✅ TOTAL stations récupérées: {len(stations)}")
+
+        # ✅ Update metrics
+        self.metrics.stations_total = len(stations)
+
+        return stations
     
     async def _fetch_all_pages(
         self,
-        endpoint_config,
+        endpoint_config: HubeauEndpointConfig,
         params: Dict[str, Any],
-        bubble_exceptions: bool = False  # ✅ CORRECTIF B: paramètre pour propager exceptions
+        bubble_exceptions: bool = False
     ) -> List[Dict[str, Any]]:
-        """Helper pour récupérer toutes les pages d'un endpoint"""
+        """
+        ✅ HUB'EAU API PAGINATION EXPLOIT
+
+        When 'size' parameter is OMITTED, the API allows unlimited pagination
+        via 'page' parameter only. This bypasses the official 20k depth limit.
+
+        Example: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?format=json&page=5
+        Returns 3205 records (last page), which should be impossible with official limits.
+
+        WARNING: This relies on an undocumented API bug that may be fixed in the future.
+
+        Args:
+            endpoint_config: Configuration de l'endpoint
+            params: Paramètres de base (format, filtres temporels, etc.)
+            bubble_exceptions: Si True, propage les exceptions
+
+        Returns:
+            Liste complète de tous les records paginés
+        """
         all_data: List[Dict[str, Any]] = []
-        pages_fetched = 0
+        page_num = 1
         cursor: Optional[str] = None
-        max_pages = endpoint_config.max_pages
-        page_size = params.get("size", endpoint_config.page_size)
+
+        # ✅ CRITICAL: Remove 'size' parameter to exploit API bug
+        params = {k: v for k, v in params.items() if k not in ["size", "page_size"]}
+
+        self.logger.info(f"🔄 Pagination illimitée pour {endpoint_config.path} (bug API exploité)")
 
         while True:
-            if max_pages is not None and pages_fetched >= max_pages:
-                break
-
             page_params = params.copy()
+
+            # Cursor-based pagination (for some endpoints)
             if endpoint_config.supports_cursor:
                 if cursor:
                     page_params["cursor"] = cursor
+            # Page-based pagination (most endpoints)
             else:
-                page_params["page"] = pages_fetched + 1
+                page_params["page"] = page_num
 
             try:
-                self.logger.debug(f"📄 Page {pages_fetched + 1}: requête en cours...")
+                self.logger.debug(f"📄 Page {page_num}: requête en cours...")
                 response_data = await self._make_request(endpoint_config.path, page_params)
 
+                # ✅ Stop condition 1: No data returned
                 if not response_data.data:
-                    self.logger.debug(f"📄 Page {pages_fetched + 1}: aucune donnée, arrêt de la pagination")
+                    self.logger.debug(f"📄 Page {page_num}: aucune donnée, arrêt pagination")
                     break
 
                 all_data.extend(response_data.data)
-                self.logger.debug(f"📄 Page {pages_fetched + 1}: {len(response_data.data)} records ajoutés (total: {len(all_data)})")
+                self.logger.debug(
+                    f"📄 Page {page_num}: {len(response_data.data)} records "
+                    f"(total: {len(all_data)})"
+                )
 
-                pages_fetched += 1
+                page_num += 1
 
+                # ✅ Stop condition 2 (cursor): No next cursor
                 if endpoint_config.supports_cursor:
                     next_cursor = self._extract_cursor(response_data.next)
                     if not next_cursor or next_cursor == cursor:
+                        self.logger.debug("📄 Curseur épuisé, arrêt pagination")
                         break
                     cursor = next_cursor
-                else:
-                    if len(response_data.data) < page_params.get("size", page_size):
-                        break
+
+                # ✅ Stop condition 3 (page): No 'next' field
+                elif not response_data.next:
+                    self.logger.debug("📄 Pas de page suivante, arrêt pagination")
+                    break
 
             except Exception as exc:
                 self.logger.exception(
-                    "Erreur lors de la récupération de la page %s pour %s",
-                    pages_fetched + 1,
-                    endpoint_config.path,
+                    f"❌ Erreur page {page_num} pour {endpoint_config.path}"
                 )
 
                 error = HubeauPageFetchError(
                     endpoint_config.path,
-                    pages_fetched + 1,
+                    page_num,
                     page_params,
                     exc,
                 )
@@ -331,22 +334,13 @@ class HubeauClient:
                 if bubble_exceptions:
                     raise error from exc
 
-        # Warning de troncature seulement si max_pages défini
-        truncated = False
-        if endpoint_config.max_pages is not None:
-            expected_records_cap = endpoint_config.max_pages * page_size
-            if pages_fetched >= endpoint_config.max_pages and len(all_data) >= expected_records_cap:
-                self.logger.warning(
-                    "⚠️ TRONCATURE: max_pages=%s atteint pour %s. Récupéré %s records, mais il pourrait y en avoir plus !",
-                    endpoint_config.max_pages,
-                    endpoint_config.path,
-                    len(all_data),
-            )
-                truncated = True
+                # Stop pagination on error
+                break
 
-        # ✅ CORRECTIF: Retourner aussi l'info de troncature pour la température
-        if hasattr(self, '_last_truncation_info'):
-            self._last_truncation_info[endpoint_config.path] = truncated
+        self.logger.info(
+            f"✅ Pagination terminée: {len(all_data)} records "
+            f"sur {page_num - 1} pages"
+        )
 
         return all_data
 
@@ -370,391 +364,129 @@ class HubeauClient:
         return cursor_values[0]
     
     async def get_observations(
-        self, 
-        endpoint_name: str, 
+        self,
+        endpoint_name: str,
         entity_codes: List[str],
         date_partition: str,
         api_name: str = None,
         realtime: bool = False,
-        partition_key: str = None  # ✅ CORRECTIF: Partition originale pour détecter annuelles/mensuelles
+        partition_key: str = None
     ) -> List[Dict[str, Any]]:
-        """Récupère les observations pour une date donnée"""
-        # ✅ CORRECTIF: Vérifier que l'endpoint existe
+        """
+        ✅ Récupère observations avec pagination simple
+
+        Plus besoin de chunking départemental ou par station grâce au bug API.
+        Seuls les filtres temporels et les codes entités sont conservés (pas de chunking).
+
+        Args:
+            endpoint_name: Nom de l'endpoint observations
+            entity_codes: Codes des entités (stations/BSS/ouvrages) - SANS CHUNKING
+            date_partition: Date de partition (YYYY-MM-DD)
+            api_name: Nom de l'API (pour entity_key)
+            realtime: Mode temps réel (non utilisé maintenant)
+            partition_key: Clé de partition originale (pour détecter annuel/mensuel)
+
+        Returns:
+            Liste complète des observations
+        """
         if endpoint_name not in self.config.endpoints:
-            self.logger.error(f"❌ Endpoint {endpoint_name} non trouvé dans la configuration")
+            self.logger.error(f"❌ Endpoint {endpoint_name} non trouvé")
             return []
-        
+
         endpoint_config = self.config.endpoints[endpoint_name]
-        all_data = []
-        
-        # ✅ OPTIMISATION GÉNÉRIQUE: Filtrage intelligent par endpoint léger
-        # Permet de ne requêter que les stations/opérations ayant des données à la date
-        # Note: Désactivé pour partitions annuelles (on récupère toute l'année d'un coup)
-        original_key = partition_key if partition_key else date_partition
-        is_yearly_partition = len(original_key) == 4
-        
-        if not is_yearly_partition:
-            entity_codes = await self._smart_filter_entities(
-                endpoint_name, 
-                entity_codes, 
-                date_partition,
-                api_name or self.config.name,
-                partition_key=partition_key
-            )
-            if not entity_codes:
-                self.logger.info("ℹ️ Aucune entité active pour cette date après filtrage intelligent")
-                return []
-        else:
-            self.logger.info(
-                f"ℹ️ Partition annuelle détectée ({original_key}): "
-                f"filtrage intelligent désactivé (récupération annuelle complète)"
-            )
-        
-        # Paramètres de base
-        params = {"format": "json", "size": endpoint_config.page_size}
-        
-        # Filtres temporels stricts (partition uniquement)
+
+        # ✅ Paramètres de base (NO SIZE)
+        params = {"format": "json"}
+
+        # ✅ KEEP: Filtres temporels (dates needed for observations)
         if endpoint_config.temporal_params:
-            # Parser la date correctement
             try:
                 date_obj = datetime.strptime(date_partition, "%Y-%m-%d")
             except ValueError:
-                # Fallback si format différent
                 date_obj = datetime.fromisoformat(date_partition)
-            
+
             start_key = endpoint_config.temporal_params["start"]
             end_key = endpoint_config.temporal_params["end"]
-            
-            # Gestion spéciale pour les prélèvements (années)
+
+            # Handle year-based params (prelevements API uses 'annee')
             if "annee" in start_key:
                 year = date_obj.year
                 params[start_key] = year
-                # Les API Hub'Eau attendent une fenêtre inclusive-exclusive
                 params[end_key] = year + 1
+                self.logger.info(f"📅 Filtrage annuel: année {year}")
             else:
-                # Format standard pour les autres APIs avec gestion de borne fin exclusive
-                end_offset = getattr(endpoint_config, 'end_offset_days', 0)
-
-                # ✅ CORRECTIF: Détecter les partitions annuelles via partition_key originale
-                # Pour qualité eau et hydrobiologie avec partitions annuelles
+                # Standard date params
                 original_key = partition_key if partition_key else date_partition
                 is_yearly_partition = len(original_key) == 4  # Ex: "2024"
-                
-                if is_yearly_partition and self.config.name in ["hydrobiology", "superficial_waterbodies_quality", "ground_water_quality", "ecoulement", "temperature"]:
-                    # Partition annuelle → récupérer toute l'année
+
+                # Check if yearly partition for specific APIs
+                yearly_apis = [
+                    "hydrobiology",
+                    "superficial_waterbodies_quality",
+                    "ground_water_quality",
+                    "ecoulement",
+                    "temperature"
+                ]
+
+                if is_yearly_partition and self.config.name in yearly_apis:
+                    # Annual partition → full year
                     year = date_obj.year
                     start_dt = datetime(year, 1, 1)
-                    end_dt = datetime(year + 1, 1, 1)  # Fin exclusive = début année suivante
+                    end_dt = datetime(year + 1, 1, 1)
                     self.logger.info(
-                        f"📅 {self.config.name.upper()} (partition annuelle {original_key}): "
-                        f"fenêtre annuelle [{start_dt.date()} → {end_dt.date()}["
+                        f"📅 Partition annuelle {original_key}: "
+                        f"[{start_dt.date()} → {end_dt.date()}["
                     )
                 elif self.config.name == "hydrobiology":
-                    # Partition quotidienne/mensuelle (legacy) → fenêtre de 30 jours
+                    # Daily/monthly partition for hydrobio → 30-day window
                     start_dt = date_obj - timedelta(days=30)
                     end_dt = date_obj + timedelta(days=1)
-                    self.logger.info(f"📅 Hydrobiologie (campagnes saisonnières): fenêtre de 30 jours [{start_dt} → {end_dt}[")
+                    self.logger.info(
+                        f"📅 Hydrobiologie (fenêtre mobile): "
+                        f"[{start_dt.date()} → {end_dt.date()}["
+                    )
                 else:
+                    # Standard daily partition
                     start_dt = date_obj
-
-                    # Plusieurs endpoints Hub'Eau attendent une borne fin strictement supérieure
-                    # à la borne début. Lorsque aucun décalage n'est configuré (offset=0),
-                    # on traite la partition journalière comme [J, J+1[ afin d'éviter
-                    # des fenêtres vides provoquant des erreurs HTTP 500 côté Hub'Eau.
-                    effective_offset = end_offset if end_offset and end_offset > 0 else 1
+                    effective_offset = max(endpoint_config.end_offset_days, 1)
                     end_dt = start_dt + timedelta(days=effective_offset)
 
-                    if effective_offset != end_offset:
-                        self.logger.debug(
-                            "🔁 Offset temporel ajusté pour %s: fin=%s (offset=%s)",
-                            endpoint_name,
-                            end_dt.strftime("%Y-%m-%d"),
-                            effective_offset,
-                        )
-                    elif end_offset > 0:
+                    if effective_offset > 1:
                         self.logger.info(
-                            f"📅 Fenêtre temporelle: [{start_dt} → {end_dt}[ (borne fin exclusive)"
+                            f"📅 Fenêtre temporelle: "
+                            f"[{start_dt.date()} → {end_dt.date()}[ "
+                            f"(offset: {effective_offset} jours)"
                         )
 
                 params[start_key] = start_dt.strftime("%Y-%m-%d")
                 params[end_key] = end_dt.strftime("%Y-%m-%d")
-        
-        # APPROCHE ADAPTÉE : Vérifier d'abord la configuration de l'endpoint
-        # Priorité 1 : Si l'endpoint demande un filtre spatial → utiliser approche spatiale
-        # Priorité 2 : Si codes d'entités disponibles → utiliser approche par codes
-        # Priorité 3 : Récupération directe sans filtre
-        
-        if endpoint_config.requires_spatial_filter and endpoint_config.spatial_params:
-            # APPROCHE SPATIALE (départements)
-            all_departments = self._get_french_departments()
 
-            # ✅ Stratégie de chunking adaptative selon l'API
-            depth_limit = getattr(endpoint_config, 'depth_limit', None)
-            
-            # Déterminer chunk_size selon l'API et la configuration
-            if self.config.name == "prelevements":
-                chunk_size = 1  # ✅ Prélèvements: 1 département pour éviter la limite de 20k
-            elif self.config.name == "temperature":
-                chunk_size = 101  # ✅ CORRECTIF: TOUS les départements d'un coup (pas de chunking départemental)
-            elif self.config.name == "hydrobiology":
-                chunk_size = 1  # Hydrobiologie: 1 département pour éviter les 500
-            elif self.config.name == "superficial_waterbodies_quality":
-                chunk_size = 1  # ✅ Qualité cours d'eau: 1 département (API très sensible aux erreurs 400)
-            elif self.config.name == "ground_water_quality":
-                chunk_size = 1  # ✅ Qualité nappes: 1 département (API très sensible aux erreurs 400)
-            elif self.config.name == "onde":
-                chunk_size = 5  # ✅ ONDE: 5 départements (approche départementale comme cl-hubeau)
-            elif depth_limit is not None and depth_limit <= 10000:
-                chunk_size = 1  # 1 département pour les APIs avec limite 10k
-            else:
-                chunk_size = 5  # 5 départements pour les autres APIs
-            
-            dept_chunks = [all_departments[i:i + chunk_size] for i in range(0, len(all_departments), chunk_size)]
-            
-            self.logger.info(f"🌍 Récupération observations {endpoint_name} par départements (parallélisée)")
-            self.logger.info(f"📊 Découpage spatial: {len(all_departments)} départements en {len(dept_chunks)} groupes (chunk_size={chunk_size})")
-            
-            # Parallélisation adaptative selon l'API
-            if self.config.name == "prelevements" and chunk_size == 1:
-                MAX_CONCURRENT_SPATIAL = 15  # ✅ Prélèvements: parallélisme élevé (1 dept/requête)
-            elif self.config.name == "temperature":
-                MAX_CONCURRENT_SPATIAL = 5   # ✅ Température: parallélisme modéré (API sensible aux erreurs 500)
-            elif self.config.name == "hydrobiology":
-                MAX_CONCURRENT_SPATIAL = 4   # Hydrobiologie: conservateur (API sensible)
-            elif self.config.name == "superficial_waterbodies_quality":
-                MAX_CONCURRENT_SPATIAL = 3   # ✅ Qualité cours d'eau: parallélisme très conservateur (API très sensible)
-            elif self.config.name == "ground_water_quality":
-                MAX_CONCURRENT_SPATIAL = 3   # ✅ Qualité nappes: parallélisme très conservateur (API très sensible)
-            elif self.config.name == "onde":
-                MAX_CONCURRENT_SPATIAL = 6   # ✅ ONDE: parallélisme modéré (5 depts/requête)
-            else:
-                MAX_CONCURRENT_SPATIAL = 10  # Défaut
-            
-            semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPATIAL)
-            self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT_SPATIAL} requêtes simultanées (optimisé pour chunk_size={chunk_size})")
-
-            spatial_param_key = self._resolve_spatial_param(endpoint_config)
-
-            async def fetch_dept_chunk(i, dept_chunk):
-                async with semaphore:
-                    try:
-                        chunk_params = params.copy()
-                        chunk_params[spatial_param_key] = ",".join(dept_chunk)
-
-                        chunk_data = await self._fetch_all_pages(endpoint_config, chunk_params)
-                        
-                        # Log adaptatif selon chunk_size
-                        if len(dept_chunk) == 1:
-                            self.logger.info(f"✅ Département {dept_chunk[0]} ({i+1}/{len(dept_chunks)}): {len(chunk_data)} observations")
-                        else:
-                            self.logger.info(f"✅ Groupe {i+1}/{len(dept_chunks)}: {len(chunk_data)} observations")
-                        return chunk_data
-                    except Exception as e:
-                        # Fallback : si le chunk multi-départements échoue, réessayer département par département
-                        # Note: Si chunk_size=1 déjà, pas de fallback possible
-                        if len(dept_chunk) > 1:
-                            self.logger.warning(f"⚠️ Groupe {i+1} erreur ({e}), retry par département individuel...")
-                            merged = []
-                            for dept in dept_chunk:
-                                try:
-                                    one_params = params.copy()
-                                    one_params[spatial_param_key] = dept
-                                    one_data = await self._fetch_all_pages(endpoint_config, one_params)
-                                    merged.extend(one_data)
-                                except Exception as ee:
-                                    self.logger.warning(f"⚠️ Département {dept} ignoré: {str(ee)}")
-                            return merged
-                        else:
-                            # chunk_size=1 : pas de fallback, juste logger et continuer
-                            self.logger.warning(f"⚠️ Département {dept_chunk[0]} ignoré: {str(e)}")
-                            return []
-            
-            # Lancer toutes les requêtes en parallèle
-            tasks = [fetch_dept_chunk(i, chunk) for i, chunk in enumerate(dept_chunks)]
-            results = await asyncio.gather(*tasks)
-            
-            # Agréger les résultats
-            all_data = []
-            for result in results:
-                all_data.extend(result)
-                # Vérifier la profondeur limite
-                if endpoint_config.depth_limit and len(all_data) >= endpoint_config.depth_limit:
-                    self.logger.warning(f"⚠️ Profondeur atteinte ({endpoint_config.depth_limit})")
-                    break
-            
-            self.logger.info(f"✅ Total: {len(all_data)} observations (parallélisé avec {MAX_CONCURRENT_SPATIAL} requêtes simultanées)")
-            return all_data
-        
-        elif entity_codes:
-            # APPROCHE PAR CODES D'ENTITÉS
+        # ✅ Add entity codes filter (NO CHUNKING - API handles all codes)
+        if entity_codes:
             api_name_actual = api_name or self.config.name
-            if api_name_actual in [
-                "hydrometry",
-                "piezometry",
-                "ground_water_quality",
-                "prelevements",
-                "temperature",
-                "onde",
-                "hydrobiology",
-            ]:
-                entity_key = self._get_entity_key_for_api(api_name_actual)
-                self.logger.info(f"📊 Approche avec {entity_key} pour observations {endpoint_name}")
-                
-                # Approche cl-hubeau : chunking systématique pour éviter URL trop longue
-                entity_name = entity_key.replace("code_", "").replace("_", " ")
-                self.logger.info(f"🌍 Récupération observations {endpoint_name} par {entity_key}")
-                self.logger.info(f"📊 {len(entity_codes)} {entity_name} disponibles")
-                
-                # Chunking systématique si trop de codes (évite URL too long)
-                # Hydrobiologie : limite URL ≈2083 caractères → chunks plus petits
-                # Hydrométrie observations_tr : beaucoup de données par station → chunks réduits
-                # Température : API sensible aux URL longues → chunks réduits
-                # ONDE : API EXTRÊMEMENT sensible aux erreurs 500 → chunks minimalistes
-                if api_name_actual == "hydrobiology":
-                    MAX_CODES_PER_REQUEST = 25
-                elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
-                    MAX_CODES_PER_REQUEST = 25  # ✅ CORRECTIF: Réduire pour éviter surcharge
-                elif api_name_actual == "onde":
-                    MAX_CODES_PER_REQUEST = 3  # ✅ CORRECTIF: Réduction drastique - API très instable
-                else:
-                    MAX_CODES_PER_REQUEST = 50
-                
-                # ✅ NOTE: Température utilise le filtrage départemental (pas par station)
-                
-                if len(entity_codes) > MAX_CODES_PER_REQUEST:
-                    # Découpage systématique en chunks avec parallélisation
-                    entity_chunks = [entity_codes[i:i + MAX_CODES_PER_REQUEST] for i in range(0, len(entity_codes), MAX_CODES_PER_REQUEST)]
-                    self.logger.info(f"📦 Découpage en {len(entity_chunks)} chunks de {MAX_CODES_PER_REQUEST} (évite URL trop longue)")
-                    
-                    # Parallélisation avec asyncio.gather() pour accélérer l'ingestion
-                    # Hydrobiologie : API sensible → parallélisme réduit
-                    # Hydrométrie observations_tr : beaucoup de chunks → parallélisme modéré
-                    # ONDE : API EXTRÊMEMENT sensible → parallélisme minimal
-                    if api_name_actual == "hydrobiology":
-                        MAX_CONCURRENT = 4
-                    elif api_name_actual == "hydrometry" and endpoint_name == "observations_tr":
-                        MAX_CONCURRENT = 8  # ✅ CORRECTIF: Parallélisme modéré pour ~245 chunks
-                    elif api_name_actual == "onde":
-                        MAX_CONCURRENT = 2  # ✅ CORRECTIF: Parallélisme minimal - API très instable
-                    else:
-                        MAX_CONCURRENT = 15
-                    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-                    self.logger.info(f"⚡ Parallélisme: {MAX_CONCURRENT} requêtes simultanées")
-                    
-                    async def _execute_chunk(chunk: List[str]) -> List[Dict[str, Any]]:
-                        async with semaphore:
-                            chunk_params = params.copy()
-                            chunk_params[entity_key] = ",".join(chunk)
-                            return await self._fetch_all_pages(
-                                endpoint_config,
-                                chunk_params,
-                                bubble_exceptions=True,
-                            )
+            entity_key = self._get_entity_key_for_api(api_name_actual)
 
-                    async def fetch_chunk(i, chunk: List[str], depth: int = 0) -> List[Dict[str, Any]]:
-                        # Chaque tentative (y compris les splits) est comptabilisée
-                        self.metrics.chunks_total += 1
+            self.logger.info(
+                f"📊 Filtrage par {len(entity_codes)} {entity_key} "
+                f"(sans chunking - API gère tout)"
+            )
 
-                        try:
-                            chunk_data = await _execute_chunk(chunk)
-                        except Exception as e:
-                            # ✅ CORRECTIF D: Tracking erreurs par type avec plus de détails
-                            message = str(e)
-                            if "500" in message:
-                                self.metrics.erreurs_http_500 += 1
-                                self.logger.warning(
-                                    f"⚠️ Erreur HTTP 500 détectée dans chunk {i + 1} "
-                                    f"(département: {chunk[0] if chunk else 'N/A'}): {message[:100]}..."
-                                )
-                            elif "timeout" in message.lower():
-                                self.metrics.erreurs_timeout += 1
-                                self.logger.warning(
-                                    f"⚠️ Timeout détecté dans chunk {i + 1} "
-                                    f"(département: {chunk[0] if chunk else 'N/A'}): {message[:100]}..."
-                                )
+            # ✅ SIMPLE: Pass ALL codes in one param (no chunking needed)
+            # The API will paginate automatically
+            params[entity_key] = ",".join(entity_codes)
 
-                            if len(chunk) > 1:
-                                self.logger.warning(
-                                    "⚠️ Chunk %s erreur (%s...), découpage en 2...",
-                                    i + 1,
-                                    message[:50],
-                                )
-                                mid = len(chunk) // 2
-                                left = await fetch_chunk(i, chunk[:mid], depth + 1)
-                                right = await fetch_chunk(i, chunk[mid:], depth + 1)
-                                return (left or []) + (right or [])
+        # ✅ Simple fetch with unlimited pagination
+        observations = await self._fetch_all_pages(endpoint_config, params)
 
-                            # ✅ CORRECTIF D: Logger les codes fautifs pour observabilité avec plus de contexte
-                            self.metrics.chunks_echoues += 1
-                            if chunk:
-                                self.metrics.codes_echoues.append(chunk[0])
-                                self.logger.error(
-                                    "❌ Chunk %s échoué définitivement (département: %s, erreur: %s)",
-                                    i + 1,
-                                    chunk[0],
-                                    message[:200],  # Plus de détails sur l'erreur
-                                )
-                            else:
-                                self.logger.error(
-                                    "❌ Chunk %s échoué définitivement: %s",
-                                    i + 1,
-                                    message[:200],
-                                )
-                            return []
+        self.logger.info(f"✅ Total observations: {len(observations)}")
 
-                        if len(chunk_data) == 0:
-                            self.metrics.chunks_vides += 1
-                            self.metrics.stations_sans_donnees.extend(chunk)
-                        else:
-                            self.metrics.chunks_ok += 1
+        # ✅ Update metrics
+        self.metrics.records_total = len(observations)
 
-                        if depth == 0 and (i % 50 == 0 or i == len(entity_chunks) - 1):
-                            self.logger.info(f"✅ Traité {i+1}/{len(entity_chunks)} chunks")
+        return observations
 
-                        return chunk_data
-                    
-                    # Lancer toutes les requêtes en parallèle
-                    tasks = [fetch_chunk(i, chunk) for i, chunk in enumerate(entity_chunks)]
-                    results = await asyncio.gather(*tasks)
-                    
-                    # Agréger tous les résultats
-                    all_data = []
-                    for result in results:
-                        all_data.extend(result)
-                    
-                    self.logger.info(f"✅ Total: {len(all_data)} observations récupérées (parallélisé avec {MAX_CONCURRENT} requêtes simultanées)")
-                    return all_data
-                    
-                else:
-                    # Peu de codes : requête unique
-                    params[entity_key] = ",".join(entity_codes)
-                    all_data = await self._fetch_all_pages(endpoint_config, params)
-                    self.logger.info(f"✅ {len(all_data)} observations récupérées avec {entity_key}")
-                    return all_data
-        
-        # Pas d'approche spécifique : récupération directe
-        else:
-            self.logger.info(f"📊 Récupération observations {endpoint_name} sans filtrage spécifique")
-            return await self._fetch_all_pages(endpoint_config, params)
-    
-    def _get_french_departments(self) -> List[str]:
-        """Retourne la liste complète des départements français (métropole + Corse + DROM)"""
-        return [
-            # Métropole (01-95)
-            '01', '02', '03', '04', '05', '06', '07', '08', '09', '10',
-            '11', '12', '13', '14', '15', '16', '17', '18', '19', '2A', '2B',
-            '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
-            '31', '32', '33', '34', '35', '36', '37', '38', '39', '40',
-            '41', '42', '43', '44', '45', '46', '47', '48', '49', '50',
-            '51', '52', '53', '54', '55', '56', '57', '58', '59', '60',
-            '61', '62', '63', '64', '65', '66', '67', '68', '69', '70',
-            '71', '72', '73', '74', '75', '76', '77', '78', '79', '80',
-            '81', '82', '83', '84', '85', '86', '87', '88', '89', '90',
-            '91', '92', '93', '94', '95',
-            # DROM (971-976)
-            '971', '972', '973', '974', '976'
-        ]
-    
+
+
     def _get_entity_key(self, endpoint_name: str) -> str:
         """Retourne la clé d'entité appropriée selon l'endpoint"""
         entity_keys = {
@@ -781,174 +513,42 @@ class HubeauClient:
         }
         return entity_keys.get(api_name, "code_station")
 
-    def _resolve_spatial_param(self, endpoint_config: HubeauEndpointConfig) -> str:
-        """Retourne la clé de paramètre spatial attendue par l'endpoint."""
-        spatial_params = endpoint_config.spatial_params or {}
-        if "dept" in spatial_params:
-            return spatial_params["dept"]
 
-        if spatial_params:
-            # Prendre le premier paramètre disponible (ex: bbox, code_commune, etc.)
-            return next(iter(spatial_params.values()))
-
-        raise ValueError(
-            f"Endpoint {endpoint_config.path} requiert un filtre spatial mais aucun paramètre n'est défini"
-        )
-    
-    async def _smart_filter_entities(
-        self,
-        target_endpoint: str,
-        entity_codes: List[str],
-        date_partition: str,
-        api_name: str,
-        partition_key: str = None
-    ) -> List[str]:
-        """
-        ✅ OPTIMISATION GÉNÉRIQUE: Filtre intelligent des entités (stations/opérations)
-        en interrogeant d'abord un endpoint léger pour identifier celles avec données
-        
-        Configuration par API:
-        - ONDE: campagnes → observations (filtrage par stations actives)
-        - Qualité Cours d'Eau: operation_pc → analyse_pc (filtrage par opérations actives)
-        - Autres APIs: pas de filtrage (retourne toutes les entités)
-        """
-        
-        # Configuration des règles de filtrage par API
-        # Note: Filtrage intelligent désactivé pour TOUTES les APIs maintenant
-        # car toutes les APIs de campagnes utilisent des partitions annuelles
-        filter_rules = {
-            # ONDE : Partitions annuelles maintenant, pas besoin de filtrage
-            # "superficial_waterbodies_quality": Partitions annuelles, pas besoin de filtrage
-        }
-        
-        # Vérifier si cette API/endpoint a une règle de filtrage
-        rule = filter_rules.get(api_name)
-        if not rule or rule["target_endpoint"] != target_endpoint:
-            # Pas de filtrage configuré → retourner toutes les entités
-            return entity_codes
-        
-        try:
-            # Parser la date
-            date_obj = datetime.strptime(date_partition, "%Y-%m-%d")
-            
-            # ✅ CORRECTIF: Pour partitions mensuelles, utiliser tout le mois (pas ±jours)
-            original_key = partition_key if partition_key else date_partition
-            is_monthly_partition = len(original_key) == 7  # Ex: "2024-09"
-            
-            if is_monthly_partition:
-                # Partition mensuelle → fenêtre = mois complet
-                year = date_obj.year
-                month = date_obj.month
-                start_date = datetime(year, month, 1).strftime("%Y-%m-%d")
-                # Dernier jour du mois
-                if month == 12:
-                    end_date = datetime(year + 1, 1, 1).strftime("%Y-%m-%d")
-                else:
-                    end_date = datetime(year, month + 1, 1).strftime("%Y-%m-%d")
-                self.logger.info(
-                    f"🔍 Partition mensuelle {original_key}: fenêtre mois complet [{start_date} → {end_date}["
-                )
-            else:
-                # Partition quotidienne → fenêtre ±jours
-                time_window = rule["time_window_days"]
-                start_date = (date_obj - timedelta(days=time_window)).strftime("%Y-%m-%d")
-                end_date = (date_obj + timedelta(days=time_window)).strftime("%Y-%m-%d")
-            
-            # Récupérer l'endpoint de filtrage
-            filter_endpoint_name = rule["filter_endpoint"]
-            filter_endpoint = self.config.endpoints.get(filter_endpoint_name)
-            
-            if not filter_endpoint:
-                self.logger.warning(
-                    f"⚠️ Endpoint '{filter_endpoint_name}' non trouvé pour filtrage, "
-                    f"requête de toutes les entités"
-                )
-                return entity_codes
-            
-            # Construire les paramètres temporels SANS filtrer par entités
-            # (on veut TOUTES les campagnes/opérations de la période, pas juste celles de nos stations)
-            temporal_params = rule["temporal_params"]
-            params = {
-                "format": "json",
-                "size": filter_endpoint.page_size,
-                temporal_params["start"]: start_date,
-                temporal_params["end"]: end_date
-            }
-            
-            self.logger.info(
-                f"🔍 {api_name.upper()}: Filtrage intelligent via {rule['description']} "
-                f"entre {start_date} et {end_date} (récupération TOUTES les {rule['description']})"
-            )
-            
-            # Récupérer TOUTES les données de filtrage de la période
-            # Note: On ne filtre PAS par code_station ici, on veut tout !
-            filter_data = await self._fetch_all_pages(filter_endpoint, params)
-            
-            if not filter_data:
-                self.logger.warning(
-                    f"⚠️ Aucune {rule['description']} trouvée pour {start_date} → {end_date}"
-                )
-                return []
-            
-            # Extraire les codes d'entités uniques
-            entity_field = rule["entity_field"]
-            active_entities = set()
-            for item in filter_data:
-                entity_code = item.get(entity_field)
-                if entity_code:
-                    active_entities.add(entity_code)
-            
-            # Filtrer les entités disponibles
-            filtered_codes = [code for code in entity_codes if code in active_entities]
-            
-            reduction_pct = (1 - len(filtered_codes) / len(entity_codes)) * 100 if entity_codes else 0
-            
-            self.logger.info(
-                f"📊 Filtrage {rule['description']}: {len(filter_data)} {rule['description']} "
-                f"→ {len(active_entities)} entités actives "
-                f"→ {len(filtered_codes)}/{len(entity_codes)} à requêter "
-                f"(-{reduction_pct:.1f}% de requêtes)"
-            )
-            
-            return filtered_codes
-            
-        except Exception as e:
-            self.logger.warning(
-                f"⚠️ Erreur lors du filtrage intelligent ({api_name}): {e}, "
-                f"requête de toutes les entités"
-            )
-            return entity_codes
 
 # ====================================
 # MÉTRIQUES D'OBSERVABILITÉ (CORRECTIF D)
 # ====================================
 
 class IngestionMetrics(BaseModel):
-    """Métriques d'observabilité pour l'ingestion"""
-    departements_traites: int = 0
-    departements_total: int = 101
+    """
+    Métriques d'observabilité pour l'ingestion
+
+    ✅ Simplifiées: plus de chunking départemental/station
+    """
+    # Stations
     stations_total: int = 0
-    stations_nouvelles: int = 0
-    stations_mises_a_jour: int = 0
-    chunks_total: int = 0
-    chunks_ok: int = 0
-    chunks_vides: int = 0
-    chunks_echoues: int = 0
-    stations_sans_donnees: List[str] = Field(default_factory=list)
-    codes_echoues: List[str] = Field(default_factory=list)
+
+    # Pagination
+    pages_fetched: int = 0
+    records_total: int = 0
+
+    # Erreurs
     erreurs_http_500: int = 0
     erreurs_timeout: int = 0
-    
+
+
     def to_summary(self) -> str:
         """Génère un résumé textuel"""
         return f"""
-ℹ️ Hydrobiologie — Synthèse
-- Départements traités : {self.departements_traites}/{self.departements_total}
-- Stations : {self.stations_total} (nouveaux: {self.stations_nouvelles}, MAJ: {self.stations_mises_a_jour})
-- Chunks indices : {self.chunks_total} (ok: {self.chunks_ok}, vides: {self.chunks_vides}, échoués: {self.chunks_echoues})
-- Stations sans indices: {len(self.stations_sans_donnees)} {self.stations_sans_donnees[:10] if self.stations_sans_donnees else ''}
-- Erreurs HTTP 500: {self.erreurs_http_500}, Timeouts: {self.erreurs_timeout}
+ℹ️ Hub'Eau — Synthèse d'ingestion
+- Stations: {self.stations_total}
+- Pages récupérées: {self.pages_fetched}
+- Records totaux: {self.records_total}
+- Erreurs HTTP 500: {self.erreurs_http_500}
+- Timeouts: {self.erreurs_timeout}
         """
+
+
 
 # ====================================
 # SERVICE D'INGESTION BRONZE
@@ -1020,265 +620,10 @@ class HubeauIngestionService:
         base_path.mkdir(parents=True, exist_ok=True)
         return base_path
     
-    async def _ingest_ecoulement_with_campagnes(
-        self, 
-        config: HubeauApiConfig, 
-        date_partition: str,
-        partition_key: str = None
-    ) -> Dict[str, Any]:
-        """Ingestion spéciale pour l'API écoulement utilisant les campagnes pour filtrer les observations"""
-        self.logger.info(f"🌊 Ingestion écoulement avec campagnes pour {partition_key or date_partition}")
-        
-        results: Dict[str, Any] = {}
-        total_records = 0
-        errors: List[str] = []
-        
-        async with HubeauClient(config) as client:
-            # 1. Récupérer les stations
-            try:
-                stations = await client.get_stations("stations")
-                results["stations"] = {
-                    'records_count': len(stations),
-                    'type': 'stations',
-                    'data': stations
-                }
-                total_records += len(stations)
-                self.logger.info(f"✅ Stations récupérées: {len(stations)}")
-            except Exception as e:
-                message = f"Erreur stations: {e}"
-                self.logger.error(message)
-                errors.append(message)
-                stations = []
-            
-            # 2. Récupérer les campagnes de l'année
-            try:
-                # Utiliser l'année complète pour récupérer toutes les campagnes
-                year = partition_key if partition_key else date_partition[:4]
-                campagnes = await client.get_observations(
-                    "campagnes", 
-                    [],  # Pas besoin de codes stations pour les campagnes
-                    f"{year}-01-01",  # Début d'année
-                    config.name,
-                    realtime=False,
-                    partition_key=partition_key
-                )
-                
-                results["campagnes"] = {
-                    'records_count': len(campagnes),
-                    'type': 'campagnes',
-                    'data': campagnes
-                }
-                total_records += len(campagnes)
-                self.logger.info(f"✅ Campagnes récupérées: {len(campagnes)}")
-                
-                # 3. Utiliser les dates des campagnes pour récupérer les observations
-                if campagnes:
-                    # Extraire les dates des campagnes (API écoulement utilise 'date_campagne')
-                    campagne_dates = []
-                    for campagne in campagnes:
-                        date_campagne = campagne.get('date_campagne')
-                        if date_campagne:
-                            # Pour l'API écoulement, chaque campagne a une seule date
-                            campagne_dates.append(date_campagne)
-                    
-                    self.logger.info(f"📅 Dates de campagnes trouvées: {len(campagne_dates)} dates")
-                    
-                    # STRATÉGIE ALTERNATIVE: L'API écoulement ignore les paramètres temporels
-                    # Récupérer les observations par dates de campagnes individuelles
-                    self.logger.info(f"📊 Récupération des observations par dates de campagnes ({len(campagne_dates)} dates)")
-                    
-                    observations = []
-                    campagne_dates_set = set(campagne_dates)
-                    
-                    # Traiter par chunks de dates pour éviter trop de requêtes
-                    chunk_size = 50  # 50 dates par chunk
-                    for i in range(0, len(campagne_dates), chunk_size):
-                        chunk_dates = campagne_dates[i:i + chunk_size]
-                        self.logger.info(f"🔍 Chunk {i//chunk_size + 1}: traitement de {len(chunk_dates)} dates")
-                        
-                        for date_campagne in chunk_dates:
-                            try:
-                                # Récupérer les observations pour cette date spécifique
-                                date_obs = await client.get_observations(
-                                    "observations",
-                                    [],  # Pas de filtrage par station
-                                    date_campagne,  # Date spécifique
-                                    config.name,
-                                    realtime=False,
-                                    partition_key=partition_key
-                                )
-                                
-                                if date_obs:
-                                    observations.extend(date_obs)
-                                    
-                            except Exception as e:
-                                self.logger.warning(f"⚠️ Erreur pour la date {date_campagne}: {e}")
-                        
-                        self.logger.info(f"✅ Chunk {i//chunk_size + 1} terminé: {len(observations)} observations total")
-                    
-                    self.logger.info(f"🔍 Observations récupérées: {len(observations)} au total")
-                    
-                    results["observations"] = {
-                        'records_count': len(observations),
-                        'type': 'observations',
-                        'data': observations
-                    }
-                    total_records += len(observations)
-                    self.logger.info(f"✅ Observations récupérées: {len(observations)}")
-                else:
-                    self.logger.warning("⚠️ Aucune campagne trouvée, pas d'observations récupérées")
-                    results["observations"] = {
-                        'records_count': 0,
-                        'type': 'observations',
-                        'data': []
-                    }
-                    
-            except Exception as e:
-                message = f"Erreur campagnes/observations: {e}"
-                self.logger.error(message)
-                errors.append(message)
-        
-        # Sauvegarder dans MinIO
-        try:
-            self._save_to_minio(config.name, partition_key or date_partition, results)
-            self.logger.info(f"💾 Données écoulement sauvegardées dans MinIO")
-        except Exception as e:
-            message = f"Erreur sauvegarde MinIO: {e}"
-            self.logger.error(message)
-            errors.append(message)
-        
-        return {
-            "execution_date": datetime.now().isoformat(),
-            "partition_date": partition_key or date_partition,
-            "api_name": config.name,
-            "status": "success" if not errors else "error",
-            "total_records_ingested": total_records,
-            "results_by_endpoint": results,
-            "errors": errors
-        }
-    
-    async def _get_temperature_observations_with_fallback(
-        self,
-        client: 'HubeauClient',
-        endpoint_name: str,
-        station_codes: List[str],
-        date_partition: str,
-        api_name: str,
-        partition_key: str = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Récupère les observations température avec fallback temporel si nécessaire.
-        
-        Stratégie :
-        1. Essayer toute l'année d'un coup
-        2. Si troncature détectée → découper par mois
-        3. Si encore tronqué → découper par semaine
-        """
-        original_key = partition_key if partition_key else date_partition
-        is_yearly_partition = len(original_key) == 4
-        
-        if not is_yearly_partition:
-            # Pas une partition annuelle → utiliser la logique normale
-            return await client.get_observations(
-                endpoint_name, station_codes, date_partition, api_name, 
-                realtime=False, partition_key=partition_key
-            )
-        
-        # ✅ CORRECTIF RADICAL: Station par station avec découpage mensuel
-        # Raison: Trop de stations dans une requête = erreurs 500
-        self.logger.info(f"🌡️ Température: Partition annuelle détectée → station par station avec découpage mensuel")
-        return await self._get_temperature_observations_station_by_station(
-            client, endpoint_name, station_codes, date_partition, api_name, partition_key
-        )
-    
-    async def _get_temperature_observations_station_by_station(
-        self,
-        client: 'HubeauClient',
-        endpoint_name: str,
-        station_codes: List[str],
-        date_partition: str,
-        api_name: str,
-        partition_key: str = None
-    ) -> List[Dict[str, Any]]:
-        """Récupère les observations température station par station avec découpage mensuel"""
-        year = int(partition_key) if partition_key and len(partition_key) == 4 else int(date_partition[:4])
-        
-        self.logger.info(f"🌡️ Température: Récupération station par station pour l'année {year} ({len(station_codes)} stations)")
-        
-        all_observations = []
-        
-        for i, station_code in enumerate(station_codes, 1):
-            try:
-                self.logger.debug(f"🌡️ Station {i}/{len(station_codes)}: {station_code}")
-                
-                # Récupérer les observations de cette station mois par mois
-                station_observations = []
-                
-                for month in range(1, 13):
-                    try:
-                        # Créer une date de partition pour le mois
-                        month_date = f"{year}-{month:02d}-01"
-                        
-                        # Requête pour cette station uniquement
-                        month_observations = await client.get_observations(
-                            endpoint_name, [station_code], month_date, api_name,
-                            realtime=False, partition_key=partition_key
-                        )
-                        
-                        station_observations.extend(month_observations)
-                        
-                    except Exception as e:
-                        self.logger.debug(f"⚠️ Erreur station {station_code} mois {month:02d}: {e}")
-                        continue
-                
-                all_observations.extend(station_observations)
-                
-                if i % 50 == 0:  # Log tous les 50 stations
-                    self.logger.info(f"🌡️ Progression: {i}/{len(station_codes)} stations traitées ({len(all_observations)} observations)")
-                
-            except Exception as e:
-                self.logger.warning(f"⚠️ Erreur station {station_code}: {e}")
-                continue
-        
-        self.logger.info(f"✅ Température: {len(all_observations)} observations récupérées (méthode station par station)")
-        return all_observations
 
-    async def _get_temperature_observations_monthly(
-        self,
-        client: 'HubeauClient',
-        endpoint_name: str,
-        station_codes: List[str],
-        date_partition: str,
-        api_name: str,
-        partition_key: str = None
-    ) -> List[Dict[str, Any]]:
-        """Récupère les observations température mois par mois"""
-        year = int(partition_key) if partition_key and len(partition_key) == 4 else int(date_partition[:4])
-        
-        self.logger.info(f"🌡️ Température: Récupération mensuelle pour l'année {year}")
-        
-        all_observations = []
-        
-        for month in range(1, 13):
-            try:
-                # Créer une date de partition pour le mois
-                month_date = f"{year}-{month:02d}-01"
-                
-                month_observations = await client.get_observations(
-                    endpoint_name, station_codes, month_date, api_name,
-                    realtime=False, partition_key=partition_key
-                )
-                
-                all_observations.extend(month_observations)
-                self.logger.debug(f"🌡️ Mois {month:02d}: {len(month_observations)} observations")
-                
-            except Exception as e:
-                self.logger.warning(f"⚠️ Erreur mois {month:02d}: {e}")
-                continue
-        
-        self.logger.info(f"✅ Température: {len(all_observations)} observations récupérées (méthode mensuelle)")
-        return all_observations
-    
+
+
+
     async def ingest_api_data(
         self, 
         config: HubeauApiConfig, 
@@ -1346,22 +691,15 @@ class HubeauIngestionService:
                             self.logger.warning(f"⚠️ Aucun code station valide trouvé pour {endpoint_name}")
                     else:
                         station_codes = []
-                    
-                    # ✅ LOGIQUE SPÉCIALE TEMPÉRATURE: Toujours utiliser le fallback station par station
-                    if config.name == "temperature":
-                        self.logger.info(f"🌡️ TEMPÉRATURE: Utilisation du fallback station par station (ignorer le filtrage normal)")
-                        observations = await self._get_temperature_observations_with_fallback(
-                            client, endpoint_name, station_codes, date_partition, config.name, partition_key
-                        )
-                    else:
-                        observations = await client.get_observations(
-                            endpoint_name, 
-                            station_codes,
-                            date_partition,
-                            config.name,
-                            realtime=False,
-                            partition_key=partition_key  # ✅ CORRECTIF: Passer partition originale
-                        )
+
+                    observations = await client.get_observations(
+                        endpoint_name,
+                        station_codes,
+                        date_partition,
+                        config.name,
+                        realtime=False,
+                        partition_key=partition_key  # ✅ CORRECTIF: Passer partition originale
+                    )
                     
                     # ✅ CORRECTIF: Vérifier que observations n'est pas None
                     if observations is None:

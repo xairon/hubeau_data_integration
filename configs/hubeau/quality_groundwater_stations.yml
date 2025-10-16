@@ -24,8 +24,6 @@ extraction:
   slicing_mode: global
   pagination:
     type: page_based
-    page_size: 5000
-    max_pages: null
   default_params: {}
 performance:
   parallelism: 5

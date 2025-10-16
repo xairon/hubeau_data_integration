@@ -10,7 +10,7 @@ resource:
   - date_mesure_temp
   write_disposition: merge
 extraction:
-  slicing_mode: dept_datetime
+  slicing_mode: global_datetime
   dept_param: code_departement
   dept_chunk_size: 8
   dept_list:
@@ -122,8 +122,6 @@ extraction:
   end_offset_days: 0
   pagination:
     type: page_based
-    page_size: 20000
-    max_pages: null
   default_params:
     format: json
   records_path: $.data

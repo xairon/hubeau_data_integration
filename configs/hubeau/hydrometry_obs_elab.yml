@@ -15,15 +15,13 @@ resource:
       data_type: text
       nullable: true
 extraction:
-  slicing_mode: station_month_chunked
+  slicing_mode: global_chunked
   station_param: code_station
   station_chunk_size: 80
   start_param: date_debut_obs_elab
   end_param: date_fin_obs_elab
   pagination:
     type: page_based
-    page_size: 5000
-    max_pages: null
   default_params:
     format: json
   records_path: $.data
