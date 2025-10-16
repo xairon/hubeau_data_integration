@@ -496,21 +496,26 @@ def slice_global_chunked(
     client: RESTClient,
     endpoint: str,
     extraction_config: Dict[str, Any],
-    stations_data: Optional[Dict[str, List[str]]] = None
+    temporal_config: Dict[str, Any],
+    stations_data: Optional[Dict[str, List[str]]] = None,
+    partition_date: Optional[str] = None
 ) -> Iterator[Dict[str, Any]]:
     """
-    Stratégie global_chunked: découpage par chunks de stations.
+    Stratégie global_chunked: découpage par chunks de stations avec filtre temporel.
 
     Utilisé pour les endpoints qui NÉCESSITENT des codes de stations
     (ex: piézométrie chroniques avec code_bss, hydrométrie obs_elab avec code_station).
 
-    Découpe la liste de stations en chunks et pagine chaque chunk.
+    Découpe la liste de stations en chunks, applique un filtre temporel (année de partition),
+    et pagine chaque chunk en utilisant le champ 'next' au lieu de 'last_page'.
 
     Args:
         client: RESTClient DLT
         endpoint: Chemin de l'endpoint
         extraction_config: Configuration d'extraction
+        temporal_config: Configuration temporelle (start_param, end_param)
         stations_data: Dict {station_code: [months]} fourni par l'asset
+        partition_date: Date de partition (format YYYY-MM-DD) pour filtrage temporel
 
     Yields:
         Records extraits avec métadonnées de chunking
@@ -525,6 +530,21 @@ def slice_global_chunked(
     # Extraire la liste unique de stations
     all_stations = list(stations_data.keys())
     total_stations = len(all_stations)
+
+    # 🗓️ OPTION 3: Calculer le filtre temporel basé sur partition_date (année)
+    start_param = temporal_config.get('start_param', 'date_debut_mesure')
+    end_param = temporal_config.get('end_param', 'date_fin_mesure')
+
+    # Parser la partition_date (format: YYYY-MM-DD) pour extraire l'année
+    if partition_date:
+        year = datetime.strptime(partition_date, "%Y-%m-%d").year
+        date_start = f"{year}-01-01"
+        date_end = f"{year}-12-31"
+        logger.info(f"📅 Temporal filter: {start_param}={date_start}, {end_param}={date_end} (from partition {partition_date})")
+    else:
+        date_start = None
+        date_end = None
+        logger.warning(f"⚠️ No partition_date provided - no temporal filtering applied")
 
     logger.info(f"📦 Starting GLOBAL_CHUNKED slicing for endpoint: {endpoint}")
     logger.info(f"🔢 Total stations: {total_stations}, chunk_size: {chunk_size}")
@@ -541,11 +561,16 @@ def slice_global_chunked(
         logger.info(f"📦 Chunk {chunk_num}/{total_chunks}: {len(chunk_stations)} stations")
         logger.info(f"   Stations: {', '.join(chunk_stations[:5])}{'...' if len(chunk_stations) > 5 else ''}")
 
-        # Construire les paramètres avec la liste de stations
+        # Construire les paramètres avec la liste de stations + filtre temporel
         params = {
             'format': 'json',
             station_param: ','.join(chunk_stations)  # Joindre avec des virgules
         }
+
+        # 🗓️ Ajouter le filtre temporel
+        if date_start and date_end:
+            params[start_param] = date_start
+            params[end_param] = date_end
 
         # Ajouter les paramètres par défaut
         default_params = extraction_config.get('default_params', {})
@@ -558,7 +583,7 @@ def slice_global_chunked(
         while True:
             page_params = {**params, 'page': page}
 
-            logger.info(f"📡 HTTP GET {client.base_url}{endpoint} chunk={chunk_num} page={page} stations={len(chunk_stations)}")
+            logger.info(f"📡 HTTP GET {client.base_url}{endpoint} chunk={chunk_num} page={page} stations={len(chunk_stations)} dates={date_start}...{date_end}")
             response = client.get(endpoint, params=page_params)
             logger.info(f"✅ Response: status={response.status_code}, content-length={len(response.content)} bytes")
 
@@ -581,12 +606,11 @@ def slice_global_chunked(
                 record['_chunk_size'] = len(chunk_stations)
                 yield record
 
-            # Vérifier dernière page
-            last_page = page_data.get('last_page', page_data.get('count', 1))
-            logger.info(f"📖 Page {page}/{last_page} completed for chunk {chunk_num} ({record_count} records)")
+            # 🔧 OPTION 1: Vérifier 'next' au lieu de 'last_page' (qui est faux pour les requêtes multi-stations)
+            next_url = page_data.get('next')
 
-            if page >= last_page:
-                logger.info(f"✅ Reached last page ({last_page}) for chunk {chunk_num}")
+            if next_url is None:
+                logger.info(f"✅ No 'next' field - reached end of data for chunk {chunk_num}")
                 break
 
             page += 1
@@ -789,7 +813,7 @@ def create_chroniques_resource(
 
         if slicing_mode == 'global_chunked':
             yield from slice_global_chunked(
-                client, endpoint, extraction_config, stations_data
+                client, endpoint, extraction_config, temporal_config, stations_data, partition_date
             )
         elif slicing_mode == 'datetime':
             yield from slice_by_datetime(
@@ -848,7 +872,7 @@ def create_observations_resource(
 
         if slicing_mode == 'global_chunked':
             yield from slice_global_chunked(
-                client, endpoint, extraction_config, stations_data
+                client, endpoint, extraction_config, temporal_config, stations_data, partition_date
             )
         elif slicing_mode == 'datetime':
             yield from slice_by_datetime(
