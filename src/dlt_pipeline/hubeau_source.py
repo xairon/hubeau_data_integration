@@ -310,7 +310,7 @@ def slice_global(
     default_params = extraction_config.get('default_params', {})
     params.update(default_params)
 
-    logger.info(f"📄 Pagination config: page_size={page_size}, params={params}")
+    logger.info(f"📄 Pagination config: no size (exploit API bug), params={params}")
 
     # Pagination manuelle (Hub'Eau commence à page=1)
     page = 1
@@ -416,7 +416,7 @@ def slice_by_datetime(
 
     logger.info(f"📅 Starting DATETIME slicing for endpoint: {endpoint}")
     logger.info(f"🗓️ Date range: {start_date} to {end_date} ({(end_date - start_date).days} days)")
-    logger.info(f"⏱️ Period chunk size: {period_days} days, page_size: {page_size}")
+    logger.info(f"⏱️ Period chunk size: {period_days} days, no size (exploit API bug)")
     logger.info(f"🔑 Date params: {start_param}/{end_param}")
 
     # Calculer le nombre total de périodes
@@ -576,3 +576,209 @@ def hubeau_rest_source(
             client, endpoint, resource_name,
             primary_keys, write_disposition, extraction_config
         )
+
+
+# ============================================
+# FACTORIES DE RESOURCES DLT
+# ============================================
+
+def create_reference_resource(
+    client: RESTClient,
+    endpoint: str,
+    resource_name: str,
+    primary_keys: List[str],
+    write_disposition: str,
+    extraction_config: Dict[str, Any]
+):
+    """
+    Crée une resource DLT pour les référentiels (stations, ouvrages, sites, etc.).
+
+    Supporte la stratégie de slicing:
+    - global: requête unique avec pagination illimitée (API bug exploit)
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        resource_name: Nom de la resource DLT
+        primary_keys: Liste des clés primaires
+        write_disposition: Mode d'écriture (replace/merge/append)
+        extraction_config: Configuration d'extraction
+
+    Returns:
+        Resource DLT configurée et instanciée
+    """
+
+    @dlt.resource(
+        name=resource_name,
+        primary_key=primary_keys if primary_keys else None,
+        write_disposition=write_disposition
+    )
+    def reference_resource() -> Iterator[Dict[str, Any]]:
+        """Resource pour référentiel avec slicing global"""
+        # Only global mode supported now
+        yield from slice_global(client, endpoint, extraction_config)
+
+    return reference_resource()
+
+
+def create_chroniques_resource(
+    client: RESTClient,
+    endpoint: str,
+    resource_name: str,
+    primary_keys: List[str],
+    write_disposition: str,
+    extraction_config: Dict[str, Any],
+    temporal_config: Dict[str, Any],
+    stations_data: Optional[Dict[str, List[str]]] = None,
+    partition_date: Optional[str] = None
+):
+    """
+    Crée une resource DLT pour les chroniques avec incremental loading.
+
+    Supporte les stratégies de slicing:
+    - datetime: découpage temporel par période
+    - global: requête unique (fallback)
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        resource_name: Nom de la resource DLT
+        primary_keys: Liste des clés primaires
+        write_disposition: Mode d'écriture (replace/merge/append)
+        extraction_config: Configuration d'extraction
+        temporal_config: Configuration temporelle pour incremental
+        stations_data: Dict {station_code: [months]} pour filtrage (obsolète)
+        partition_date: Date de partition pour batch processing (obsolète)
+
+    Returns:
+        Resource DLT configurée et instanciée avec incremental loading
+    """
+    # Déterminer le champ de date pour incremental
+    date_field = temporal_config.get('date_field', 'date_mesure')
+    start_date_str = temporal_config.get('start_date', '2020-01-01')
+
+    # Convert initial value based on the field type
+    # timestamp_mesure is in milliseconds Unix timestamp format
+    if 'timestamp' in date_field.lower():
+        # Convert date string to Unix timestamp in milliseconds
+        start_dt = datetime.strptime(start_date_str, '%Y-%m-%d')
+        # Convert to Unix timestamp in milliseconds (like the API returns)
+        initial_value = int(start_dt.timestamp() * 1000)
+        logger.info(f"📅 Using timestamp incremental: field={date_field}, initial_value={initial_value} (from {start_date_str})")
+    else:
+        # For date fields, keep as string
+        initial_value = start_date_str
+        logger.info(f"📅 Using date incremental: field={date_field}, initial_value={initial_value}")
+
+    @dlt.resource(
+        name=resource_name,
+        primary_key=primary_keys if primary_keys else None,
+        write_disposition=write_disposition
+    )
+    def chroniques_resource(
+        last_value=dlt.sources.incremental(date_field, initial_value=initial_value)
+    ) -> Iterator[Dict[str, Any]]:
+        """Resource pour chroniques avec incremental loading natif"""
+
+        slicing_mode = extraction_config.get('slicing_mode', 'global')
+
+        if slicing_mode == 'datetime':
+            yield from slice_by_datetime(
+                client, endpoint, extraction_config,
+                temporal_config, last_value
+            )
+        else:
+            yield from slice_global(client, endpoint, extraction_config)
+
+    return chroniques_resource()
+
+
+def create_observations_resource(
+    client: RESTClient,
+    endpoint: str,
+    resource_name: str,
+    primary_keys: List[str],
+    write_disposition: str,
+    extraction_config: Dict[str, Any],
+    temporal_config: Dict[str, Any],
+    stations_data: Optional[Dict[str, List[str]]] = None,
+    partition_date: Optional[str] = None
+):
+    """
+    Crée une resource DLT pour les observations/analyses.
+
+    Supporte les stratégies de slicing:
+    - datetime: découpage temporel par période
+    - global: requête unique (fallback)
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        resource_name: Nom de la resource DLT
+        primary_keys: Liste des clés primaires
+        write_disposition: Mode d'écriture (replace/merge/append)
+        extraction_config: Configuration d'extraction
+        temporal_config: Configuration temporelle
+        stations_data: Dict {station_code: [months]} pour filtrage (obsolète)
+        partition_date: Date de partition pour batch processing (obsolète)
+
+    Returns:
+        Resource DLT configurée et instanciée
+    """
+
+    @dlt.resource(
+        name=resource_name,
+        primary_key=primary_keys if primary_keys else None,
+        write_disposition=write_disposition
+    )
+    def observations_resource() -> Iterator[Dict[str, Any]]:
+        """Resource pour observations"""
+
+        slicing_mode = extraction_config.get('slicing_mode', 'global')
+
+        if slicing_mode == 'datetime':
+            yield from slice_by_datetime(
+                client, endpoint, extraction_config,
+                temporal_config, None
+            )
+        else:
+            yield from slice_global(client, endpoint, extraction_config)
+
+    return observations_resource()
+
+
+def create_generic_resource(
+    client: RESTClient,
+    endpoint: str,
+    resource_name: str,
+    primary_keys: List[str],
+    write_disposition: str,
+    extraction_config: Dict[str, Any]
+):
+    """
+    Crée une resource DLT générique pour tout endpoint.
+
+    Utilise la stratégie global par défaut.
+
+    Args:
+        client: RESTClient DLT
+        endpoint: Chemin de l'endpoint
+        resource_name: Nom de la resource DLT
+        primary_keys: Liste des clés primaires
+        write_disposition: Mode d'écriture (replace/merge/append)
+        extraction_config: Configuration d'extraction
+
+    Returns:
+        Resource DLT configurée et instanciée
+    """
+
+    @dlt.resource(
+        name=resource_name,
+        primary_key=primary_keys if primary_keys else None,
+        write_disposition=write_disposition
+    )
+    def generic_resource() -> Iterator[Dict[str, Any]]:
+        """Resource générique"""
+        yield from slice_global(client, endpoint, extraction_config)
+
+    return generic_resource()
