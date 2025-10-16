@@ -545,9 +545,6 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     
     try:
         # Execute DLT pipeline with monkey-patched print
-        # Get state store from config or use default
-        state_store = cfg.get("state_store", "s3://bronze/_state")
-        
         # Créer le pipeline DLT
         # ✅ FIX: Déduire dataset_name du source.name pour éviter bronze/bronze
         # Exemple: source.name="piezometry" → dataset_name="piezometry_api"
@@ -616,10 +613,18 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Créer la destination avec file_format, layout depuis YAML
         destination = get_filesystem_destination(filesystem_config)
 
+        # ✅ FIX: Configure pipelines_dir to use a temp directory to avoid local filesystem issues
+        # DLT will store pipeline working files here, but incremental state goes to MinIO automatically
+        import tempfile
+        pipelines_dir = os.path.join(tempfile.gettempdir(), "dlt_pipelines")
+        os.makedirs(pipelines_dir, exist_ok=True)
+        context.log.info(f"📁 DLT pipelines_dir: {pipelines_dir}")
+
         pipeline = dlt.pipeline(
             pipeline_name="hubeau_pipeline",
             destination=destination,
-            dataset_name=dataset_name
+            dataset_name=dataset_name,
+            pipelines_dir=pipelines_dir  # Use temp directory for local working files
         )
 
         # Créer la source Hub'Eau
