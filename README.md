@@ -1,291 +1,71 @@
-# 🌊 Hub'Eau Data Integration - Axe EAU du Programme JUNON
+# 🌊 Hub'Eau Data Integration
 
-Pipeline d'intégration des données Hub'Eau pour le programme **JUNON** (Jumeaux Numériques au service des ressources naturelles, BRGM).
+> **Pipeline d'intégration des données Hub'Eau pour le programme JUNON** (Jumeaux Numériques - BRGM Centre-Val de Loire)
 
-> **Programme officiel** : [JUNON](https://www.junon-cvl.fr/fr) | Budget : 12,3M€ | BRGM Centre-Val de Loire  
-> **Dépôt GitLab** : https://scm.univ-tours.fr/ringuet/hubeau_data_integration
-
----
-
-## 📋 Table des Matières
-
-- [Contexte : Programme JUNON](#-contexte--programme-junon)
-- [Notre Contribution : Axe EAU](#-notre-contribution--axe-eau)
-- [Architecture & Technologies](#-architecture--technologies)
-- [Installation Rapide](#-installation-rapide)
-- [Données Intégrées](#-données-intégrées)
-- [Jobs Dagster](#-jobs-dagster)
-- [Documentation](#-documentation)
-- [Structure du Projet](#-structure-du-projet)
+[![Pipeline](https://img.shields.io/badge/status-production-success)](https://scm.univ-tours.fr/ringuet/hubeau_data_integration)
+[![Dagster](https://img.shields.io/badge/Dagster-1.11.14-blue)](https://dagster.io)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue)](https://python.org)
 
 ---
 
-## 🎯 Contexte : Programme JUNON
+## 🎯 Qu'est-ce que c'est ?
 
-### Qu'est-ce que JUNON ?
+Ce projet est **la fondation data** de l'axe EAU du [programme JUNON](https://www.junon-cvl.fr/fr) (12,3M€, BRGM) visant à créer des **jumeaux numériques** pour la gestion des ressources en eau.
 
-**JUNON** est un programme officiel du BRGM (Bureau de Recherches Géologiques et Minières) doté de **12,3 millions d'euros** sur **5 ans**, visant à développer des **jumeaux numériques** pour la gestion des ressources naturelles en région Centre-Val de Loire.
-
-**Définition officielle** (Sébastien Dupraz, Coordinateur JUNON) :
-> "Un jumeau numérique est une reproduction virtuelle d'un objet ou d'un environnement qui, grâce à des méthodes d'intelligence artificielle, simule le comportement de son double réel afin de mieux le comprendre et le gérer."
-
-### Les 5 Axes du Programme
-
-1. **🌊 EAU** - Gestion ressources en eau (notre projet)
-2. **🌱 SOL/AIR** - Qualité sols et atmosphère
-3. **💾 DATA** - Infrastructure de données et interopérabilité
-4. **🔮 PRÉDICTION** - Modélisation prédictive et IA
-5. **🎯 JUMEAUX NUMÉRIQUES** - Développement des jumeaux numériques
-
-**Plus d'infos** : [junon-cvl.fr](https://www.junon-cvl.fr/fr)
-
----
-
-## 🌊 Notre Contribution : Axe EAU
-
-Ce projet constitue **la fondation data** de l'axe EAU du programme JUNON :
-
-### Objectif
-Créer un **entrepôt de données unifié** des ressources en eau (nappes, cours d'eau) en intégrant **8 APIs Hub'Eau** (portail national des données sur l'eau) pour servir de base au **jumeau numérique hydrologique**.
-
-### Approche en 3 Phases
+**En bref** : On intègre automatiquement **8 APIs Hub'Eau** (24 endpoints, 778 attributs) dans un data lake unifié pour servir de base au jumeau numérique hydrologique.
 
 ```
-Phase 1 ✅ IMPLÉMENTÉ
-┌─────────────────────────────────────────┐
-│   BRONZE - Intégration Données Brutes  │
-│                                         │
-│  Hub'Eau (8 APIs, 24 endpoints)        │
-│         ↓ DLT Pipeline                  │
-│  MinIO (Parquet, partitions annuelles) │
-└─────────────────────────────────────────┘
-
-Phase 2 🚧 EN COURS
-┌─────────────────────────────────────────┐
-│   SILVER - Harmonisation & Nettoyage   │
-│                                         │
-│  Enrichissement avec référentiels       │
-│  (SANDRE, BDLISA, COG, NQE, etc.)      │
-└─────────────────────────────────────────┘
-
-Phase 3 📋 ROADMAP
-┌─────────────────────────────────────────┐
-│   ONTOLOGIE - Modèle Sémantique SOSA   │
-│                                         │
-│  Graphe de connaissances unifié         │
-│  → Base du jumeau numérique             │
-└─────────────────────────────────────────┘
+Hub'Eau (8 APIs) → DLT Pipeline → MinIO (Parquet) → [Futur: ML/IA/Jumeau Numérique]
+                                                      Phase Bronze ✅
 ```
 
-### Vision : Architecture SOSA
+### Données intégrées
 
-Le jumeau numérique s'appuiera sur l'ontologie **SOSA** (Sensor, Observation, Sample, Actuator - Standard W3C) pour unifier toutes les sources de données hétérogènes dans un modèle sémantique cohérent.
+- 🌊 **Hydrométrie** : Stations, sites, débits, hauteurs d'eau
+- 🏔️ **Piézométrie** : Stations, chroniques nappes phréatiques
+- 🧪 **Qualité** : Stations, analyses physico-chimiques (rivières + nappes)
+- 🌡️ **Température** : Stations, chroniques température continue
+- 💧 **Écoulement (ONDE)** : Stations, observations assecs
+- 🦠 **Hydrobiologie** : Stations, indices biologiques, taxons
+- 💦 **Prélèvements** : Ouvrages, points, volumes prélevés
 
-**Voir** : [Documentation complète JUNON](docs/PROJET_JUNON_VISION.md)
-
----
-
-## 🏗️ Architecture & Technologies
-
-### État Actuel ✅ (Phase Bronze)
-
-| Composant | Technologie | Statut | Rôle |
-|-----------|-------------|--------|------|
-| **Orchestration** | Dagster 1.5+ | ✅ Prod | Workflow, scheduling, monitoring |
-| **Data Loading** | DLT Custom | ✅ Prod | Extraction Hub'Eau → Parquet |
-| **Stockage Bronze** | MinIO (S3) | ✅ Prod | Data lake Parquet |
-| **Monitoring** | Portainer CE | ✅ Prod | Docker management & monitoring |
-
-### Roadmap 🚧 (Phases Silver/Gold)
-
-| Composant | Technologie | Statut | Rôle |
-|-----------|-------------|--------|------|
-| **Time Series** | TimescaleDB | 🚧 Roadmap | Chroniques optimisées |
-| **Geospatial** | PostGIS | 🚧 Roadmap | Analyses spatiales |
-| **Graph** | Neo4j | 🚧 Roadmap | Ontologie SOSA/SANDRE |
-
-**Architecture complète** : [Architecture Technique](docs/ARCHITECTURE_MODERNE.md)
+**Total** : 24 endpoints, 778 attributs documentés
 
 ---
 
-## 🚀 Tests Rapides Sans Docker
+## 🚀 Démarrage Rapide
 
-**Vous n'avez PAS besoin de Docker** pour tester les APIs et le wrapper Python.
+### Pour les utilisateurs (sans Docker)
 
-### Option 1 : Script Simple (2 minutes)
+Explorez les données Hub'Eau directement en Python :
 
 ```bash
-# Installer les dépendances
+# Installation
 pip install -r requirements.txt
 
-# Lancer le test
-python test_local_simple.py
-```
+# Tester
+python test_local_simple.py  # → 3 CSV dans data/local_tests/
 
-**Résultat** : 3 CSV dans `data/local_tests/`
-
-### Option 2 : Notebook Jupyter (5 minutes)
-
-```bash
-# Lancer Jupyter
+# Ou avec Jupyter
 jupyter notebook notebooks/test_hubeau_wrapper.ipynb
 ```
 
-**Résultat** : 9 CSV + visualisations dans `data/test_exports/`
-
-### Option 3 : CLI (1 minute)
+### Pour les développeurs (avec Docker)
 
 ```bash
-# Lister les APIs
-python -m hubeau.cli list-apis
+# 1. Configurer
+cp .env.template .env
+# Éditer .env avec vos mots de passe
 
-# Tester la connectivité
-python -m hubeau.cli test-connectivity
-
-# Extraire des données
-python -m hubeau.cli get-data piezometry stations --limit 10 --export csv
-```
-
-**Guide complet** : [Tests Locaux Sans Docker](docs/QUICK_START_LOCAL.md)
-
----
-
-## 🚀 Installation & Déploiement
-
-### Développement Local
-
-**Prérequis** : Docker, Docker Compose, Python 3.11+
-
-```bash
-# 1. Cloner le projet
-git clone https://scm.univ-tours.fr/ringuet/hubeau_data_integration.git
-cd hubeau_data_integration
-
-# 2. Configurer les variables d'environnement
-cp env.example .env
-nano .env  # Éditer avec vos mots de passe
-
-# 3. Démarrer les services
+# 2. Lancer
 docker-compose up -d
 
-# 4. Accès aux services
-# - Dagster UI : http://localhost:8080
-# - MinIO Console : http://localhost:9001
-# - Portainer : https://localhost:9443
+# 3. Accéder
+# Dagster UI: http://localhost:8080
+# MinIO Console: http://localhost:9001
 ```
 
-### Déploiement Production (GitLab CI/CD)
-
-**Automatique sur push vers `main`** :
-
-1. **Configurer les secrets GitLab** (Settings > CI/CD > Variables) :
-   - `DAGSTER_PG_PASSWORD`
-   - `MINIO_USER`
-   - `MINIO_PASS`
-
-2. **Push vers main** :
-   ```bash
-   git push origin main
-   ```
-
-3. **GitLab CI/CD** :
-   - Build image Docker
-   - Génère `.env.production` depuis secrets
-   - Déploie automatiquement
-   - Health checks
-
-**Le runner doit avoir** :
-- Docker installé
-- Tag `hubeau` configuré
-- Accès aux volumes de données
-
-**Détails** : [scripts/README.md](scripts/README.md)
-
-### Premier Job
-
-```bash
-# Stations de référence
-dagster job execute -j sync_all_stations
-
-# Données annuelles (partition 2024)
-dagster asset materialize -a temperature_chroniques --partition 2024
-```
-
-**Guide complet** : [Tutoriel DLT](docs/TUTORIEL_DLT.md)
-
----
-
-## 📊 Données Intégrées
-
-### 8 APIs Hub'Eau - 24 Endpoints
-
-| API | Endpoints | Description |
-|-----|-----------|-------------|
-| **Hydrométrie** | 3 | Stations, sites, observations élaborées (débits/hauteurs) |
-| **Piézométrie** | 3 | Stations, chroniques temps réel, chroniques historiques |
-| **Qualité Cours d'Eau** | 4 | Stations, analyses, opérations, conditions environnementales |
-| **Qualité Nappes** | 2 | Stations, analyses physico-chimiques |
-| **Température** | 2 | Stations, chroniques température en continu |
-| **Écoulement (ONDE)** | 3 | Stations, observations, campagnes |
-| **Hydrobiologie** | 3 | Stations, indices biologiques, taxons |
-| **Prélèvements** | 3 | Ouvrages, points, chroniques volumes |
-
-**Total attributs documentés** : **778 champs**
-
-**Documentation complète** : [APIs Hub'Eau - Référence Complète](docs/APIS_HUBEAU_REFERENCE_COMPLETE.md)
-
----
-
-## 🎮 Jobs Dagster
-
-### Architecture des Jobs
-
-Les données sont organisées en **chaînes logiques** :
-
-```
-Station Référence (pas de partition)
-    ↓
-Observations/Chroniques (partitions annuelles 2020-2025)
-```
-
-### Jobs Disponibles
-
-```bash
-# 📍 Toutes les stations de référence (exécution unique)
-dagster job execute -j sync_all_stations
-
-# 📈 Toutes les données annuelles (historique 2020-2025)
-dagster job execute -j sync_all_yearly_data
-
-# 🌊 Job Hydrométrie (stations → sites → obs_elab)
-dagster job execute -j hubeau_hydrometry_job
-
-# 🏔️ Job Piézométrie (stations → chroniques)
-dagster job execute -j hubeau_piezometry_job
-
-# 🧪 Job Qualité Cours d'Eau (stations → analyses + opérations + conditions)
-dagster job execute -j hubeau_quality_rivers_job
-
-# 🌡️ Job Température (stations → chroniques)
-dagster job execute -j hubeau_temperature_job
-```
-
-### Exécution par Partition
-
-```bash
-# Matérialiser une partition spécifique
-dagster asset materialize -a temperature_chroniques --partition 2024
-dagster asset materialize -a hydrometry_obs_elab --partition 2023
-
-# Backfill multi-partitions
-dagster asset materialize -a piezometry_chroniques --partition 2020,2021,2022,2023,2024
-```
-
-### Schedule Automatique
-
-**Schedule annuel** : 1er janvier à 3h du matin
-- Exécute `sync_all_yearly_data`
-- Collecte données de l'année précédente
+**Guide détaillé** : [docs/QUICK_START_LOCAL.md](docs/QUICK_START_LOCAL.md)
 
 ---
 
@@ -293,216 +73,126 @@ dagster asset materialize -a piezometry_chroniques --partition 2020,2021,2022,20
 
 ```
 hubeau_data_integration/
-├── configs/hubeau/              # ✅ Configurations DLT (24 fichiers YAML)
-│   ├── hydrometry_*.yml
-│   ├── piezometry_*.yml
-│   ├── quality_*.yml
-│   ├── temperature_*.yml
-│   └── ...
-│
-├── src/dlt_pipeline/            # ✅ Pipeline DLT générique
-│   ├── hubeau_generic.py        # Source DLT Hub'Eau
-│   ├── slicing.py               # Découpage intelligent
-│   ├── transformers.py          # Validation et transformation
-│   └── http_client.py           # Client HTTP avec retry
-│
-├── src/hubeau_pipeline/         # ✅ Code Dagster
-│   ├── assets/bronze/           # Assets DLT par API
-│   │   └── dlt_assets.py
-│   ├── jobs/dlt_jobs.py         # Jobs Dagster
-│   ├── schedules/               # Planification
-│   └── definitions.py           # Définitions Dagster
-│
-├── docker/                      # ✅ Configuration Docker
-│   └── dagster/Dockerfile
-│
-├── scripts/                     # ✅ Déploiement
-│   └── README.md                # Configuration GitLab CI/CD
-│
-└── docs/                        # ✅ Documentation complète
-    ├── APIS_HUBEAU_REFERENCE_COMPLETE.md    # Schémas 8 APIs (778 attributs)
-    ├── AUTRES_REFERENTIELS.md               # SANDRE, BDLISA, COG, NQE...
-    ├── ARCHITECTURE_MODERNE.md              # Architecture technique
-    ├── TUTORIEL_DLT.md                      # Guide configuration DLT
-    └── PROJET_JUNON_VISION.md               # Vision jumeau numérique
+├── configs/hubeau/          # Configurations DLT (24 fichiers YAML)
+├── src/
+│   ├── dlt_pipeline/        # Pipeline DLT générique
+│   └── hubeau_pipeline/     # Code Dagster (assets, jobs, schedules)
+├── docker/                  # Dockerfiles (orchestrator + worker)
+├── docs/                    # Documentation (voir ci-dessous)
+└── scripts/                 # Scripts de déploiement
 ```
 
 ---
 
 ## 📚 Documentation
 
-### Documentation Technique
+### 🚀 Guides de Démarrage
 
-| Document | Description | Audience |
-|----------|-------------|----------|
-| **[APIs Hub'Eau](docs/APIS_HUBEAU_REFERENCE_COMPLETE.md)** | Référence exhaustive des 8 APIs intégrées (778 attributs documentés) | Utilisateurs, développeurs |
-| **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** | Guide des configurations YAML, modes de slicing, optimisations | Développeurs |
-| **[Architecture Technique](docs/ARCHITECTURE_MODERNE.md)** | Stack technique, choix architecturaux, état d'implémentation | Architectes, DevOps |
-| **[Autres Référentiels](docs/AUTRES_REFERENTIELS.md)** | Guide d'intégration SANDRE, BDLISA, COG, NQE, TAXREF | Data engineers |
+| Document | Description |
+|----------|-------------|
+| **[Quick Start Local](docs/QUICK_START_LOCAL.md)** | Installation et premiers pas (dev local) |
+| **[Tutoriel DLT](docs/TUTORIEL_DLT.md)** | Configurer et personnaliser le pipeline |
+| **[GitLab CI/CD Setup](GITLAB_CI_SETUP.md)** | Déploiement automatique en production |
 
-### Documentation Projet
+### 📖 Documentation Technique
 
-| Document | Description | Audience |
-|----------|-------------|----------|
-| **[Vision JUNON](docs/PROJET_JUNON_VISION.md)** | Contexte programme JUNON, vision jumeau numérique, ontologie SOSA | Management, chercheurs |
-| **[Déploiement](scripts/README.md)** | Configuration GitLab CI/CD pour déploiement automatique | DevOps |
+| Document | Description |
+|----------|-------------|
+| **[Architecture](docs/ARCHITECTURE.md)** | Stack technique actuelle (Dagster + DLT + MinIO) |
+| **[Environment Configuration](docs/ENVIRONMENT_CONFIGURATION.md)** | Configuration multi-environnements (dev/staging/prod) |
+| **[Contributing](CONTRIBUTING.md)** | Guide de contribution |
 
----
+### 📊 Référence Données
 
-## 🔧 Caractéristiques Techniques
+| Document | Description |
+|----------|-------------|
+| **[APIs Hub'Eau - Référence Complète](docs/APIS_HUBEAU_REFERENCE_COMPLETE.md)** | Schémas des 8 APIs (778 attributs) |
+| **[Autres Référentiels](docs/AUTRES_REFERENTIELS.md)** | SANDRE, BDLISA, COG, NQE, TAXREF |
+| **[Schéma BDD](docs/SCHEMA_BDD_HUBEAU.md)** | Design de la base de données Silver/Gold |
 
-### Pipeline DLT Intelligent
+### 🔮 Vision & Roadmap
 
-- ✅ **5 modes de slicing** : Global, datetime, dept, station_month_chunked, dept_datetime
-- ✅ **Pagination automatique** : Page-based et cursor-based (20K records/page)
-- ✅ **Fallbacks sur troncature** : Découpage automatique si limite API atteinte
-- ✅ **Rate limiting adaptatif** : 0.5-2.0 req/s selon API
-- ✅ **Filtrage stations actives** : Évite requêtes inutiles (gain 90%+ sur certaines APIs)
-- ✅ **Garbage collection** : Optimisation mémoire (évite OOM)
-- ✅ **Retry intelligent** : Backoff exponentiel 2s → 120s
-
-### Optimisations Mémoire
-
-- ✅ **In-process executor** : Tous les jobs (évite overhead multiprocess)
-- ✅ **Garbage collection explicite** : Après chaque slice
-- ✅ **Buffered batches cleanup** : Libération mémoire après traitement
-- ✅ **Partitionnement annuel** : Charge data year-by-year
-
-### Stockage Bronze (MinIO)
-
-```
-hubeau-bronze/
-├── hydrometry_api/
-│   ├── hydrometry_stations/*.parquet
-│   ├── hydrometry_sites/*.parquet
-│   └── hydrometry_obs_elab/year={2020,2021,...,2025}/*.parquet
-│
-├── quality_rivers_api/
-│   ├── quality_rivers_stations/*.parquet
-│   └── quality_rivers_analyses/year={2020,...,2025}/*.parquet
-│
-└── {api_name}/{endpoint}/year={YYYY}/*.parquet
-```
-
-**Format** : Parquet compressé (Snappy)  
-**Métadonnées** : `_load_id`, `_slice_id`, `_dlt_load_timestamp`
+| Document | Description |
+|----------|-------------|
+| **[Vision JUNON](docs/PROJET_JUNON_VISION.md)** | Contexte programme JUNON, jumeau numérique, ontologie SOSA |
+| **[Observability](docs/OBSERVABILITY.md)** | Monitoring avancé (Prometheus, Grafana) |
 
 ---
 
-## 🔍 Monitoring
+## 🏗️ Architecture
 
-### Portainer (https://localhost:9443)
+### Stack Actuel ✅ (Phase Bronze - Production)
 
-- ✅ **Container Management** : Start/stop/restart containers
-- ✅ **Resource Monitoring** : CPU, memory, network usage
-- ✅ **Log Viewer** : Centralized log access
-- ✅ **Stack Management** : Deploy and manage stacks
-- ✅ **Volume/Network Management** : Visual management
+| Composant | Technologie | Rôle |
+|-----------|-------------|------|
+| **Orchestration** | Dagster 1.11.14 | Workflow, scheduling, monitoring |
+| **Data Loading** | DLT 0.4.12 | Extraction Hub'Eau → Parquet |
+| **Data Lake** | MinIO (S3) | Stockage Parquet (Bronze) |
+| **Databases** | PostgreSQL + PostGIS | Métadonnées & données géospatiales |
+| **Monitoring** | Portainer CE | Gestion containers Docker |
 
-### Dagster UI (http://localhost:8080)
+### Roadmap 🚧 (Phases Silver/Gold)
 
-- ✅ **Assets Graph** : Visualisation des dépendances
-- ✅ **Runs** : Historique d'exécution avec logs détaillés
-- ✅ **Partitions** : Vue par année (2020-2025)
-- ✅ **Lineage** : Traçabilité des données
-- ✅ **Métriques** : Records, durée, requêtes API
+| Composant | Technologie | Status | Rôle |
+|-----------|-------------|--------|------|
+| **Time Series** | TimescaleDB | Roadmap | Chroniques optimisées (> 100M lignes) |
+| **Graph DB** | Neo4j | Roadmap | Ontologie SOSA/SANDRE |
+| **ML/IA** | TBD | Roadmap | Modèles prédictifs |
 
-### Logs Détaillés
+**Architecture détaillée** : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+---
+
+## 🎮 Utilisation
+
+### Lancer un Job Dagster
 
 ```bash
-# Logs temps réel
-docker-compose logs -f dagster_daemon
+# Via UI: http://localhost:8080 → Jobs → Execute
 
-# Logs spécifiques API
-docker-compose logs dagster_daemon | grep hydrometry
+# Via CLI:
+dagster job execute -j sync_all_stations  # Toutes les stations de référence
+dagster job execute -j hubeau_hydrometry_job  # Job hydrométrie complet
 
-# Logs d'une exécution
-dagster run logs <run_id>
+# Par partition annuelle:
+dagster asset materialize -a temperature_chroniques --partition 2024
+```
+
+### Accès aux Données (MinIO)
+
+```python
+import boto3
+
+s3 = boto3.client('s3',
+    endpoint_url='http://localhost:9000',
+    aws_access_key_id='admin',
+    aws_secret_access_key='your_password'
+)
+
+# Lister les fichiers
+s3.list_objects_v2(Bucket='bronze', Prefix='hydrometry_api/')
 ```
 
 ---
 
-## 🚀 Développement & Contribution
-
-### Ajouter une Nouvelle API
-
-1. Créer config YAML : `configs/hubeau/nouvelle_api.yml`
-2. Définir asset Dagster : `src/hubeau_pipeline/assets/bronze/dlt_assets.py`
-3. Ajouter au job : `src/hubeau_pipeline/jobs/dlt_jobs.py`
-4. Tester : Dagster UI → Jobs → Execute
-
-**Guide complet** : [Tutoriel DLT](docs/TUTORIEL_DLT.md)
-
-### Modifier une Configuration
-
-1. Éditer le YAML : `configs/hubeau/api.yml`
-2. Commit : `git add . && git commit -m "fix: ..."`
-3. Push : `git push origin main`
-4. Déploiement automatique via GitLab CI/CD
-
-### Tests
-
-```bash
-# Vérifier une configuration DLT
-python -c "from dlt_pipeline.hubeau_generic import validate_config; validate_config('configs/hubeau/api.yml')"
-
-# Tester un asset
-dagster asset materialize -a temperature_stations_reference
-```
-
----
-
-## 📖 Documentation Complète
-
-### Par Thème
-
-**🚀 Démarrage Rapide**
-- Ce README
-- [Tutoriel DLT](docs/TUTORIEL_DLT.md) - Guide pratique
-
-**📊 Données**
-- [APIs Hub'Eau - Référence Complète](docs/APIS_HUBEAU_REFERENCE_COMPLETE.md) - 778 attributs documentés
-- [Autres Référentiels](docs/AUTRES_REFERENTIELS.md) - SANDRE, BDLISA, COG, etc.
-
-**🏗️ Architecture**
-- [Architecture Technique](docs/ARCHITECTURE_MODERNE.md) - Stack & choix techniques
-- [Vision JUNON](docs/PROJET_JUNON_VISION.md) - Contexte jumeau numérique
-
-**⚙️ Production**
-- [Déploiement](scripts/README.md) - GitLab CI/CD
-
-### Par Audience
-
-| Rôle | Documents Recommandés |
-|------|----------------------|
-| **Data User** | APIs Hub'Eau, Autres Référentiels |
-| **Developer** | Tutoriel DLT, Architecture Technique, ce README |
-| **DevOps** | Architecture Technique, Scripts Production |
-| **Researcher** | Vision JUNON, APIs Hub'Eau, Autres Référentiels |
-| **Manager** | Vision JUNON, Architecture Technique |
-
----
-
-## 🤝 Contribution & Contact
-
-### Workflow de Contribution
+## 🤝 Contribution
 
 1. Fork du projet
-2. Créer branche feature : `git checkout -b feature/ma-feature`
-3. Développer et tester
-4. Commit : `git commit -m "feat: description"`
-5. Push : `git push origin feature/ma-feature`
-6. Créer Merge Request vers `main`
+2. Créer une branche : `git checkout -b feature/ma-feature`
+3. Commit : `git commit -m "feat: description"`
+4. Push : `git push origin feature/ma-feature`
+5. Créer une Merge Request
 
-### GitLab CI/CD
+**Guide complet** : [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Le déploiement est **automatique** sur push vers `main` :
-1. Build image Docker
-2. Génération `.env.production` depuis secrets GitLab
-3. Déploiement automatique sur serveur cible
-4. Health checks automatiques
+---
 
-**Variables secrets** : Settings > CI/CD > Variables
+## 🔗 Liens Utiles
+
+- **Programme JUNON** : https://www.junon-cvl.fr/fr
+- **Hub'Eau** : https://hubeau.eaufrance.fr
+- **SANDRE** : https://www.sandre.eaufrance.fr
+- **GitLab** : https://scm.univ-tours.fr/ringuet/hubeau_data_integration
 
 ---
 
@@ -510,20 +200,5 @@ Le déploiement est **automatique** sur push vers `main` :
 
 Projet développé dans le cadre du **programme JUNON** (BRGM) et de l'**Université de Tours**.
 
----
-
-## 🔗 Liens Utiles
-
-### Programme JUNON
-- [Site officiel JUNON](https://www.junon-cvl.fr/fr)
-- [BRGM](https://www.brgm.fr)
-
-### Sources de Données
-- [Hub'Eau](https://hubeau.eaufrance.fr) - Portail national données eau
-- [SANDRE](https://www.sandre.eaufrance.fr) - Référentiels eau
-- [BDLISA](https://bdlisa.eaufrance.fr) - Référentiel hydrogéologique
-
-### Standards & Ontologies
-- [SOSA/SSN (W3C)](https://www.w3.org/TR/vocab-ssn/) - Ontologie observations
-- [GeoSPARQL (OGC)](https://www.ogc.org/standards/geosparql) - Données géospatiales
-- [INSPIRE (EU)](https://inspire.ec.europa.eu) - Directive européenne
+**Auteur** : Nicolas Ringuet
+**Contact** : [Formulaire de contact JUNON](https://www.junon-cvl.fr/fr/contact)
