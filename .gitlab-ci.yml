@@ -45,8 +45,23 @@ deploy:production:
   script:
     - echo "🔄 Déploiement automatique sur production..."
     - cd /srv/brgm
+    - echo "🔐 Vérification des variables obligatoires..."
+    - |
+      if [ -z "$DAGSTER_PG_PASSWORD" ]; then
+        echo "❌ ERREUR: DAGSTER_PG_PASSWORD non définie dans GitLab CI/CD Variables"
+        exit 1
+      fi
+      if [ -z "$MINIO_PASS" ]; then
+        echo "❌ ERREUR: MINIO_PASS non définie dans GitLab CI/CD Variables"
+        exit 1
+      fi
+      if [ -z "$PG_PASSWORD" ]; then
+        echo "❌ ERREUR: PG_PASSWORD non définie dans GitLab CI/CD Variables"
+        exit 1
+      fi
+    - echo "✅ Toutes les variables obligatoires sont définies"
     - echo "🔐 Export des variables GitLab CI/CD pour Docker Compose..."
-    - export DAGSTER_PG_HOST DAGSTER_PG_PASSWORD MINIO_ENDPOINT MINIO_USER MINIO_PASS MINIO_REGION MINIO_BRONZE_BUCKET PG_HOST PG_PASSWORD POSTGIS_HOST
+    - export DAGSTER_PG_HOST DAGSTER_PG_PORT DAGSTER_PG_PASSWORD MINIO_ENDPOINT MINIO_USER MINIO_PASS MINIO_REGION MINIO_BRONZE_BUCKET PG_HOST PG_PASSWORD POSTGIS_HOST
     - echo "✅ Variables exportées (Docker Compose les lira automatiquement)"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down

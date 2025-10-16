@@ -6,6 +6,8 @@ storage:
     postgres_db:
       hostname:
         env: DAGSTER_PG_HOST
+      port:
+        env: DAGSTER_PG_PORT
       db_name:
         env: DAGSTER_PG_DB
       username:

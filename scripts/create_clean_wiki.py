@@ -24,6 +24,7 @@ def wiki(title, content=None, fpath=None):
 
     print(f"{title}...", end=" ", flush=True)
 
+    # Try POST first (create)
     r = requests.post(f"{URL}/api/v4/projects/{PID}/wikis",
                      headers=H, json={"title": title, "content": content},
                      verify=False, timeout=30)
@@ -31,6 +32,19 @@ def wiki(title, content=None, fpath=None):
     if r.status_code == 201:
         print("[OK]")
         return True
+    elif r.status_code == 400:
+        # Page exists, try PUT (update)
+        # GitLab normalizes titles to slugs
+        slug = title.lower().replace(' ', '-')
+        r = requests.put(f"{URL}/api/v4/projects/{PID}/wikis/{slug}",
+                        headers=H, json={"title": title, "content": content},
+                        verify=False, timeout=30)
+        if r.status_code == 200:
+            print("[UPDATED]")
+            return True
+        else:
+            print(f"[ERR UPDATE {r.status_code}]")
+            return False
     else:
         print(f"[ERR {r.status_code}]")
         return False
