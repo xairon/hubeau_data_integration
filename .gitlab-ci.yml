@@ -45,44 +45,13 @@ deploy:production:
   script:
     - echo "🔄 Déploiement automatique sur production..."
     - cd /srv/brgm
-    - echo "🔐 Génération du fichier .env.production depuis les secrets GitLab..."
-    - echo "# Fichier généré automatiquement par le pipeline GitLab CI/CD" > .env.production
-    - echo "# NE PAS ÉDITER MANUELLEMENT - Les changements seront écrasés" >> .env.production
-    - echo "" >> .env.production
-    - echo "# Dagster Orchestration Database" >> .env.production
-    - echo "DAGSTER_PG_HOST=${DAGSTER_PG_HOST}" >> .env.production
-    - echo "DAGSTER_PG_PORT=5432" >> .env.production
-    - echo "DAGSTER_PG_DB=dagster" >> .env.production
-    - echo "DAGSTER_PG_USER=postgres" >> .env.production
-    - echo "DAGSTER_PG_PASSWORD=${DAGSTER_PG_PASSWORD}" >> .env.production
-    - echo "" >> .env.production
-    - echo "# PostgreSQL Data Storage" >> .env.production
-    - echo "PG_HOST=${PG_HOST}" >> .env.production
-    - echo "PG_PORT=5432" >> .env.production
-    - echo "PG_DB=postgres" >> .env.production
-    - echo "PG_USER=postgres" >> .env.production
-    - echo "PG_PASSWORD=${PG_PASSWORD}" >> .env.production
-    - echo "" >> .env.production
-    - echo "# PostGIS Geospatial Database" >> .env.production
-    - echo "POSTGIS_HOST=${POSTGIS_HOST}" >> .env.production
-    - echo "POSTGIS_PORT=5432" >> .env.production
-    - echo "POSTGIS_DB=postgres" >> .env.production
-    - echo "POSTGIS_USER=postgres" >> .env.production
-    - echo "POSTGIS_PASSWORD=${PG_PASSWORD}" >> .env.production
-    - echo "" >> .env.production
-    - echo "# MinIO Object Storage" >> .env.production
-    - echo "MINIO_ENDPOINT=${MINIO_ENDPOINT}" >> .env.production
-    - echo "MINIO_USER=${MINIO_USER}" >> .env.production
-    - echo "MINIO_PASS=${MINIO_PASS}" >> .env.production
-    - echo "MINIO_REGION=${MINIO_REGION}" >> .env.production
-    - echo "MINIO_BRONZE_BUCKET=${MINIO_BRONZE_BUCKET}" >> .env.production
-    - echo "✅ Fichier .env.production créé"
-    - echo "📄 Contenu du fichier .env.production (passwords masqués):"
-    - cat .env.production | sed 's/PASSWORD=.*/PASSWORD=***MASKED***/g' | sed 's/PASS=.*/PASS=***MASKED***/g'
+    - echo "🔐 Export des variables GitLab CI/CD pour Docker Compose..."
+    - export DAGSTER_PG_HOST DAGSTER_PG_PASSWORD MINIO_ENDPOINT MINIO_USER MINIO_PASS MINIO_REGION MINIO_BRONZE_BUCKET PG_HOST PG_PASSWORD POSTGIS_HOST
+    - echo "✅ Variables exportées (Docker Compose les lira automatiquement)"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down
     - echo "🚀 Démarrage avec la nouvelle image..."
-    - docker compose -f docker-compose.production.yml --env-file .env.production up -d
+    - docker compose -f docker-compose.production.yml up -d
     - echo "⏳ Attente des services (90s pour start_period)..."
     - sleep 90
     - echo "✅ Vérification des conteneurs..."
