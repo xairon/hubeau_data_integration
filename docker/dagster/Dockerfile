@@ -1,5 +1,6 @@
-﻿FROM python:3.11-slim
+FROM python:3.11-slim
 
+# Install system dependencies including uv
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -13,11 +14,19 @@ RUN apt-get update \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Install uv (ultra-fast Python package installer)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /app/requirements.txt
+# Copy project files
+COPY pyproject.toml /app/pyproject.toml
+COPY src /app/src
+COPY configs /app/configs
+
+# Install dependencies using uv (100x faster than pip!)
+# Install all dependencies (production + worker)
+RUN uv pip install --no-cache --system .
 
 ENV PYTHONPATH=/app/src:/app
 
