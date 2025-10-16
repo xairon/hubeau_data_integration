@@ -8,7 +8,6 @@ import boto3
 import httpx
 import psycopg
 from dagster import resource
-from neo4j import GraphDatabase
 
 
 logger = logging.getLogger(__name__)
@@ -26,20 +25,6 @@ def _build_pg_dsn() -> str:
     port = os.getenv("PG_PORT", "5432")
     database = os.getenv("PG_DATABASE", "water")
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
-
-
-def _build_neo4j_config() -> Dict[str, str]:
-    """Return the default Neo4j configuration from environment variables."""
-    password = os.getenv("NEO4J_PASSWORD")
-    if not password:
-        logger.warning("NEO4J_PASSWORD not set; using default password for local development")
-        password = "neo4j"
-
-    return {
-        "dsn": os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
-        "user": os.getenv("NEO4J_USER", "neo4j"),
-        "password": password,
-    }
 
 
 def _build_s3_config() -> Dict[str, str]:
@@ -79,22 +64,6 @@ def pg_conn(init_context):
     return psycopg.connect(dsn, autocommit=True)
 
 
-@resource(config_schema={"dsn": str, "user": str, "password": str})
-def neo4j_driver(init_context):
-    """Driver Neo4j pour le graphe sémantique"""
-    uri = init_context.resource_config["dsn"]
-    auth = (
-        init_context.resource_config.get("user", "neo4j"),
-        init_context.resource_config.get("password")
-    )
-    return GraphDatabase.driver(
-        uri, 
-        auth=auth, 
-        max_connection_pool_size=10,
-        connection_timeout=30
-    )
-
-
 @resource(
     config_schema={
         "endpoint_url": str,
@@ -123,6 +92,5 @@ def s3_client(init_context):
 RESOURCES = {
     "http_client": http_client,
     "pg": pg_conn.configured({"dsn": _build_pg_dsn()}),
-    "neo4j": neo4j_driver.configured(_build_neo4j_config()),
     "s3": s3_client.configured(_build_s3_config()),
 }
