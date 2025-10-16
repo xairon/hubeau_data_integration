@@ -1,0 +1,29 @@
+# Portainer - Docker Management UI
+# Installation standalone sur le serveur (une seule fois)
+# https://docs.portainer.io/start/install-ce/server/docker/linux
+
+services:
+  portainer:
+    image: portainer/portainer-ce:2.19.4-alpine
+    container_name: portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "9443:9443"   # HTTPS interface
+      - "8000:8000"   # Edge agent (optionnel)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    command: --http-disabled
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "https://localhost:9443", "--no-check-certificate"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.1
+
+volumes:
+  portainer_data:
+    driver: local
