@@ -350,12 +350,11 @@ def slice_global(
             record['_slice_mode'] = 'global'
             yield record
 
-        # Vérifier si on a atteint la dernière page
-        last_page = page_data.get('last_page', page_data.get('count', 1))
-        logger.info(f"📖 Page {page}/{last_page} completed ({record_count} records)")
+        # Vérifier 'next' au lieu de 'last_page' (qui est faux pour certaines requêtes)
+        next_url = page_data.get('next')
 
-        if page >= last_page:
-            logger.info(f"✅ Reached last page ({last_page})")
+        if next_url is None:
+            logger.info(f"✅ No 'next' field - reached end of data")
             break
 
         page += 1
@@ -474,12 +473,11 @@ def slice_by_datetime(
                 record['_slice_end'] = next_date.isoformat()
                 yield record
 
-            # Vérifier dernière page
-            last_page = page_data.get('last_page', page_data.get('count', 1))
-            logger.info(f"📖 Page {page}/{last_page} completed for period {current}...{next_date} ({record_count} records)")
+            # Vérifier 'next' au lieu de 'last_page' (qui est faux pour certaines requêtes)
+            next_url = page_data.get('next')
 
-            if page >= last_page:
-                logger.info(f"✅ Reached last page ({last_page}) for period {current}...{next_date}")
+            if next_url is None:
+                logger.info(f"✅ No 'next' field - reached end of data for period {current}...{next_date}")
                 break
 
             page += 1
