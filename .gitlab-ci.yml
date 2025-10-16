@@ -84,12 +84,16 @@ deploy:production:
     - docker compose -f docker-compose.production.yml down
     - echo "🚀 Démarrage avec la nouvelle image..."
     - docker compose -f docker-compose.production.yml --env-file .env.production up -d
-    - echo "⏳ Attente des services (60s)..."
-    - sleep 60
+    - echo "⏳ Attente des services (90s pour start_period)..."
+    - sleep 90
     - echo "✅ Vérification des conteneurs..."
     - docker compose -f docker-compose.production.yml ps
-    - echo "📊 Logs Dagster (dernières 20 lignes):"
-    - docker logs brgm-dagster-webserver --tail 20
+    - echo "📊 Logs DLT Worker (dernières 50 lignes):"
+    - docker logs brgm-dlt-worker --tail 50 || echo "Worker logs not available"
+    - echo "📊 Logs Dagster Webserver (dernières 20 lignes):"
+    - docker logs brgm-dagster-webserver --tail 20 || echo "Webserver logs not available"
+    - echo "🔍 Worker health check:"
+    - docker inspect brgm-dlt-worker --format='{{json .State.Health}}' | python3 -m json.tool || echo "Health check not available"
     - echo "✅ Déploiement terminé!"
   environment:
     name: production
