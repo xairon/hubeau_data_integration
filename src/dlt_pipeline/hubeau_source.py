@@ -273,6 +273,70 @@ def get_primary_keys(config: Dict[str, Any]) -> List[str]:
 
 
 # ============================================
+# HELPERS POUR INCREMENTAL LOADING
+# ============================================
+
+def get_incremental_start_date(
+    incremental_state: Optional[Any],
+    temporal_config: Dict[str, Any],
+    partition_date: Optional[str] = None
+) -> date:
+    """
+    Calcule la vraie date de début en fonction de l'état incremental DLT.
+
+    Logique:
+    1. Si incremental_state existe ET a une valeur (last_value) : part de cette date + 1 jour
+    2. Sinon si partition_date existe : part du début de l'année de la partition
+    3. Sinon : part de start_date configuré dans temporal_config
+
+    Args:
+        incremental_state: État DLT incremental (contient last_value)
+        temporal_config: Configuration temporelle (contient start_date)
+        partition_date: Date de partition Dagster (format YYYY-MM-DD)
+
+    Returns:
+        date: Date de début effective pour l'extraction
+    """
+    date_field = temporal_config.get('date_field', 'date_mesure')
+    default_start = temporal_config.get('start_date', '2020-01-01')
+
+    # Cas 1: État incremental existe (run ultérieur) - reprendre après la dernière valeur
+    if incremental_state and hasattr(incremental_state, 'last_value') and incremental_state.last_value:
+        last_value = incremental_state.last_value
+
+        # Gérer les timestamps (millisecondes Unix)
+        if 'timestamp' in date_field.lower() and isinstance(last_value, int):
+            last_date = datetime.fromtimestamp(last_value / 1000).date()
+            # Partir du jour suivant la dernière valeur extraite
+            start_date = last_date + timedelta(days=1)
+            logger.info(f"📅 Incremental: Resuming from {start_date} (last_value={last_value}, last_date={last_date})")
+            return start_date
+
+        # Gérer les dates ISO string
+        elif isinstance(last_value, str):
+            try:
+                last_date = datetime.fromisoformat(last_value).date()
+                # Partir du jour suivant la dernière valeur extraite
+                start_date = last_date + timedelta(days=1)
+                logger.info(f"📅 Incremental: Resuming from {start_date} (last_value={last_value})")
+                return start_date
+            except:
+                logger.warning(f"⚠️ Could not parse last_value '{last_value}', using default start_date")
+
+    # Cas 2: Partition Dagster existe (extraction par année)
+    if partition_date:
+        year = datetime.strptime(partition_date, "%Y-%m-%d").year
+        start_date = datetime(year, 1, 1).date()
+        logger.info(f"📅 Using partition year: {start_date} (from partition {partition_date})")
+        return start_date
+
+    # Cas 3: Premier run ou pas d'état - utiliser start_date du config
+    start_date = datetime.fromisoformat(default_start).date()
+    logger.info(f"📅 First run: Starting from {start_date} (config default)")
+    return start_date
+
+
+# ============================================
 # STRATÉGIES DE SLICING
 # ============================================
 
@@ -385,24 +449,23 @@ def slice_by_datetime(
     incremental_state: Optional[Any] = None
 ) -> Iterator[Dict[str, Any]]:
     """
-    Stratégie datetime: découpage temporel par période.
+    Stratégie datetime: découpage temporel par période avec incremental loading.
 
     Traite les slices temporelles en découpant la période en chunks configurables.
+    Utilise incremental_state pour reprendre depuis la dernière date extraite.
 
     Args:
         client: RESTClient DLT
         endpoint: Chemin de l'endpoint
         extraction_config: Configuration d'extraction
         temporal_config: Configuration temporelle
-        incremental_state: State DLT pour incremental
+        incremental_state: State DLT pour incremental (contient last_value)
 
     Yields:
         Records extraits avec métadonnées de slicing temporel
     """
-    # Récupérer la configuration de slicing
-    start_date = datetime.fromisoformat(
-        temporal_config.get('start_date', '2020-01-01')
-    ).date()
+    # 🔄 INCREMENTAL: Calculer la vraie date de début (reprend depuis last_value si existe)
+    start_date = get_incremental_start_date(incremental_state, temporal_config)
 
     end_date = datetime.now().date() - timedelta(days=1)
 
@@ -496,15 +559,16 @@ def slice_global_chunked(
     extraction_config: Dict[str, Any],
     temporal_config: Dict[str, Any],
     stations_data: Optional[Dict[str, List[str]]] = None,
-    partition_date: Optional[str] = None
+    partition_date: Optional[str] = None,
+    incremental_state: Optional[Any] = None
 ) -> Iterator[Dict[str, Any]]:
     """
-    Stratégie global_chunked: découpage par chunks de stations avec filtre temporel.
+    Stratégie global_chunked: découpage par chunks de stations avec filtre temporel et incremental loading.
 
     Utilisé pour les endpoints qui NÉCESSITENT des codes de stations
     (ex: piézométrie chroniques avec code_bss, hydrométrie obs_elab avec code_station).
 
-    Découpe la liste de stations en chunks, applique un filtre temporel (année de partition),
+    Découpe la liste de stations en chunks, applique un filtre temporel (année de partition ou incremental),
     et pagine chaque chunk en utilisant le champ 'next' au lieu de 'last_page'.
 
     Args:
@@ -514,6 +578,7 @@ def slice_global_chunked(
         temporal_config: Configuration temporelle (start_param, end_param)
         stations_data: Dict {station_code: [months]} fourni par l'asset
         partition_date: Date de partition (format YYYY-MM-DD) pour filtrage temporel
+        incremental_state: State DLT pour incremental (contient last_value)
 
     Yields:
         Records extraits avec métadonnées de chunking
@@ -529,20 +594,19 @@ def slice_global_chunked(
     all_stations = list(stations_data.keys())
     total_stations = len(all_stations)
 
-    # 🗓️ OPTION 3: Calculer le filtre temporel basé sur partition_date (année)
+    # 🔄 INCREMENTAL: Calculer la vraie date de début (reprend depuis last_value si existe)
+    start_date = get_incremental_start_date(incremental_state, temporal_config, partition_date)
+
+    # Calculer la date de fin (aujourd'hui - 1 jour)
+    end_date = datetime.now().date() - timedelta(days=1)
+
+    # Paramètres de dates pour l'API
     start_param = temporal_config.get('start_param', 'date_debut_mesure')
     end_param = temporal_config.get('end_param', 'date_fin_mesure')
+    date_start = start_date.isoformat()
+    date_end = end_date.isoformat()
 
-    # Parser la partition_date (format: YYYY-MM-DD) pour extraire l'année
-    if partition_date:
-        year = datetime.strptime(partition_date, "%Y-%m-%d").year
-        date_start = f"{year}-01-01"
-        date_end = f"{year}-12-31"
-        logger.info(f"📅 Temporal filter: {start_param}={date_start}, {end_param}={date_end} (from partition {partition_date})")
-    else:
-        date_start = None
-        date_end = None
-        logger.warning(f"⚠️ No partition_date provided - no temporal filtering applied")
+    logger.info(f"📅 Temporal filter: {start_param}={date_start}, {end_param}={date_end}")
 
     logger.info(f"📦 Starting GLOBAL_CHUNKED slicing for endpoint: {endpoint}")
     logger.info(f"🔢 Total stations: {total_stations}, chunk_size: {chunk_size}")
@@ -562,13 +626,10 @@ def slice_global_chunked(
         # Construire les paramètres avec la liste de stations + filtre temporel
         params = {
             'format': 'json',
-            station_param: ','.join(chunk_stations)  # Joindre avec des virgules
+            station_param: ','.join(chunk_stations),  # Joindre avec des virgules
+            start_param: date_start,
+            end_param: date_end
         }
-
-        # 🗓️ Ajouter le filtre temporel
-        if date_start and date_end:
-            params[start_param] = date_start
-            params[end_param] = date_end
 
         # Ajouter les paramètres par défaut
         default_params = extraction_config.get('default_params', {})
@@ -811,7 +872,7 @@ def create_chroniques_resource(
 
         if slicing_mode == 'global_chunked':
             yield from slice_global_chunked(
-                client, endpoint, extraction_config, temporal_config, stations_data, partition_date
+                client, endpoint, extraction_config, temporal_config, stations_data, partition_date, last_value
             )
         elif slicing_mode == 'datetime':
             yield from slice_by_datetime(
@@ -870,7 +931,7 @@ def create_observations_resource(
 
         if slicing_mode == 'global_chunked':
             yield from slice_global_chunked(
-                client, endpoint, extraction_config, temporal_config, stations_data, partition_date
+                client, endpoint, extraction_config, temporal_config, stations_data, partition_date, None
             )
         elif slicing_mode == 'datetime':
             yield from slice_by_datetime(
