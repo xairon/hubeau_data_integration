@@ -30,7 +30,6 @@ services:
       PYTHONPATH: /app/src:/app
       # Database credentials
       PG_PASSWORD: ${PG_PASSWORD}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       # MinIO/S3 credentials (used by app code)
       MINIO_USER: ${MINIO_USER}
       MINIO_PASS: ${MINIO_PASS}

@@ -86,7 +86,6 @@ services:
       PYTHONPATH: /app/src:/app
       # Database credentials
       PG_PASSWORD: ${PG_PASSWORD}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       # MinIO/S3 credentials (used by app code)
       MINIO_USER: ${MINIO_USER}
       MINIO_PASS: ${MINIO_PASS}
@@ -302,8 +301,6 @@ volumes:
   dagster_pg: {}
   ts_pg: {}
   postgis_data: {}
-  neo4j_data: {}
-  neo4j_logs: {}
   minio_data: {}
   prometheus_data: {}
   grafana_data: {}

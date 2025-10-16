@@ -56,7 +56,6 @@ deploy:production:
 
       # Databases
       PG_PASSWORD=${PG_PASSWORD}
-      NEO4J_PASSWORD=${NEO4J_PASSWORD}
 
       # MinIO
       MINIO_USER=${MINIO_USER}

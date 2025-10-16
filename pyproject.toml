@@ -32,7 +32,6 @@ dependencies = [
 
     # Database clients
     "psycopg[binary]==3.1.13",
-    "neo4j==5.15.0",
 
     # HTTP and caching
     "httpx==0.26.0",
@@ -122,7 +121,6 @@ worker = [
     "dagster==1.11.14",
     "dagster-dlt==0.27.14",
     "psycopg[binary]==3.1.13",
-    "neo4j==5.15.0",
     "httpx==0.26.0",
     "tenacity==8.2.3",
     "redis==5.0.1",
