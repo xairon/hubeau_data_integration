@@ -1,3 +1,18 @@
+# Dagster Workspace Configuration
+# Configuration GRPC pour architecture distribuée (orchestrator + workers)
+
 load_from:
-  - python_module:
-      module_name: hubeau_pipeline
+  # ✅ NOUVEAU : Code server distant via GRPC
+  # L'orchestrator se connecte aux workers via GRPC
+  - grpc_server:
+      host: dlt_worker  # Nom du service Docker
+      port: 4000
+      location_name: hubeau_pipeline
+
+      # Timeout configuration
+      heartbeat_timeout: 60  # 60s timeout pour healthcheck
+      startup_timeout: 300   # 5min timeout pour démarrage worker
+
+      # Retry configuration
+      max_retries: 3
+      retry_delay: 5

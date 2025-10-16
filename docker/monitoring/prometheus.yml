@@ -1,0 +1,67 @@
+# Prometheus Configuration for Hub'Eau Pipeline Monitoring
+# Scrape intervals and targets for all services
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'hubeau-pipeline'
+    environment: 'production'
+
+# Alertmanager configuration (optional, pour alerting)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Scrape configurations
+scrape_configs:
+  # ═══════════════════════════════════════════════════════════
+  # DAGSTER ORCHESTRATOR METRICS
+  # ═══════════════════════════════════════════════════════════
+
+  - job_name: 'dagster-webserver'
+    static_configs:
+      - targets: ['dagster_webserver:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # ═══════════════════════════════════════════════════════════
+  # DLT WORKER METRICS (Python multiprocess metrics)
+  # ═══════════════════════════════════════════════════════════
+
+  - job_name: 'dlt-workers'
+    static_configs:
+      - targets: ['dlt_worker:9091']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'dlt_worker'
+
+  # ═══════════════════════════════════════════════════════════
+  # STORAGE METRICS
+  # ═══════════════════════════════════════════════════════════
+
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ['minio:9000']
+    scrape_interval: 30s
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+    # Note: nécessite d'ajouter postgres-exporter dans docker-compose
+
+  # ═══════════════════════════════════════════════════════════
+  # PROMETHEUS SELF-MONITORING
+  # ═══════════════════════════════════════════════════════════
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s

@@ -1,83 +1,140 @@
-﻿# version: "3.8"  # Obsolète, supprimé pour éviter l'avertissement
+# Hub'Eau Data Pipeline - Architecture Distribuée
+# Orchestrator (Dagster) + Workers (DLT) + Storage + Monitoring
 
 services:
+  # ═══════════════════════════════════════════════════════════
+  # ORCHESTRATION LAYER (Léger - Dagster uniquement)
+  # ═══════════════════════════════════════════════════════════
+
   dagster_postgres:
     image: postgres:16
+    container_name: dagster_postgres
     environment:
       POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD}
       POSTGRES_DB: dagster
-    volumes: 
+    volumes:
       - dagster_pg:/var/lib/postgresql/data
-    healthcheck: 
+    healthcheck:
       test: ["CMD-SHELL","pg_isready -U postgres -d dagster"]
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - hubeau_network
 
   dagster_webserver:
     build:
       context: .
-      dockerfile: docker/dagster/Dockerfile
-    image: hubeau-dagster:latest
+      dockerfile: docker/orchestrator/Dockerfile
+    image: hubeau-orchestrator:latest
+    container_name: dagster_webserver
     depends_on:
-      - dagster_postgres
+      dagster_postgres:
+        condition: service_healthy
+      dlt_worker:
+        condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: dagster_postgres
       DAGSTER_PG_DB: dagster
       DAGSTER_PG_USER: postgres
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
-      PYTHONPATH: /app/src:/app
-      PG_PASSWORD: ${PG_PASSWORD}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-      MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      PYTHONPATH: /app
     volumes:
       - ./dagster_home:/app/dagster_home
-      - ./dagster:/app/dagster
-      - ./src:/app/src
       - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
     ports:
       - "8080:3000"
+    networks:
+      - hubeau_network
+
   dagster_daemon:
-    image: hubeau-dagster:latest
+    image: hubeau-orchestrator:latest
+    container_name: dagster_daemon
     depends_on:
-      - dagster_postgres
-      - dagster_webserver
+      dagster_postgres:
+        condition: service_healthy
+      dlt_worker:
+        condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: dagster_postgres
       DAGSTER_PG_DB: dagster
       DAGSTER_PG_USER: postgres
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      PYTHONPATH: /app
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./configs:/app/configs:ro
+    command: ["dagster-daemon","run"]
+    networks:
+      - hubeau_network
+
+  # ═══════════════════════════════════════════════════════════
+  # EXECUTION LAYER (Lourd - DLT Workers avec scaling)
+  # ═══════════════════════════════════════════════════════════
+
+  dlt_worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    image: hubeau-worker:latest
+    container_name: dlt_worker
+    environment:
+      DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
+      # Database credentials
       PG_PASSWORD: ${PG_PASSWORD}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      # MinIO/S3 credentials
       MINIO_USER: ${MINIO_USER}
       MINIO_PASS: ${MINIO_PASS}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
       MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      # Prometheus metrics
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
     volumes:
-      - ./dagster_home:/app/dagster_home
-      - ./dagster:/app/dagster
       - ./src:/app/src
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
-    command: ["dagster-daemon","run","-m","hubeau_pipeline"]
+      - ./dagster_home:/app/dagster_home:ro
+    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline"]
+    expose:
+      - "4000"  # GRPC API (internal)
+      - "9091"  # Prometheus metrics
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 4000)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    deploy:
+      replicas: 1  # ✅ Augmente à 2-3 pour scaling horizontal
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    networks:
+      - hubeau_network
+
+  # ═══════════════════════════════════════════════════════════
+  # DATA STORAGE LAYER
+  # ═══════════════════════════════════════════════════════════
+
   timescaledb:
     image: timescale/timescaledb-ha:pg16
+    container_name: timescaledb
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: postgres
-    ports: 
+    ports:
       - "5432:5432"
-    volumes: 
+    volumes:
       - ts_pg:/var/lib/postgresql/data
       - ./docker/init-scripts/timescaledb:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -85,19 +142,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - hubeau_network
 
   neo4j:
     image: neo4j:5.15-community
+    container_name: neo4j
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
       NEO4J_server_config_strict__validation_enabled: "false"
       NEO4J_PLUGINS: '["apoc","n10s"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
       NEO4J_dbms_default__database: "neo4j"
-    ports: 
+    ports:
       - "7474:7474"
       - "7687:7687"
-    volumes: 
+    volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
       - ./docker/init-scripts/neo4j:/var/lib/neo4j/init
@@ -106,46 +166,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
-
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
-    ports: 
-      - "9000:9000"
-      - "9001:9001"
-    volumes: 
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  minio_init:
-    image: hubeau-dagster:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-    volumes:
-      - ./scripts:/app/scripts:ro
-    command: ["python", "/app/scripts/init_minio.py"]
-    restart: "no"
-
+    networks:
+      - hubeau_network
 
   postgis:
     image: postgis/postgis:16-3.4
+    container_name: postgis
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: postgres
-    ports: 
+    ports:
       - "5433:5432"
-    volumes: 
+    volumes:
       - postgis_data:/var/lib/postgresql/data
       - ./docker/init-scripts/postgis:/docker-entrypoint-initdb.d:ro
     healthcheck:
@@ -153,9 +185,93 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - hubeau_network
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+      MINIO_PROMETHEUS_AUTH_TYPE: public  # ✅ Activer métriques Prometheus
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hubeau_network
+
+  minio_init:
+    image: hubeau-worker:latest
+    container_name: minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: http://minio:9000
+    volumes:
+      - ./scripts:/app/scripts:ro
+    command: ["python", "/app/scripts/init_minio.py"]
+    restart: "no"
+    networks:
+      - hubeau_network
+
+  # ═══════════════════════════════════════════════════════════
+  # MONITORING LAYER (Observability)
+  # ═══════════════════════════════════════════════════════════
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - hubeau_network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./docker/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - hubeau_network
+
+  # ═══════════════════════════════════════════════════════════
+  # UTILITIES
+  # ═══════════════════════════════════════════════════════════
 
   pgadmin:
     image: dpage/pgadmin4:latest
+    container_name: pgadmin
     ports:
       - "5050:80"
     environment:
@@ -165,6 +281,12 @@ services:
     depends_on:
       - timescaledb
       - postgis
+    networks:
+      - hubeau_network
+
+# ═══════════════════════════════════════════════════════════
+# VOLUMES
+# ═══════════════════════════════════════════════════════════
 
 volumes:
   dagster_pg: {}
@@ -173,8 +295,13 @@ volumes:
   neo4j_data: {}
   neo4j_logs: {}
   minio_data: {}
+  prometheus_data: {}
+  grafana_data: {}
 
+# ═══════════════════════════════════════════════════════════
+# NETWORKS
+# ═══════════════════════════════════════════════════════════
 
-
-
-
+networks:
+  hubeau_network:
+    driver: bridge
