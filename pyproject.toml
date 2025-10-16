@@ -20,10 +20,10 @@ keywords = ["data-pipeline", "dagster", "dlt", "hubeau", "water-data"]
 
 dependencies = [
     # Core Dagster
-    "dagster==1.8.8",
-    "dagster-webserver==1.8.8",
-    "dagster-postgres==0.24.8",
-    "dagster-dlt==0.23.8",  # Dagster-DLT integration
+    "dagster==1.11.14",
+    "dagster-webserver==1.11.14",
+    "dagster-postgres==0.27.14",
+    "dagster-dlt==0.27.14",  # Dagster-DLT integration
 
     # DLT with destinations
     "dlt[postgres,filesystem,duckdb]==0.4.12",
@@ -102,10 +102,10 @@ docs = [
 
 # Orchestrator-only dependencies (lightweight)
 orchestrator = [
-    "dagster==1.8.8",
-    "dagster-webserver==1.8.8",
-    "dagster-postgres==0.24.8",
-    "dagster-dlt==0.23.8",
+    "dagster==1.11.14",
+    "dagster-webserver==1.11.14",
+    "dagster-postgres==0.27.14",
+    "dagster-dlt==0.27.14",
     "psycopg[binary]==3.1.13",
     "httpx==0.26.0",
     "click>=8.0.0",
@@ -119,8 +119,8 @@ orchestrator = [
 
 # Worker-only dependencies (full stack)
 worker = [
-    "dagster==1.8.8",
-    "dagster-dlt==0.23.8",
+    "dagster==1.11.14",
+    "dagster-dlt==0.27.14",
     "psycopg[binary]==3.1.13",
     "neo4j==5.15.0",
     "httpx==0.26.0",
