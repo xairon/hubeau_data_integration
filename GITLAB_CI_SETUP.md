@@ -11,7 +11,7 @@ To enable automatic deployment, you need to configure these variables in GitLab:
 | Variable Name | Description | Example Value | Protected | Masked |
 |--------------|-------------|---------------|-----------|---------|
 | `DAGSTER_PG_PASSWORD` | Password for Dagster orchestration database | `SecurePassword123!` | ✅ Yes | ✅ Yes |
-| `PG_PASSWORD` | Password for TimescaleDB/PostGIS databases | `SecurePassword456!` | ✅ Yes | ✅ Yes |
+| `PG_PASSWORD` | Password for PostgreSQL/PostGIS databases | `SecurePassword456!` | ✅ Yes | ✅ Yes |
 | `MINIO_USER` | MinIO admin username | `admin` | ✅ Yes | ❌ No |
 | `MINIO_PASS` | MinIO admin password | `SecurePassword789!` | ✅ Yes | ✅ Yes |
 
