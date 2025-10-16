@@ -102,7 +102,7 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
         context.log.info(f"📂 {len(all_stations)} stations trouvées dans MinIO")
 
         # Filtrer pour ne garder que les stations actives dans la partition
-        filtered_stations = _filter_active_stations_for_period(all_stations, partition_date, station_type, context.log)
+        filtered_stations = _filter_active_stations_for_period(all_stations, partition_date, station_type)
         context.log.info(f"✅ {len(filtered_stations)} stations actives pour partition {partition_date}")
 
         # 2. Convertir en dict avec tous les mois de l'année
