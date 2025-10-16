@@ -17,8 +17,9 @@ WORKDIR /app
 # Install uv (ultra-fast Python package installer)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy project files (need README.md for package metadata)
+# Copy project files needed for installation
 COPY pyproject.toml README.md /app/
+COPY src /app/src
 
 # Install dependencies using uv (100x faster than pip!)
 # --no-cache: Don't cache packages (smaller image)
