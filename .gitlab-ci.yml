@@ -61,7 +61,13 @@ deploy:production:
       fi
     - echo "✅ Toutes les variables obligatoires sont définies"
     - echo "🔐 Export des variables GitLab CI/CD pour Docker Compose..."
-    - export DAGSTER_PG_HOST DAGSTER_PG_PORT DAGSTER_PG_PASSWORD MINIO_ENDPOINT MINIO_USER MINIO_PASS MINIO_REGION MINIO_BRONZE_BUCKET PG_HOST PG_PASSWORD POSTGIS_HOST
+    - export DAGSTER_PG_HOST=${DAGSTER_PG_HOST:-dagster_postgres}
+    - export DAGSTER_PG_PORT=${DAGSTER_PG_PORT:-5432}
+    - export DAGSTER_PG_DB=${DAGSTER_PG_DB:-dagster}
+    - export DAGSTER_PG_USER=${DAGSTER_PG_USER:-postgres}
+    - export DAGSTER_PG_PASSWORD
+    - export MINIO_ENDPOINT MINIO_USER MINIO_PASS MINIO_REGION MINIO_BRONZE_BUCKET
+    - export PG_HOST PG_PASSWORD POSTGIS_HOST
     - echo "✅ Variables exportées (Docker Compose les lira automatiquement)"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down
