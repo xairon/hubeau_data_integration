@@ -69,14 +69,48 @@ deploy:production:
     - export MINIO_ENDPOINT MINIO_USER MINIO_PASS MINIO_REGION MINIO_BRONZE_BUCKET
     - export PG_HOST PG_PASSWORD POSTGIS_HOST
     - echo "✅ Variables exportées (Docker Compose les lira automatiquement)"
+    - echo "🔍 Debug - DAGSTER_PG_HOST=$DAGSTER_PG_HOST"
+    - echo "🔍 Debug - DAGSTER_PG_USER=$DAGSTER_PG_USER"
+    - echo "🔍 Debug - DAGSTER_PG_DB=$DAGSTER_PG_DB"
+    - echo "🔍 Debug - DAGSTER_PG_PASSWORD défini=$([ -n "$DAGSTER_PG_PASSWORD" ] && echo 'OUI' || echo 'NON')"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down
+    - |
+      if [ "$FORCE_POSTGRES_RESET" = "true" ]; then
+        echo "⚠️  FORCE_POSTGRES_RESET=true détecté dans GitLab CI/CD Variables"
+        echo "🗑️  Suppression du volume PostgreSQL Dagster pour forcer la réinitialisation..."
+        if [ -d "/srv/brgm-data/dagster_pg" ]; then
+          rm -rf /srv/brgm-data/dagster_pg
+          echo "✅ Volume /srv/brgm-data/dagster_pg supprimé"
+        else
+          echo "ℹ️  Volume /srv/brgm-data/dagster_pg n'existe pas (déjà supprimé ou première installation)"
+        fi
+        echo "📝 PostgreSQL sera recréé avec le mot de passe depuis GitLab Variables"
+      else
+        echo "ℹ️  FORCE_POSTGRES_RESET non défini ou = false - Volume PostgreSQL conservé"
+        echo "💡 Pour réinitialiser PostgreSQL: définir FORCE_POSTGRES_RESET=true dans GitLab CI/CD Variables"
+      fi
     - echo "🚀 Démarrage avec la nouvelle image..."
     - docker compose -f docker-compose.production.yml up -d
     - echo "⏳ Attente des services (90s pour start_period)..."
     - sleep 90
     - echo "✅ Vérification des conteneurs..."
     - docker compose -f docker-compose.production.yml ps
+    - echo "🔍 Test de connexion PostgreSQL Dagster..."
+    - |
+      if docker exec brgm-dagster-postgres psql -U postgres -d dagster -c "SELECT version();" > /dev/null 2>&1; then
+        echo "✅ PostgreSQL Dagster accessible et fonctionnel"
+        docker exec brgm-dagster-postgres psql -U postgres -d dagster -c "SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema='public';" | grep -A 1 "table_count"
+      else
+        echo "❌ ERREUR: PostgreSQL Dagster non accessible"
+        echo "📊 Logs PostgreSQL (50 dernières lignes):"
+        docker logs brgm-dagster-postgres --tail 50
+        exit 1
+      fi
+    - echo "🔍 Vérification des variables d'environnement dans dagster_webserver..."
+    - |
+      echo "Variables DAGSTER_PG dans le conteneur webserver:"
+      docker exec brgm-dagster-webserver env | grep DAGSTER_PG | sed 's/PASSWORD=.*/PASSWORD=***MASKED***/' || echo "❌ Aucune variable DAGSTER_PG trouvée"
     - echo "📊 Logs DLT Worker (dernières 50 lignes):"
     - docker logs brgm-dlt-worker --tail 50 || echo "Worker logs not available"
     - echo "📊 Logs Dagster Webserver (dernières 20 lignes):"
