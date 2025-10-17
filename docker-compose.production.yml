@@ -92,6 +92,14 @@ services:
       DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
       PYTHONPATH: /app
+      # Application database credentials (needed for resources.py module import)
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD}
+      # MinIO credentials (needed for resources.py module import)
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
@@ -118,6 +126,14 @@ services:
       DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
       PYTHONPATH: /app
+      # Application database credentials (needed for resources.py module import)
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD}
+      # MinIO credentials (needed for resources.py module import)
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
