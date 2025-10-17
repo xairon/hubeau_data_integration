@@ -154,8 +154,22 @@ deploy:production:
           endpoint_url=endpoint,
           aws_access_key_id=access_key,
           aws_secret_access_key=secret_key)
-      buckets = s3.list_buckets()
-      print('✅ Buckets MinIO:', [b['Name'] for b in buckets['Buckets']])
+      # List buckets
+      buckets_list = s3.list_buckets()
+      bucket_names = [b['Name'] for b in buckets_list['Buckets']]
+      print('✅ Buckets MinIO:', bucket_names)
+      # Create bronze bucket if not exists
+      if 'bronze' not in bucket_names:
+          print('🪣 Creating bronze bucket...')
+          s3.create_bucket(Bucket='bronze')
+          print('✅ Bronze bucket created')
+      else:
+          print('✅ Bronze bucket already exists')
+      # Test write permission
+      print('🔧 Testing write permission...')
+      s3.put_object(Bucket='bronze', Key='_test_write', Body=b'test')
+      s3.delete_object(Bucket='bronze', Key='_test_write')
+      print('✅ Write permissions OK')
       " 2>&1; then
         echo "✅ MinIO accessible depuis dlt_worker"
       else

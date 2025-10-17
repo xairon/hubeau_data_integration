@@ -422,10 +422,18 @@ def consolidate_parquet_files(
 
 def get_minio_credentials() -> Dict:
     """Get MinIO credentials from environment variables."""
-    minio_user = os.getenv("MINIO_USER", "admin")
-    minio_pass = os.getenv("MINIO_PASS", "BrgmMinio2024!")
+    minio_user = os.getenv("MINIO_USER")
+    minio_pass = os.getenv("MINIO_PASS")
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
     minio_region = os.getenv("MINIO_REGION", "us-east-1")
+
+    # ✅ FAIL FAST: Validate credentials
+    if not minio_user or not minio_pass:
+        raise ValueError(
+            f"CRITICAL: MinIO credentials not set! "
+            f"MINIO_USER={'NOT SET' if not minio_user else 'SET'}, "
+            f"MINIO_PASS={'NOT SET' if not minio_pass else 'SET'}"
+        )
 
     return {
         "aws_access_key_id": minio_user,

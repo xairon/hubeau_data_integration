@@ -109,8 +109,16 @@ def _create_s3_filesystem():
     """
     # Configuration MinIO depuis les variables d'environnement
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
-    minio_user = os.getenv("MINIO_USER", "admin")
-    minio_pass = os.getenv("MINIO_PASS", "BrgmMinio2024!")
+    minio_user = os.getenv("MINIO_USER")
+    minio_pass = os.getenv("MINIO_PASS")
+
+    # ✅ FAIL FAST: Validate credentials
+    if not minio_user or not minio_pass:
+        raise ValueError(
+            f"CRITICAL: MinIO credentials not set! "
+            f"MINIO_USER={'NOT SET' if not minio_user else 'SET'}, "
+            f"MINIO_PASS={'NOT SET' if not minio_pass else 'SET'}"
+        )
 
     # Nettoyer l'endpoint (enlever http://)
     endpoint = minio_endpoint.replace("http://", "").replace("https://", "")

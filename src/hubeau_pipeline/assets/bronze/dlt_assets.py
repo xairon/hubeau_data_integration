@@ -466,11 +466,33 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 
     # Build MinIO credentials for dlt
     import os
-    minio_user = os.getenv("MINIO_USER", "admin")
-    minio_pass = os.getenv("MINIO_PASS", "BrgmMinio2024!")
+
+    # ✅ FAIL FAST: Load MinIO credentials from environment (NO DEFAULTS)
+    minio_user = os.getenv("MINIO_USER")
+    minio_pass = os.getenv("MINIO_PASS")
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
     minio_region = os.getenv("MINIO_REGION", "us-east-1")
-    
+
+    # Validate required credentials
+    if not minio_user or not minio_pass:
+        error_msg = (
+            "❌ CRITICAL: MinIO credentials not set!\n"
+            f"   MINIO_USER: {'NOT SET' if not minio_user else 'SET'}\n"
+            f"   MINIO_PASS: {'NOT SET' if not minio_pass else 'SET'}\n"
+            "These MUST be defined in GitLab CI/CD Variables and properly exported.\n"
+            "Check .gitlab-ci.yml exports and ensure variables are not 'Protected' "
+            "or branch is protected."
+        )
+        context.log.error(error_msg)
+        raise ValueError(error_msg)
+
+    # Log MinIO credentials for debugging (masked password)
+    context.log.info(f"🔐 MinIO credentials:")
+    context.log.info(f"   - MINIO_USER: {minio_user}")
+    context.log.info(f"   - MINIO_PASS: SET")
+    context.log.info(f"   - MINIO_ENDPOINT: {minio_endpoint}")
+    context.log.info(f"   - MINIO_REGION: {minio_region}")
+
     credentials = {
         "aws_access_key_id": TSecretValue(minio_user),
         "aws_secret_access_key": TSecretValue(minio_pass),
