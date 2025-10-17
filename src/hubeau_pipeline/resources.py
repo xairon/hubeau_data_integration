@@ -17,13 +17,16 @@ def _build_pg_dsn() -> str:
     """Compose the PostgreSQL DSN from environment variables."""
     password = os.getenv("PG_PASSWORD")
     if not password:
-        logger.warning("PG_PASSWORD not set; using default password for local development")
+        logger.warning("⚠️  PG_PASSWORD not set; using default password for local development")
         password = "postgres"
+    else:
+        logger.info("✅ PG_PASSWORD loaded from environment")
 
     user = os.getenv("PG_USER", "postgres")
     host = os.getenv("PG_HOST", "timescaledb")
     port = os.getenv("PG_PORT", "5432")
     database = os.getenv("PG_DATABASE", "water")
+    logger.info(f"🔗 PostgreSQL DSN: postgresql://{user}:***@{host}:{port}/{database}")
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
@@ -35,9 +38,16 @@ def _build_s3_config() -> Dict[str, str]:
     bucket = os.getenv("MINIO_BRONZE_BUCKET", "bronze")
 
     if not access_key or not secret_key:
-        logger.warning("MINIO credentials not set; using default development credentials")
+        logger.warning("⚠️  MINIO credentials not set; using default development credentials")
+        logger.warning(f"   MINIO_USER={'NOT SET' if not access_key else 'SET'}")
+        logger.warning(f"   MINIO_PASS={'NOT SET' if not secret_key else 'SET'}")
         access_key = access_key or "admin"
         secret_key = secret_key or "admin123"
+    else:
+        logger.info("✅ MINIO credentials loaded from environment")
+        logger.info(f"   MINIO_USER: {access_key}")
+        logger.info(f"   MINIO_ENDPOINT: {endpoint}")
+        logger.info(f"   MINIO_BRONZE_BUCKET: {bucket}")
 
     return {
         "endpoint_url": endpoint,
