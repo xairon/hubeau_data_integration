@@ -60,7 +60,7 @@ build:image:
     name: docker:24-cli
     pull_policy: ["if-not-present", "always"]
   retry:
-    max: 3
+    max: 2  # Maximum autorisé par GitLab
     when:
       - runner_system_failure
       - stuck_or_timeout_failure
@@ -69,7 +69,7 @@ build:image:
 
 **Améliorations V2**:
 - Pull policy "if-not-present" pour utiliser cache local en priorité
-- Retry augmenté à 3 tentatives
+- Retry maximum de 2 tentatives (limite GitLab)
 - Gestion des erreurs API (503, timeouts)
 - Fallback automatique si docker CLI manquant
 
