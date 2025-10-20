@@ -49,7 +49,7 @@ def get_postgres_destination(config: Dict = None) -> Any:
 
     Notes:
         - Support natif PostGIS pour les données géospatiales
-        - Utilise les variables d'environnement POSTGRES_* si présentes
+        - Utilise les variables d'environnement PG_* si présentes
         - Sinon utilise dlt.secrets
     """
     config = config or {}
@@ -63,11 +63,11 @@ def get_postgres_destination(config: Dict = None) -> Any:
     # Fallback sur variables d'environnement
     if not credentials:
         credentials = {
-            "database": os.getenv("POSTGRES_DB", config.get("database", "hubeau")),
-            "username": os.getenv("POSTGRES_USER", config.get("username", "hubeau")),
-            "password": os.getenv("POSTGRES_PASSWORD", config.get("password", "hubeau")),
-            "host": os.getenv("POSTGRES_HOST", config.get("host", "localhost")),
-            "port": int(os.getenv("POSTGRES_PORT", config.get("port", 5432)))
+            "database": os.getenv("PG_DB", config.get("database", "postgres")),
+            "username": os.getenv("PG_USER", config.get("username", "postgres")),
+            "password": os.getenv("PG_PASSWORD", config.get("password", "postgres")),
+            "host": os.getenv("PG_HOST", config.get("host", "postgres")),
+            "port": int(os.getenv("PG_PORT", config.get("port", 5432)))
         }
 
     # Support PostGIS
