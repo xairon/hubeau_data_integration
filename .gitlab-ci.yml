@@ -196,14 +196,15 @@ deploy:production:
         echo "💡 Pour réinitialiser PostgreSQL: définir FORCE_POSTGRES_RESET=true dans GitLab CI/CD Variables"
       fi
     - echo "🚀 Démarrage avec la nouvelle image..."
-    - docker compose -f docker-compose.production.yml up -d || {
+    - |
+      if ! docker compose -f docker-compose.production.yml up -d; then
         echo "❌ docker compose up a échoué!"
         echo "📋 Logs Worker (toutes les lignes):"
-        docker logs brgm-dlt-worker || echo "Worker container not found"
+        docker logs brgm-dlt-worker 2>/dev/null || echo "Worker container not found"
         echo "📋 Logs Dagster Postgres:"
-        docker logs brgm-dagster-postgres --tail 50 || echo "Postgres container not found"
+        docker logs brgm-dagster-postgres --tail 50 2>/dev/null || echo "Postgres container not found"
         exit 1
-      }
+      fi
     - echo "⏳ Attente des services (30s initial)..."
     - sleep 30
     - echo "📊 Status préliminaire des conteneurs:"
