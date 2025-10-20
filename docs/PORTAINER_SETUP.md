@@ -135,6 +135,42 @@ docker restart portainer
 3. Cliquer sur **Logs**
 4. Activer "Auto-refresh logs"
 
+### Débugger les problèmes de health check
+
+Si un conteneur est marqué "unhealthy" (ex: `brgm-dlt-worker`) :
+
+1. **Voir les logs en direct** :
+   - Containers → Cliquer sur le conteneur
+   - Onglet "Logs" → Activer "Auto-refresh"
+   - Chercher les erreurs de connexion, variables manquantes, etc.
+
+2. **Inspecter la configuration** :
+   - Onglet "Inspect" → Voir la config complète
+   - Section "Health" → Voir le statut du health check
+   - Section "Env" → Vérifier les variables d'environnement
+
+3. **Console interactive** :
+   - Onglet "Console" → Cliquer "Connect"
+   - Lancer des commandes de test :
+     ```bash
+     # Test connexion PostgreSQL
+     psql -h postgres -U postgres -d hubeau
+
+     # Test variables
+     env | grep PG_
+
+     # Test Python
+     python -c "import psycopg2; print('OK')"
+     ```
+
+4. **Statistiques de ressources** :
+   - Onglet "Stats" → Voir CPU, RAM, Network
+   - Identifier les problèmes de performance
+
+5. **Restart rapide** :
+   - Bouton "Restart" en haut
+   - Plus rapide que `docker restart` en SSH
+
 ## Maintenance
 
 ### Mise à jour Portainer
