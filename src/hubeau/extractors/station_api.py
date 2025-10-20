@@ -34,12 +34,12 @@ def extract_station_codes_from_result(
         logger = logging.getLogger(__name__)
 
     if not partition_date:
-        logger.warning("⚠️ Pas de partition_date fournie, récupération depuis MinIO (liste potentiellement incomplète)")
+        logger.warning("⚠️ Pas de partition_date fournie, récupération depuis PostgreSQL (liste potentiellement incomplète)")
         # Import here to avoid circular dependencies
-        from hubeau.extractors.station_minio import extract_station_codes_from_minio
+        from src.hubeau_pipeline.utils.station_postgres import extract_station_codes_from_postgres
 
         # Convertir la liste en dict avec tous les mois de l'année courante
-        stations_list = extract_station_codes_from_minio(station_type)
+        stations_list = extract_station_codes_from_postgres(station_type)
         year = datetime.now().year
         all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
         return {station: all_months for station in stations_list}
@@ -119,9 +119,13 @@ def extract_station_codes_from_result(
         }
 
         if station_type not in api_configs:
-            logger.warning(f"⚠️ Type de station non supporté: {station_type}, fallback sur MinIO")
-            from hubeau.extractors.station_minio import extract_station_codes_from_minio
-            return extract_station_codes_from_minio(station_type)
+            logger.warning(f"⚠️ Type de station non supporté: {station_type}, fallback sur PostgreSQL")
+            from src.hubeau_pipeline.utils.station_postgres import extract_station_codes_from_postgres
+            stations_list = extract_station_codes_from_postgres(station_type)
+            # Convert list to dict with all months of current year
+            year = datetime.now().year
+            all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
+            return {station: all_months for station in stations_list}
 
         config = api_configs[station_type]
 
@@ -231,13 +235,13 @@ def extract_station_codes_from_result(
     except Exception as e:
         logger.error(f"⚠️ Erreur lors de la récupération des stations depuis l'API: {e}")
         logger.error(traceback.format_exc())
-        logger.warning("⚠️ Fallback sur la liste MinIO (potentiellement incomplète)")
+        logger.warning("⚠️ Fallback sur la liste PostgreSQL (potentiellement incomplète)")
 
         # Import here to avoid circular dependencies
-        from hubeau.extractors.station_minio import extract_station_codes_from_minio
+        from src.hubeau_pipeline.utils.station_postgres import extract_station_codes_from_postgres
 
         # Convertir la liste en dict avec tous les mois de l'année
-        stations_list = extract_station_codes_from_minio(station_type, logger=logger)
+        stations_list = extract_station_codes_from_postgres(station_type)
         year = datetime.strptime(partition_date, "%Y-%m-%d").year if partition_date else datetime.now().year
         all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
         return {station: all_months for station in stations_list}
