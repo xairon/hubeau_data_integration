@@ -317,6 +317,41 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         os.makedirs(pipelines_dir, exist_ok=True)
         context.log.info(f"📁 DLT pipelines_dir: {pipelines_dir}")
 
+        # Vérifier que le schéma hubeau existe
+        try:
+            import psycopg2
+            from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+            
+            conn = psycopg2.connect(
+                host=os.getenv("PG_HOST", "postgres"),
+                port=os.getenv("PG_PORT", "5432"),
+                database=os.getenv("PG_DB", "postgres"),
+                user=os.getenv("PG_USER", "postgres"),
+                password=os.getenv("PG_PASSWORD")
+            )
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            
+            with conn.cursor() as cur:
+                # Vérifier si le schéma hubeau existe
+                cur.execute("""
+                    SELECT schema_name 
+                    FROM information_schema.schemata 
+                    WHERE schema_name = 'hubeau'
+                """)
+                
+                if not cur.fetchone():
+                    context.log.warning("⚠️ Schema 'hubeau' n'existe pas - création automatique...")
+                    # Créer le schéma si nécessaire
+                    cur.execute("CREATE SCHEMA IF NOT EXISTS hubeau")
+                    context.log.info("✅ Schema 'hubeau' créé")
+                else:
+                    context.log.info("✅ Schema 'hubeau' existe déjà")
+            
+            conn.close()
+        except Exception as e:
+            context.log.error(f"❌ Erreur vérification schéma: {e}")
+            context.log.warning("⚠️ Continuation sans vérification du schéma...")
+
         # ✅ FIX: Use unique pipeline name per source/resource to avoid schema conflicts
         # Each asset gets isolated DLT state to prevent schema leaks between sources
         # Format: "hubeau_{source_name}_{resource_name}"

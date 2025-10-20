@@ -79,11 +79,14 @@ def get_postgres_destination(config: Dict = None) -> Any:
         ]
 
     # Créer la destination
-    dataset_name = config.get("dataset_name", "raw")  # Raw layer - Modern Data Stack
+    # Forcer le schéma hubeau pour utiliser les tables pré-définies
+    dataset_name = config.get("dataset_name", os.getenv("HUBEAU_SCHEMA", "hubeau"))
 
     return dlt.destinations.postgres(
         credentials=credentials,
         dataset_name=dataset_name,
+        # Désactiver la création automatique de tables par DLT
+        replace_strategy="truncate-and-insert",  # Utiliser les tables existantes
         **{k: v for k, v in config.items() if k not in ["credentials", "dataset_name", "enable_postgis"]}
     )
 

@@ -1,501 +1,280 @@
-# Architecture Technique
-
-Documentation de l'architecture du pipeline Hub'Eau Data Integration.
-
-## 📋 Table des Matières
-
-- [Vue d'ensemble](#vue-densemble)
-- [Architecture Actuelle](#architecture-actuelle)
-- [Stack Technique](#stack-technique)
-- [Architecture des Données](#architecture-des-données)
-- [Workflow d'Exécution](#workflow-dexécution)
-- [Déploiement](#déploiement)
-- [Roadmap](#roadmap)
-
----
+# Architecture Hub'Eau Data Pipeline
 
 ## Vue d'ensemble
 
-Le projet utilise une architecture simple et directe : **Hub'Eau APIs → DLT → PostgreSQL**.
+Le projet Hub'Eau Data Pipeline est une solution complète d'ingestion et de traitement des données hydrologiques françaises. Il collecte automatiquement les données depuis les APIs Hub'Eau et les stocke dans une base PostgreSQL structurée.
+
+## Architecture technique
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     SOURCES DE DONNÉES                          │
-│                                                                 │
-│  8 APIs Hub'Eau (24 endpoints, 778 attributs)                 │
-│  - Piézométrie                                                 │
-│  - Hydrométrie                                                 │
-│  - Qualité des eaux (rivières + nappes)                       │
-│  - Température                                                 │
-│  - Écoulement (ONDE)                                           │
-│  - Hydrobiologie                                               │
-│  - Prélèvements                                                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      DLT PIPELINE                               │
-│  - Extraction (httpx + tenacity)                               │
-│  - Pagination automatique                                       │
-│  - Gestion d'erreurs et retries                                │
-│  - Chargement incrémental (merge sur primary keys)             │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    POSTGRESQL DATABASE                          │
-│                                                                 │
-│  Schema: hubeau                                                │
-│  - Tables par endpoint (ex: hydrometry_stations)               │
-│  - État DLT (_dlt_pipeline_state)                             │
-│  - Gestion schéma automatique (DLT)                           │
-│                                                                 │
-│  Administration:                                               │
-│  - Adminer (http://localhost:8081) - Requêtes rapides         │
-│  - PgAdmin (http://localhost:5050) - Admin avancée            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**État actuel** : Pipeline d'ingestion en production. Les optimisations (hypertables, index, agrégations) seront ajoutées itérativement.
-
----
-
-## Architecture Actuelle
-
-### Schéma d'Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ORCHESTRATION                            │
-│                                                                 │
-│  ┌──────────────┐        ┌──────────────┐                      │
-│  │   Dagster    │        │   Dagster    │                      │
-│  │  Webserver   │◄──────►│    Daemon    │                      │
-│  │  (UI/API)    │        │  (Scheduler) │                      │
-│  └──────────────┘        └──────────────┘                      │
-│         │                        │                              │
-│         │         gRPC           │                              │
-│         └────────────┬───────────┘                              │
-└──────────────────────┼──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        EXECUTION LAYER                          │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                    DLT Worker                            │  │
-│  │                                                          │  │
-│  │  Hub'Eau API ──► DLT Pipeline ──► PostgreSQL           │  │
-│  │                                                          │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        STORAGE LAYER                            │
-│                                                                 │
-│  ┌────────────────┐   ┌────────────────┐                       │
-│  │  PostgreSQL    │   │     PostGIS    │                       │
-│  │ (schema:hubeau)│   │   (extension)  │                       │
-│  └────────────────┘   └────────────────┘                       │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Séparation Orchestrator / Worker
-
-**Principe** : Architecture distribuée pour scalabilité
-
-| Composant | Rôle | Image Docker |
-|-----------|------|--------------|
-| **Orchestrator** | UI, API, Scheduling | `hubeau-orchestrator:latest` |
-| **Worker** | Exécution DLT | `hubeau-worker:latest` |
-
-**Avantages** :
-- ✅ Worker lourd séparé de l'orchestrateur léger
-- ✅ Scaling horizontal possible (plusieurs workers)
-- ✅ Orchestrateur redémarre rapidement
-- ✅ Workers peuvent tourner sur machines différentes
-
----
-
-## Stack Technique
-
-### Technologies de Production ✅
-
-| Composant | Version | Rôle |
-|-----------|---------|------|
-| **Python** | 3.11+ | Langage principal |
-| **Dagster** | 1.11.14 | Orchestration, UI, scheduling |
-| **DLT** | 0.4.12 | Data loading, transformations |
-| **PostgreSQL** | 16 | Base de données relationnelle |
-| **PostGIS** | 16-3.4 | Extension géospatiale PostgreSQL |
-| **Adminer** | latest | DB admin lightweight |
-| **PgAdmin** | latest | DB admin full-featured |
-| **Docker** | 24+ | Containerisation |
-| **Portainer CE** | latest | Gestion containers |
-
-### Technologies en Roadmap 🚧
-
-| Composant | Usage prévu |
-|-----------|-------------|
-| **TimescaleDB** | Extension PostgreSQL pour time-series optimisées |
-| **Prometheus** | Métriques détaillées |
-| **Grafana** | Dashboards monitoring |
-
-### Dépendances Python (Principales)
-
-```python
-# Orchestration
-dagster==1.11.14
-dagster-webserver==1.11.14
-dagster-postgres==0.27.14
-dagster-dlt==0.27.14
-
-# Data Loading
-dlt[postgres,filesystem,duckdb]==0.4.12
-
-# Database
-psycopg[binary]==3.1.13
-
-# HTTP Client
-httpx==0.27.0
-tenacity==8.2.3
-
-# Data Processing
-pandas==2.2.0
-pyarrow==15.0.0
-
-# Geospatial
-geopandas==0.14.0
-shapely==2.0.2
-```
-
-**Fichier complet** : [pyproject.toml](../pyproject.toml)
-
----
-
-## Architecture des Données
-
-### PostgreSQL Schema: `hubeau`
-
-**Format** : Tables PostgreSQL gérées par DLT
-**Structure** : 1 table = 1 endpoint API
-
-```
-PostgreSQL Database
-└── Schema: hubeau
-    ├── _dlt_loads              # DLT metadata (historique chargements)
-    ├── _dlt_pipeline_state     # DLT state (incremental loading)
-    ├── _dlt_version            # DLT schema versions
-    │
-    ├── hydrometry_stations     # Stations hydrométrie
-    ├── hydrometry_obs_elab     # Observations élaborées
-    ├── piezometry_stations     # Stations piézométrie
-    ├── piezometry_chroniques   # Chroniques piézométriques
-    ├── quality_rivers_stations # Stations qualité rivières
-    ├── quality_rivers_analyses # Analyses qualité rivières
-    ├── temperature_stations    # Stations température
-    ├── temperature_chroniques  # Chroniques température
-    ├── ecoulement_stations     # Stations écoulement
-    ├── ecoulement_observations # Observations écoulement
-    ├── hydrobio_stations       # Stations hydrobiologie
-    ├── hydrobio_indices        # Indices biologiques
-    └── ...                     # 24 tables au total
-```
-
-**Partitionnement** :
-- **Assets Dagster** : Partitions annuelles pour données temporelles
-- **Tables PostgreSQL** : Pas de partitionnement natif (à ajouter si besoin)
-
-**Schema Management** :
-- DLT gère automatiquement la création et l'évolution du schéma
-- `write_disposition=merge` : Upsert basé sur primary keys
-- `write_disposition=replace` : Remplacement complet (données de référence)
-
-**Accès aux données** :
-```python
-import psycopg2
-
-conn = psycopg2.connect(
-    host='localhost',
-    port=5432,
-    database='postgres',
-    user='postgres',
-    password='your_password'
-)
-
-cursor = conn.cursor()
-cursor.execute("SELECT * FROM hubeau.hydrometry_stations LIMIT 10")
-stations = cursor.fetchall()
-```
-
----
-
-## Workflow d'Exécution
-
-### 1. Scheduling (Dagster Daemon)
-
-```
-┌──────────────────┐
-│ Dagster Daemon   │
-│                  │
-│ ┌──────────────┐ │
-│ │  Schedules   │ │──► Vérifie toutes les 30s
-│ └──────────────┘ │
-│ ┌──────────────┐ │
-│ │   Sensors    │ │──► Écoute événements
-│ └──────────────┘ │
-└──────────────────┘
-         │
-         ▼
-    Crée Run
-```
-
-### 2. Exécution Asset (Worker)
-
-```
-1. Worker reçoit job via gRPC
-         │
-         ▼
-2. Charge config YAML
-   configs/hubeau/api.yml
-         │
-         ▼
-3. DLT Source génère requêtes
-   - Pagination automatique
-   - Filtrage temporel (partitions annuelles)
-   - Filtrage par stations actives
-         │
-         ▼
-4. Extract (HTTP → JSON)
-   - httpx + tenacity pour retry automatique
-   - Rate limiting respectueux
-   - Gestion erreurs API
-         │
-         ▼
-5. Transform (optionnel)
-   - Normalisation types
-   - Nettoyage valeurs nulles
-         │
-         ▼
-6. Load (PostgreSQL)
-   - Insertion/upsert via DLT
-   - Gestion schéma automatique
-   - Merge sur primary keys
-         │
-         ▼
-7. État DLT (metadata → PostgreSQL)
-   - _dlt_loads (historique)
-   - _dlt_pipeline_state (état incrémental)
-```
-
-### 3. Monitoring
-
-```
-Dagster UI ──► Statut runs, logs
-             │
-             ▼
-Adminer ──► Requêtes SQL rapides
-             │
-             ▼
-PgAdmin ──► Administration avancée
-             │
-             ▼
-Portainer ──► Santé containers
-```
-
----
-
-## Déploiement
-
-### Environnements
-
-| Environnement | Infra | URL | Déploiement |
-|---------------|-------|-----|-------------|
-| **Dev Local** | Docker Compose | localhost:8080 | Manuel |
-| **Production** | VPS Hostinger | srv991054.hstgr.cloud:8080 | GitLab CI/CD |
-
-### CI/CD Pipeline (GitLab)
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Stage: BUILD                       │
-│                                                         │
-│  1. rsync code vers /srv/brgm                          │
-│  2. Build hubeau-orchestrator:latest                   │
-│  3. Build hubeau-worker:latest                         │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                         GitLab CI/CD                        │
+│              (Déploiement automatique sur push)             │
+└────────────────────────┬────────────────────────────────────┘
                          │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│                     Stage: DEPLOY                       │
-│                                                         │
-│  1. Génère .env.production (secrets GitLab)            │
-│  2. docker compose down                                │
-│  3. docker compose up -d                               │
-│  4. Attente 90s (healthchecks)                         │
-│  5. Vérification logs                                  │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────▼────────────────────────────────────┐
+│                    VPS Production                           │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │                  Dagster Orchestrator               │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────────┐    │    │
+│  │  │ Webserver├──►│  Daemon  ├──►│   Scheduler  │    │    │
+│  │  └──────────┘  └──────────┘  └──────────────┘    │    │
+│  └────────────────────┬───────────────────────────────┘    │
+│                       │ gRPC                                │
+│  ┌────────────────────▼───────────────────────────────┐    │
+│  │                   DLT Worker                        │    │
+│  │         (Ingestion depuis APIs Hub'Eau)            │    │
+│  └────────────────────┬───────────────────────────────┘    │
+│                       │                                     │
+│  ┌────────────────────▼───────────────────────────────┐    │
+│  │                PostgreSQL Database                  │    │
+│  │              Schema: hubeau (tables)               │    │
+│  └─────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-**Trigger** : Push sur `main`
-**Durée** : ~10-15 minutes
+## Composants principaux
 
-### Configuration Multi-Environnements
+### 1. Orchestration - Dagster
 
-**Variables externalisées** :
+**Rôle**: Planification et exécution des pipelines de données
 
-```bash
-# Dagster
-DAGSTER_PG_HOST=dagster_postgres
-DAGSTER_PG_PASSWORD=***
+**Composants**:
+- **Webserver**: Interface utilisateur (port 8080)
+- **Daemon**: Exécution des jobs et sensors
+- **Scheduler**: Planification des runs
+- **PostgreSQL Dagster**: Métadonnées Dagster
 
-# Hub'Eau Data Storage
-PG_HOST=postgres
-PG_PORT=5432
-PG_DB=postgres
-PG_USER=postgres
-PG_PASSWORD=***
-HUBEAU_SCHEMA=hubeau
+**Assets définis**:
+- Assets de référence (stations, sites, ouvrages)
+- Assets de données temporelles (chroniques, mesures)
+- Partitionnement par année (2020-2024)
+
+### 2. Ingestion - DLT (Data Load Tool)
+
+**Rôle**: Extraction et chargement des données depuis les APIs Hub'Eau
+
+**Caractéristiques**:
+- Ingestion directe dans PostgreSQL
+- Tables pré-créées via script SQL d'initialisation
+- Support du mode merge (upsert) avec clés primaires
+- Retry automatique en cas d'erreur
+- Rate limiting pour respecter les quotas API
+
+**Sources configurées**:
+- Piézométrie (nappes phréatiques)
+- Hydrométrie (cours d'eau)
+- Qualité des eaux (rivières et nappes)
+- Prélèvements
+- Écoulements
+- Température
+- Hydrobiologie
+
+### 3. Stockage - PostgreSQL
+
+**Rôle**: Base de données principale
+
+**Structure**:
+- Schema `hubeau`: Toutes les données Hub'Eau
+- Tables pré-créées via script SQL d'initialisation
+- Index optimisés pour requêtes temporelles et géographiques
+- Support PostGIS pour données géospatiales
+- Triggers pour mise à jour automatique des timestamps
+
+### 4. Déploiement - Docker & GitLab CI/CD
+
+**Conteneurs Docker**:
+```yaml
+services:
+  dagster_postgres    # Base Dagster (métadonnées)
+  postgres           # Base données Hub'Eau
+  dlt_worker         # Worker DLT
+  dagster_webserver  # UI Dagster
+  dagster_daemon     # Daemon Dagster
+  adminer           # Interface DB
 ```
 
-**Voir** : [ENVIRONMENT_CONFIGURATION.md](ENVIRONMENT_CONFIGURATION.md)
+**Pipeline CI/CD**:
+1. Push sur branche `main`
+2. Build des images Docker
+3. Déploiement automatique sur VPS
+4. Restart des services
 
----
+## Structure de la base de données
 
-## Roadmap
+### Schema `hubeau`
 
-### Optimisations PostgreSQL 🚧
+Le schema est créé automatiquement au démarrage via `/docker/init-scripts/postgres/01_create_schema.sql`.
 
-**Objectif** : Optimiser la base de données itérativement selon les besoins
+**Tables principales**:
 
-| Tâche | Priorité | Description |
-|-------|----------|-------------|
-| **Hypertables TimescaleDB** | Moyenne | Conversion tables chroniques en hypertables (> 10M lignes) |
-| **Index spatiaux** | Haute | Index PostGIS sur colonnes géométriques (stations) |
-| **Index temporels** | Haute | Index sur colonnes date pour requêtes temporelles |
-| **Vues matérialisées** | Basse | Agrégations pré-calculées (moyennes mensuelles, etc.) |
-| **Partitionnement natif** | Basse | Partitionnement PostgreSQL par année/région |
+#### Tables de référence (stations, sites)
+- `piezometry_stations` - Stations piézométriques
+- `hydrometry_sites` - Sites hydrométriques
+- `hydrometry_stations` - Stations hydrométriques
+- `quality_rivers_stations` - Stations qualité rivières
+- `quality_groundwater_stations` - Stations qualité nappes
+- `temperature_stations` - Stations température
+- `ecoulement_stations` - Stations écoulement
+- `hydrobio_stations` - Stations hydrobiologie
+- `prelevements_ouvrages` - Ouvrages de prélèvement
 
-### Analytics & Visualisation 📋
+#### Tables de données temporelles
+- `piezometry_chroniques` - Mesures piézométriques
+- `hydrometry_observations` - Observations hydrométriques
+- `quality_rivers_analyses` - Analyses qualité rivières
+- `quality_groundwater_analyses` - Analyses qualité nappes
+- `temperature_chroniques` - Mesures température
+- `ecoulement_campagnes` - Campagnes écoulement
+- `hydrobio_indices` - Indices biologiques
+- `prelevements_chroniques` - Volumes prélevés
 
-**Objectif** : Exploiter les données Hub'Eau
+#### Tables système DLT
+- `_dlt_loads` - Historique des chargements
+- `_dlt_pipeline_state` - État des pipelines
+- `_dlt_version` - Versions des schémas
 
-| Tâche | Status | Description |
-|-------|--------|-------------|
-| **Grafana** | Planifié | Dashboards de monitoring et visualisations |
-| **Metabase** | Vision | BI self-service pour explorations |
-| **API REST** | Vision | Exposer données Hub'Eau via API |
-| **Neo4j (optionnel)** | Vision | Graphe de connaissances (ontologie SOSA) |
+### Index et optimisations
 
-**Voir** : [PROJET_JUNON_VISION.md](PROJET_JUNON_VISION.md)
+**Index temporels**:
+- Sur toutes les colonnes de date (`date_mesure`, `date_obs`, `date_prelevement`)
+- Sur les colonnes `year` (générées automatiquement)
 
----
+**Index géographiques**:
+- Sur `code_commune_insee`, `code_departement`
+- Index spatiaux PostGIS disponibles (commentés par défaut)
 
-## Performance & Scalabilité
+**Triggers**:
+- `updated_at` mis à jour automatiquement sur modification
 
-### Capacité Actuelle
+## Flux de données
 
-- **APIs Hub'Eau** : 8 APIs, 24 endpoints
-- **Volume estimé** : ~10-50 GB de données PostgreSQL
-- **Fréquence** : Selon schedules (quotidien/hebdomadaire/mensuel)
-- **Durée run** : 2-10 minutes par asset selon volume
+### 1. Ingestion initiale
+```
+API Hub'Eau → DLT → PostgreSQL (tables stations/référentiels)
+```
 
-### Optimisations Implémentées
+### 2. Mise à jour des chroniques
+```
+Sensor Dagster → Job partitionné → DLT → PostgreSQL (données temporelles)
+```
 
-1. **Pagination automatique** : DLT gère la pagination Hub'Eau
-2. **Chargement incrémental** : Merge sur primary keys (pas de doublons)
-3. **Filtrage intelligent** : Extraction stations actives depuis PostgreSQL
-4. **Retry automatique** : Résilience face aux erreurs API (tenacity)
-5. **Partitions Dagster** : Parallélisation des assets par année
-6. **HTTP async** : httpx pour requêtes non-bloquantes
+### 3. Backfill automatique
+```
+Sensor détection partitions manquantes → Jobs backfill → DLT → PostgreSQL
+```
 
-### Limites Connues
+Note: Le sensor de backfill ne se déclenche pas sur une nouvelle installation (protection intégrée).
 
-| Limite | Valeur | Workaround |
-|--------|--------|------------|
-| Max records/page Hub'Eau | Variable | DLT gère automatiquement |
-| Timeout API | 30-60s | Retry avec backoff exponentiel |
-| Mémoire container worker | 2 GB RAM | Ajuster dans docker-compose |
+## Configuration
 
----
+### Variables d'environnement principales
+
+**PostgreSQL données**:
+- `PG_HOST`: Hôte PostgreSQL (défaut: postgres)
+- `PG_PASSWORD`: Mot de passe (depuis GitLab CI/CD)
+- `PG_DB`: Base de données (défaut: postgres)
+- `PG_USER`: Utilisateur (défaut: postgres)
+- `HUBEAU_SCHEMA`: Schema (défaut: hubeau)
+
+**Dagster**:
+- `DAGSTER_PG_HOST`: Hôte PostgreSQL Dagster
+- `DAGSTER_PG_PASSWORD`: Mot de passe Dagster
+
+**DLT**:
+- `DESTINATION__POSTGRES__CREDENTIALS__HOST`: postgres
+- `DESTINATION__POSTGRES__CREDENTIALS__DATABASE`: postgres
+- `DESTINATION__POSTGRES__CREDENTIALS__USERNAME`: postgres
+- `DESTINATION__POSTGRES__CREDENTIALS__PASSWORD`: ${PG_PASSWORD}
+
+### Configuration des sources
+
+Les sources sont configurées via fichiers YAML dans `configs/hubeau/`:
+- Configuration des endpoints API
+- Paramètres de pagination
+- Mapping des champs
+- Filtres temporels et géographiques
+
+## Jobs et Sensors Dagster
+
+### Jobs principaux
+
+- **`sync_all_yearly_data`**: Synchronise toutes les données pour une année
+- **`hubeau_piezometry_job`**: Données piézométriques
+- **`hubeau_hydrometry_job`**: Données hydrométriques
+- **`hubeau_quality_job`**: Qualité des eaux
+- **`hubeau_temperature_job`**: Température des cours d'eau
+
+### Sensors
+
+- **`backfill_missing_partitions_sensor`**:
+  - Détecte les partitions manquantes
+  - Ne se déclenche pas sur nouvelle installation
+  - Limite à 3 backfills par exécution
+  - Variable `FORCE_INITIAL_BACKFILL=true` pour forcer
+
+## Optimisations
+
+### Performance
+- Pipelines DLT isolés par asset pour éviter conflits de schéma
+- Utilisation de `/tmp` pour fichiers temporaires DLT
+- Rate limiting pour respecter quotas API
+- Index PostgreSQL sur colonnes clés
+- Write disposition "merge" pour upserts efficaces
+
+### Résilience
+- Retry automatique sur erreurs API
+- Health checks Docker
+- Backfill sensor pour rattraper données manquantes
+- Logs centralisés dans Dagster
+- État DLT persisté dans PostgreSQL
+
+### Monitoring
+- Dagster UI pour suivi des runs
+- Adminer pour inspection base de données
+- Logs structurés avec niveaux (INFO, WARNING, ERROR)
+- Métriques d'exécution dans Dagster
 
 ## Sécurité
 
-### Credentials Management
+- Mots de passe stockés dans GitLab CI/CD Variables
+- Pas de secrets dans le code ou fichiers de config
+- Connexions PostgreSQL via réseau Docker interne
+- Ports exposés uniquement si nécessaire
+- `.dlt/*.toml` dans `.gitignore` pour éviter fuite de credentials
 
-- **Local** : `.env` (gitignored)
-- **Production** : GitLab CI/CD Variables (Protected + Masked)
-- **Pas de secrets hardcodés** : Uniquement via env vars
+## Maintenance
 
-### Réseau
+### Logs
+- **Dagster UI**: http://localhost:8080 - Tous les logs d'exécution
+- **Docker logs**: `docker logs <container_name>`
+- **PostgreSQL logs**: Dans le container PostgreSQL
 
-- **Orchestrator** : Expose port 8080 (UI)
-- **Worker** : Expose port 4000 (gRPC interne uniquement)
-- **PostgreSQL** : Port 5432 (interne réseau Docker)
-- **Adminer** : Port 8081 (HTTP)
-- **PgAdmin** : Port 5050 (HTTP)
+### Backup
+- Volume Docker PostgreSQL persistant: `/srv/brgm-data/postgres`
+- État Dagster: `/srv/brgm-data/dagster_pg`
+- Possibilité de backup via `pg_dump`
 
-### Backups
-
-- **PostgreSQL data** : `/srv/brgm-data/postgres` (persistant)
-- **Dagster metadata** : `/srv/brgm-data/dagster_pg` (persistant)
-- **Stratégie** : Snapshots serveur + backups PostgreSQL (pg_dump)
-
----
+### Mise à jour
+1. Push sur `main` déclenche déploiement automatique
+2. GitLab CI/CD build les nouvelles images
+3. Déploiement sur VPS avec health checks
+4. Rollback possible via GitLab
 
 ## Troubleshooting
 
-### Worker ne démarre pas
+### Problème: DLT crée trop de tables enfants
+**Solution**: Les tables sont pré-créées via script SQL, DLT utilise la structure existante
 
-```bash
-# Check logs
-docker logs brgm-dlt-worker --tail 50
+### Problème: "could not translate host name postgres"
+**Solution**: Vérifier que le service `postgres` est bien défini dans docker-compose
 
-# Causes communes :
-# - Import error (module manquant)
-# - Port 4000 déjà utilisé
-# - PYTHONPATH incorrect
-```
+### Problème: Backfill automatique non désiré
+**Solution**: Le sensor détecte automatiquement les nouvelles installations et ne backfill pas
 
-### Pipeline échoue
-
-```bash
-# Via Dagster UI
-http://localhost:8080 → Runs → [Run ID] → Logs
-
-# Causes communes :
-# - API Hub'Eau indisponible (503, 504)
-# - Timeout (retry automatique épuisé)
-# - Credentials PostgreSQL incorrects
-```
-
-### PostgreSQL connection refused
-
-```bash
-# Vérifier credentials
-docker exec brgm-dlt-worker env | grep PG_
-
-# Vérifier que PostgreSQL est up
-docker ps | grep postgres
-
-# Tester connexion
-docker exec postgres psql -U postgres -c "SELECT 1"
-```
-
-**Guide complet** : [GITLAB_CI_SETUP.md](../GITLAB_CI_SETUP.md)
-
----
-
-## Ressources
-
-- **Code source** : https://scm.univ-tours.fr/ringuet/hubeau_data_integration
-- **Dagster Docs** : https://docs.dagster.io
-- **DLT Docs** : https://dlthub.com/docs
-- **Hub'Eau** : https://hubeau.eaufrance.fr
-- **PostgreSQL Docs** : https://www.postgresql.org/docs/
-- **PostGIS Docs** : https://postgis.net/documentation/
+### Problème: Données non mises à jour
+**Vérifier**:
+1. Dagster UI pour les logs d'erreur
+2. Connexion PostgreSQL fonctionne
+3. API Hub'Eau accessible
+4. Credentials corrects dans GitLab Variables

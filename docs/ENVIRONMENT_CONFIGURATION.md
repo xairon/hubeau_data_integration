@@ -1,337 +1,247 @@
-# Environment Configuration Guide
+# Configuration des Variables d'Environnement
 
-Ce guide explique comment configurer les variables d'environnement pour différents scénarios de déploiement.
+## Vue d'ensemble
 
-## 📋 Table des matières
+Ce guide détaille la configuration des variables d'environnement pour le projet Hub'Eau Data Pipeline.
 
-- [Variables disponibles](#variables-disponibles)
-- [Scénarios de déploiement](#scénarios-de-déploiement)
-- [Exemples de configuration](#exemples-de-configuration)
+## Variables d'environnement
 
-## Variables disponibles
-
-### 🔹 Dagster (Orchestration)
+### PostgreSQL - Base de données principale
 
 | Variable | Description | Valeur par défaut | Obligatoire |
 |----------|-------------|-------------------|-------------|
-| `DAGSTER_PG_HOST` | Hostname PostgreSQL Dagster | `dagster_postgres` | ✅ |
-| `DAGSTER_PG_PORT` | Port PostgreSQL Dagster | `5432` | ✅ |
-| `DAGSTER_PG_DB` | Base de données Dagster | `dagster` | ✅ |
-| `DAGSTER_PG_USER` | Utilisateur PostgreSQL | `postgres` | ✅ |
-| `DAGSTER_PG_PASSWORD` | Mot de passe PostgreSQL | - | ✅ |
-
-### 🔹 PostgreSQL (Données relationnelles)
-
-| Variable | Description | Valeur par défaut | Obligatoire |
-|----------|-------------|-------------------|-------------|
-| `PG_HOST` | Hostname PostgreSQL | `postgres` | ✅ |
+| `PG_HOST` | Hôte PostgreSQL | `postgres` | ✅ |
 | `PG_PORT` | Port PostgreSQL | `5432` | ✅ |
-| `PG_DB` | Base de données | `postgres` | ✅ |
-| `PG_USER` | Utilisateur PostgreSQL | `postgres` | ✅ |
-| `PG_PASSWORD` | Mot de passe PostgreSQL | - | ✅ |
+| `PG_DB` | Nom de la base | `postgres` | ✅ |
+| `PG_USER` | Utilisateur | `postgres` | ✅ |
+| `PG_PASSWORD` | Mot de passe | - | ✅ |
+| `HUBEAU_SCHEMA` | Schema Hub'Eau | `hubeau` | ❌ |
 
-### 🔹 PostGIS (Données géospatiales)
-
-| Variable | Description | Valeur par défaut | Obligatoire |
-|----------|-------------|-------------------|-------------|
-| `POSTGIS_HOST` | Hostname PostGIS | `postgis` | ✅ |
-| `POSTGIS_PORT` | Port PostGIS | `5432` | ✅ |
-| `POSTGIS_DB` | Base de données PostGIS | `postgres` | ✅ |
-| `POSTGIS_USER` | Utilisateur PostGIS | `postgres` | ✅ |
-| `POSTGIS_PASSWORD` | Mot de passe PostGIS | - | ✅ |
-
-### 🔹 MinIO / S3 (Object Storage)
+### Dagster - Orchestration
 
 | Variable | Description | Valeur par défaut | Obligatoire |
 |----------|-------------|-------------------|-------------|
-| `MINIO_ENDPOINT` | URL du endpoint S3 | `http://minio:9000` | ✅ |
-| `MINIO_USER` | Access Key ID | `admin` | ✅ |
-| `MINIO_PASS` | Secret Access Key | - | ✅ |
-| `MINIO_REGION` | Région S3 | `us-east-1` | ✅ |
-| `MINIO_BRONZE_BUCKET` | Bucket Bronze layer | `bronze` | ✅ |
+| `DAGSTER_PG_HOST` | Hôte PostgreSQL Dagster | `dagster_postgres` | ✅ |
+| `DAGSTER_PG_PORT` | Port PostgreSQL Dagster | `5432` | ✅ |
+| `DAGSTER_PG_DB` | Base Dagster | `dagster` | ✅ |
+| `DAGSTER_PG_USER` | Utilisateur Dagster | `postgres` | ✅ |
+| `DAGSTER_PG_PASSWORD` | Mot de passe Dagster | - | ✅ |
+| `DAGSTER_HOME` | Répertoire Dagster | `/app/dagster_home` | ❌ |
 
-### 🔹 Monitoring (Optionnel)
+### DLT - Ingestion
+
+| Variable | Description | Valeur par défaut | Obligatoire |
+|----------|-------------|-------------------|-------------|
+| `DESTINATION__POSTGRES__CREDENTIALS__HOST` | Hôte destination DLT | `${PG_HOST}` | ✅ |
+| `DESTINATION__POSTGRES__CREDENTIALS__PORT` | Port destination DLT | `${PG_PORT}` | ✅ |
+| `DESTINATION__POSTGRES__CREDENTIALS__DATABASE` | Base destination DLT | `${PG_DB}` | ✅ |
+| `DESTINATION__POSTGRES__CREDENTIALS__USERNAME` | User destination DLT | `${PG_USER}` | ✅ |
+| `DESTINATION__POSTGRES__CREDENTIALS__PASSWORD` | Pass destination DLT | `${PG_PASSWORD}` | ✅ |
+
+### Monitoring (Optionnel)
 
 | Variable | Description | Valeur par défaut | Obligatoire |
 |----------|-------------|-------------------|-------------|
 | `GRAFANA_PASSWORD` | Mot de passe admin Grafana | `admin` | ❌ |
 | `PROMETHEUS_PORT` | Port Prometheus | `9090` | ❌ |
 
-## Scénarios de déploiement
+### Backfill (Optionnel)
 
-### 1️⃣ Développement local (Docker Compose)
+| Variable | Description | Valeur par défaut | Obligatoire |
+|----------|-------------|-------------------|-------------|
+| `FORCE_INITIAL_BACKFILL` | Force le backfill sur nouvelle installation | `false` | ❌ |
 
-**Configuration** : Tous les services en local via Docker Compose
+## Fichiers de configuration
+
+### Développement local - `.env`
+
+Créer un fichier `.env` à la racine du projet :
 
 ```bash
-# Dagster
+# Dagster Orchestrator Database
 DAGSTER_PG_HOST=dagster_postgres
 DAGSTER_PG_PORT=5432
+DAGSTER_PG_DB=dagster
+DAGSTER_PG_USER=postgres
 DAGSTER_PG_PASSWORD=BrgmDagster2024!
 
-# Postgres
+# Data Storage - PostgreSQL
 PG_HOST=postgres
 PG_PORT=5432
+PG_DB=postgres
+PG_USER=postgres
 PG_PASSWORD=BrgmPostgres2024!
 
-# PostGIS
-POSTGIS_HOST=postgis
-POSTGIS_PORT=5432
-POSTGIS_PASSWORD=BrgmPostgres2024!
+# Hub'Eau Schema
+HUBEAU_SCHEMA=hubeau
 
-# MinIO
-MINIO_ENDPOINT=http://minio:9000
-MINIO_USER=admin
-MINIO_PASS=BrgmMinio2024!
+# Monitoring (optionnel)
+GRAFANA_PASSWORD=admin
 ```
 
-**Commandes** :
+### Production - GitLab CI/CD Variables
+
+Dans GitLab, aller dans **Settings → CI/CD → Variables** et définir :
+
+| Variable | Type | Options |
+|----------|------|---------|
+| `PG_PASSWORD` | Variable | Protected ✅, Masked ✅ |
+| `DAGSTER_PG_PASSWORD` | Variable | Protected ✅, Masked ✅ |
+
+Les autres variables utilisent les valeurs par défaut définies dans `docker-compose.production.yml`.
+
+## Scénarios de déploiement
+
+### 1. Développement local
+
+**Configuration** : Tous les services via Docker Compose
+
 ```bash
-cp .env.template .env
-# Éditer .env avec vos passwords
+# 1. Copier le template
+cp .env.example .env
+
+# 2. Éditer .env avec vos passwords
+
+# 3. Démarrer les services
 docker-compose up -d
 ```
 
----
+**Services démarrés** :
+- PostgreSQL données (port 5432)
+- PostgreSQL Dagster (interne)
+- Dagster Webserver (port 8080)
+- Dagster Daemon
+- DLT Worker
+- Adminer (port 8081)
 
-### 2️⃣ Production VPS (Docker Compose)
+### 2. Production VPS
 
-**Configuration** : Identique au dev local mais avec des passwords sécurisés
+**Configuration** : Déploiement automatique via GitLab CI/CD
 
-```bash
-# Même configuration que dev local mais avec :
-DAGSTER_PG_PASSWORD=<strong-password-1>
-PG_PASSWORD=<strong-password-2>
-POSTGIS_PASSWORD=<strong-password-2>
-MINIO_PASS=<strong-password-3>
-```
-
-**Déploiement** : Via GitLab CI/CD (variables configurées dans GitLab)
-
----
-
-### 3️⃣ Production Hybride (MinIO externe + Databases locales)
-
-**Scénario** : Utiliser AWS S3 ou Scaleway Object Storage au lieu de MinIO local
-
-```bash
-# Dagster - Local
-DAGSTER_PG_HOST=dagster_postgres
-DAGSTER_PG_PORT=5432
-DAGSTER_PG_PASSWORD=<password>
-
-# Postgres - Local
-PG_HOST=postgres
-PG_PORT=5432
-PG_PASSWORD=<password>
-
-# PostGIS - Local
-POSTGIS_HOST=postgis
-POSTGIS_PORT=5432
-POSTGIS_PASSWORD=<password>
-
-# AWS S3 - Externe
-MINIO_ENDPOINT=https://s3.eu-west-3.amazonaws.com
-MINIO_USER=AKIAIOSFODNN7EXAMPLE
-MINIO_PASS=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-MINIO_REGION=eu-west-3
-MINIO_BRONZE_BUCKET=hubeau-bronze-prod
-```
-
-**Modifications docker-compose** :
-```yaml
-# Supprimer le service minio de docker-compose.yml
-# Garder les autres services
-```
-
----
-
-### 4️⃣ Production Cloud-Native (Tout externe)
-
-**Scénario** : Bases de données managées (AWS RDS, Scaleway DB) + S3
-
-```bash
-# Dagster - AWS RDS PostgreSQL
-DAGSTER_PG_HOST=dagster-prod.xxxx.eu-west-3.rds.amazonaws.com
-DAGSTER_PG_PORT=5432
-DAGSTER_PG_DB=dagster
-DAGSTER_PG_USER=dagster_admin
-DAGSTER_PG_PASSWORD=<rds-password>
-
-# Postgres - AWS RDS
-PG_HOST=hubeau-postgres.xxxx.eu-west-3.rds.amazonaws.com
-PG_PORT=5432
-PG_DB=hubeau_data
-PG_USER=hubeau_admin
-PG_PASSWORD=<rds-password>
-
-# PostGIS - AWS RDS with PostGIS extension
-POSTGIS_HOST=hubeau-postgis.xxxx.eu-west-3.rds.amazonaws.com
-POSTGIS_PORT=5432
-POSTGIS_DB=hubeau_geo
-POSTGIS_USER=hubeau_admin
-POSTGIS_PASSWORD=<rds-password>
-
-# AWS S3
-MINIO_ENDPOINT=https://s3.eu-west-3.amazonaws.com
-MINIO_USER=AKIAIOSFODNN7EXAMPLE
-MINIO_PASS=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-MINIO_REGION=eu-west-3
-MINIO_BRONZE_BUCKET=hubeau-bronze-prod
-```
+Variables GitLab CI/CD requises :
+- `PG_PASSWORD` : Password PostgreSQL données
+- `DAGSTER_PG_PASSWORD` : Password PostgreSQL Dagster
 
 **Déploiement** :
-- Dagster sur Kubernetes ou ECS
-- Aucun service de base de données dans docker-compose
-- Seulement les workers DLT
-
----
-
-### 5️⃣ Environnement de Staging
-
-**Scénario** : Tester avec des services externes avant la production
-
 ```bash
-# Databases - Instances dédiées de staging
-PG_HOST=postgres-staging.internal
-PG_PASSWORD=<staging-password>
-
-POSTGIS_HOST=postgis-staging.internal
-POSTGIS_PASSWORD=<staging-password>
-
-# Object Storage - Bucket dédié
-MINIO_ENDPOINT=https://s3.eu-west-3.amazonaws.com
-MINIO_BRONZE_BUCKET=hubeau-bronze-staging  # ← Bucket séparé
-MINIO_USER=<aws-key>
-MINIO_PASS=<aws-secret>
+# Push sur main déclenche le déploiement
+git push origin main
 ```
 
----
+### 3. Production avec base externe
+
+Si vous utilisez une base PostgreSQL externe (AWS RDS, etc.) :
+
+```bash
+# Dans GitLab CI/CD Variables
+PG_HOST=database.example.com
+PG_PORT=5432
+PG_DB=hubeau_prod
+PG_USER=hubeau_user
+PG_PASSWORD=<strong-password>
+```
+
+Supprimer le service `postgres` de `docker-compose.production.yml`.
+
+## Sécurité
+
+### Bonnes pratiques
+
+1. **Passwords forts** :
+   - Minimum 16 caractères
+   - Caractères spéciaux, chiffres, majuscules
+   - Différents pour chaque service
+
+2. **Stockage sécurisé** :
+   - Local : `.env` (gitignored)
+   - Production : GitLab CI/CD Variables (Protected + Masked)
+   - Jamais dans le code ou les commits
+
+3. **Rotation régulière** :
+   - Changer les passwords tous les 3-6 mois
+   - Mettre à jour dans GitLab Variables
+   - Redéployer l'application
+
+### Vérification des variables
+
+```bash
+# Vérifier dans un container
+docker exec brgm-dlt-worker env | grep PG_
+
+# Tester connexion PostgreSQL
+docker exec brgm-postgres psql -U postgres -c "SELECT version();"
+
+# Vérifier les logs
+docker logs brgm-dlt-worker --tail 50
+```
+
+## Troubleshooting
+
+### Erreur : "PG_PASSWORD not set"
+
+**Solution** : Vérifier que `.env` existe et contient `PG_PASSWORD`
+
+### Erreur : "could not translate host name"
+
+**Solution** : Vérifier que le nom d'hôte dans la variable correspond au nom du service Docker
+
+### Erreur : "password authentication failed"
+
+**Solution** :
+1. Vérifier le password dans `.env` ou GitLab Variables
+2. Si changé, supprimer le volume PostgreSQL et recréer
+
+## Migration depuis ancienne configuration
+
+Si vous aviez une configuration avec MinIO/PostGIS séparés :
+
+1. **Supprimer les anciennes variables** :
+   - `MINIO_*`
+   - `POSTGIS_*` (sauf si vous utilisez PostGIS séparé)
+
+2. **Utiliser uniquement** :
+   - `PG_*` pour PostgreSQL données
+   - `DAGSTER_PG_*` pour PostgreSQL Dagster
+
+3. **Nettoyer docker-compose** :
+   - Supprimer services MinIO
+   - Supprimer PostGIS si non utilisé
 
 ## Exemples de configuration
 
-### Exemple 1: Scaleway Object Storage
+### Minimal (dev local)
 
 ```bash
-MINIO_ENDPOINT=https://s3.fr-par.scw.cloud
-MINIO_USER=<scaleway-access-key>
-MINIO_PASS=<scaleway-secret-key>
-MINIO_REGION=fr-par
-MINIO_BRONZE_BUCKET=hubeau-bronze
+# Seulement les passwords obligatoires
+PG_PASSWORD=dev123456
+DAGSTER_PG_PASSWORD=dev123456
 ```
 
-### Exemple 2: DigitalOcean Spaces
+### Complet (production)
 
 ```bash
-MINIO_ENDPOINT=https://fra1.digitaloceanspaces.com
-MINIO_USER=<do-access-key>
-MINIO_PASS=<do-secret-key>
-MINIO_REGION=fra1
-MINIO_BRONZE_BUCKET=hubeau-bronze
-```
-
-### Exemple 3: MinIO local accessible depuis l'extérieur
-
-```bash
-# Accès depuis le host Docker
-MINIO_ENDPOINT=http://localhost:9000
-
-# Accès depuis un autre serveur
-MINIO_ENDPOINT=http://192.168.1.100:9000
-```
-
-### Exemple 4: Plusieurs environnements PostgreSQL
-
-```bash
-# Dev
-PG_HOST=localhost
+# PostgreSQL
+PG_HOST=postgres
 PG_PORT=5432
+PG_DB=hubeau_prod
+PG_USER=hubeau_admin
+PG_PASSWORD=xK9#mP2$vL5@nQ8!
 
-# Staging
-PG_HOST=postgres-staging.company.com
-PG_PORT=5432
+# Dagster
+DAGSTER_PG_HOST=dagster_postgres
+DAGSTER_PG_PORT=5432
+DAGSTER_PG_DB=dagster
+DAGSTER_PG_USER=dagster_admin
+DAGSTER_PG_PASSWORD=yR7&tW4*hN9%sF3@
 
-# Production
-PG_HOST=postgres-prod.company.com
-PG_PORT=5432
+# Options
+HUBEAU_SCHEMA=hubeau
+FORCE_INITIAL_BACKFILL=false
 ```
 
----
+## Ressources
 
-## 🔐 Bonnes pratiques de sécurité
-
-### Passwords
-
-- **Minimum 16 caractères**
-- Mélange de majuscules, minuscules, chiffres, symboles
-- Différents pour chaque service
-- Stockés dans un password manager
-
-### Secrets Management
-
-**Local** :
-```bash
-# .env - gitignored
-cp .env.template .env
-# Éditer .env
-```
-
-**GitLab CI/CD** :
-```
-Settings > CI/CD > Variables
-- Protected: ✅
-- Masked: ✅ (sauf MINIO_USER si = "admin")
-```
-
-**Production** (alternatives):
-- AWS Secrets Manager
-- HashiCorp Vault
-- Kubernetes Secrets
-
-### Rotation des credentials
-
-Changer les passwords régulièrement :
-1. Générer nouveau password
-2. Mettre à jour dans GitLab CI/CD
-3. Redéployer l'application
-4. Vérifier que tout fonctionne
-5. Supprimer l'ancien password
-
----
-
-## 🔍 Debugging
-
-### Vérifier les variables d'environnement
-
-```bash
-# Dans un container Docker
-docker exec dlt_worker env | grep MINIO
-docker exec dagster_webserver env | grep DAGSTER_PG
-```
-
-### Tester la connexion MinIO
-
-```bash
-# Avec awscli
-aws --endpoint-url=$MINIO_ENDPOINT \
-    s3 ls s3://$MINIO_BRONZE_BUCKET
-
-# Avec curl
-curl -I $MINIO_ENDPOINT/minio/health/live
-```
-
-### Tester la connexion PostgreSQL
-
-```bash
-# Avec psql
-PGPASSWORD=$PG_PASSWORD psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d $PG_DB -c "SELECT version();"
-```
-
----
-
-## 📚 Ressources
-
-- [.env.template](../.env.template) - Template avec toutes les variables
-- [GITLAB_CI_SETUP.md](../GITLAB_CI_SETUP.md) - Configuration GitLab CI/CD
-- [docker-compose.yml](../docker-compose.yml) - Configuration Docker locale
+- [.env.example](../.env.example) - Template avec toutes les variables
+- [docker-compose.yml](../docker-compose.yml) - Configuration locale
 - [docker-compose.production.yml](../docker-compose.production.yml) - Configuration production
+- [GITLAB_CI_VARIABLES_SETUP.md](GITLAB_CI_VARIABLES_SETUP.md) - Guide GitLab
