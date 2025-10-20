@@ -70,7 +70,7 @@ build:image:
     - echo "📦 Installation des dépendances depuis Alpine..."
     - |
       for i in {1..3}; do
-        if apk add --no-cache docker-cli bash rsync curl; then
+        if apk add --no-cache docker-cli docker-cli-compose bash rsync curl; then
           echo "✅ Installation réussie au tentatif $i"
           break
         else
@@ -79,6 +79,7 @@ build:image:
         fi
       done
     - docker --version || echo "❌ Docker CLI installation failed"
+    - docker compose version || echo "⚠️  Docker Compose plugin non disponible"
     # Script de fallback pour erreurs Docker Hub
     - echo "🔧 Préparation du script de fallback Docker Hub..."
     - chmod +x scripts/fix-docker-pull.sh || echo "⚠️  Script déjà exécutable"
@@ -119,7 +120,7 @@ deploy:production:
     - echo "📦 Installation des dépendances depuis Alpine..."
     - |
       for i in {1..3}; do
-        if apk add --no-cache docker-cli bash curl; then
+        if apk add --no-cache docker-cli docker-cli-compose bash curl; then
           echo "✅ Installation réussie au tentatif $i"
           break
         else
@@ -128,6 +129,7 @@ deploy:production:
         fi
       done
     - docker --version || echo "❌ Docker CLI installation failed"
+    - docker compose version || echo "⚠️  Docker Compose plugin non disponible"
     # Script de fallback pour erreurs Docker Hub
     - echo "🔧 Préparation du script de fallback Docker Hub..."
     - chmod +x scripts/fix-docker-pull.sh || echo "⚠️  Script déjà exécutable"
@@ -293,7 +295,7 @@ rollback:production:
     - echo "📦 Installation des dépendances depuis Alpine..."
     - |
       for i in {1..3}; do
-        if apk add --no-cache docker-cli bash curl; then
+        if apk add --no-cache docker-cli docker-cli-compose bash curl; then
           echo "✅ Installation réussie au tentatif $i"
           break
         else
@@ -302,6 +304,7 @@ rollback:production:
         fi
       done
     - docker --version || echo "❌ Docker CLI installation failed"
+    - docker compose version || echo "⚠️  Docker Compose plugin non disponible"
     # Script de fallback pour erreurs Docker Hub
     - echo "🔧 Préparation du script de fallback Docker Hub..."
     - chmod +x scripts/fix-docker-pull.sh || echo "⚠️  Script déjà exécutable"
