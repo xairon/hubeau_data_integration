@@ -1,6 +1,6 @@
 from dagster import define_asset_job, AssetSelection, in_process_executor
 
-from ..assets.bronze.dlt_assets import (
+from ..assets.raw.dlt_assets import (
     # Assets de stations de référence (pas de partition)
     hydrometry_stations_reference,
     hydrometry_sites_reference,

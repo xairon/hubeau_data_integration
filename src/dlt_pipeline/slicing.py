@@ -641,7 +641,7 @@ def get_active_departments_for_stations(stations_data: list[str], station_type: 
         Liste unique et triée des départements ayant des stations
     """
     # Import ici pour éviter dépendances circulaires
-    from src.hubeau_pipeline.assets.bronze.dlt_assets import get_active_departments_for_stations as _get_depts
+    from src.hubeau_pipeline.assets.raw.dlt_assets import get_active_departments_for_stations as _get_depts
 
     return _get_depts(stations_data, station_type)
 

@@ -1,9 +1,15 @@
 """
-Assets Bronze Hub'Eau - Architecture moderne et claire
-httpx + tenacity + pydantic pour une ingestion robuste et performante
+Raw assets Hub'Eau - Raw data ingestion layer
+
+This layer contains raw data from Hub'Eau API with minimal transformation:
+- Direct API ingestion
+- Data validation (pydantic)
+- Resilient HTTP client (httpx + tenacity)
+
+Standard: Modern Data Stack - Raw layer conventions.
 """
 
-# Assets Hub'Eau Bronze (ancienne architecture - deprecated)
+# Assets Hub'Eau Raw (ancienne architecture - deprecated)
 # from .hubeau_assets import (
 #     hubeau_hydrometry_bronze,
 #     hubeau_piezometry_bronze,
@@ -48,10 +54,10 @@ from .dlt_assets import (
 # from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
 
 # Assets de production Hub'Eau (ancienne architecture - supprimés)
-# hubeau_bronze_assets_old = []
+# hubeau_raw_assets_old = []
 
 # Assets de production Hub'Eau (nouvelle architecture dlt - recommandé)
-hubeau_bronze_assets_dlt = [
+hubeau_raw_assets = [
     # Assets de stations de référence (pas de partition)
     hydrometry_stations_reference,
     hydrometry_sites_reference,
@@ -80,17 +86,17 @@ hubeau_bronze_assets_dlt = [
 ]
 
 # Assets externes (référentiels complémentaires) - SUPPRIMÉS
-# external_bronze_assets = [
-#     bdlisa_geographic_bronze_real,  # BDLISA : Formations géologiques aquifères
-#     sandre_thesaurus_bronze_real     # Sandre : Nomenclatures et référentiels
+# external_raw_assets = [
+#     bdlisa_geographic_raw_real,  # BDLISA : Formations géologiques aquifères
+#     sandre_thesaurus_raw_real     # Sandre : Nomenclatures et référentiels
 # ]
 
 # ✅ NOUVELLE ARCHITECTURE: Utiliser les assets dlt par défaut
-all_bronze_assets = hubeau_bronze_assets_dlt
+all_raw_assets = hubeau_raw_assets
 
 __all__ = [
     # Assets Hub'Eau dlt (nouvelle architecture)
-    "hubeau_bronze_assets_dlt",
+    "hubeau_raw_assets",
     "hydrobio_taxons",
     "hydrobio_indices",
     "hydrometry_obs_elab",
@@ -118,5 +124,5 @@ __all__ = [
     "diagnose_piezometry_missing_stations",
 
     # Tous les assets
-    "all_bronze_assets"
+    "all_raw_assets"
 ]

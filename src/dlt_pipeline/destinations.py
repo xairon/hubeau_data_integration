@@ -79,7 +79,7 @@ def get_postgres_destination(config: Dict = None) -> Any:
         ]
 
     # Créer la destination
-    dataset_name = config.get("dataset_name", "bronze")
+    dataset_name = config.get("dataset_name", "raw")  # Raw layer - Modern Data Stack
 
     return dlt.destinations.postgres(
         credentials=credentials,
@@ -141,7 +141,7 @@ def get_bigquery_destination(config: Dict = None) -> Any:
     if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         credentials["credentials"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
-    dataset_name = config.get("dataset_name", "hubeau_bronze")
+    dataset_name = config.get("dataset_name", "hubeau_raw")  # Raw layer
 
     return dlt.destinations.bigquery(
         credentials=credentials,
@@ -171,7 +171,7 @@ def get_snowflake_destination(config: Dict = None) -> Any:
         "role": os.getenv("SNOWFLAKE_ROLE", config.get("role"))
     }
 
-    schema_name = config.get("schema_name", "BRONZE")
+    schema_name = config.get("schema_name", "RAW")  # Raw layer - uppercase for Snowflake
 
     return dlt.destinations.snowflake(
         credentials=credentials,
@@ -193,7 +193,7 @@ def create_multi_destination(destinations: list) -> Any:
     Example:
         # Charger vers PostgreSQL ET DuckDB
         dests = create_multi_destination([
-            ("postgres", {"dataset_name": "bronze"}),
+            ("postgres", {"dataset_name": "raw"}),
             ("duckdb", {"path": "backup.duckdb"})
         ])
     """

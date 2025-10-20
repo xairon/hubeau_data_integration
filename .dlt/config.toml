@@ -17,7 +17,7 @@ page_size = 5000  # taille de page par défaut
 [destinations.postgres]
 # Configuration PostgreSQL
 database = "hubeau"
-schema = "bronze"
+schema = "raw"  # Raw data layer - Modern Data Stack convention
 host = "localhost"
 port = 5432
 # user et password doivent être dans secrets.toml
@@ -25,7 +25,7 @@ port = 5432
 [destinations.duckdb]
 # Configuration DuckDB
 database = "hubeau.duckdb"
-schema = "bronze"
+schema = "raw"  # Raw data layer - Modern Data Stack convention
 
 [runtime]
 # Paramètres d'exécution
