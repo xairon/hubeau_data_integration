@@ -149,12 +149,4 @@ transformers:
     - date_obs
 destinations:
   postgres:
-    dataset_name: bronze
-    schema_name: hydrobio
-    create_indexes: true
-  filesystem:
-    bucket_url: s3://bronze
-    file_format: parquet
-    layout: '{table_name}/year={YYYY}/data.parquet'
-  duckdb:
-    database: data/hydrobio.duckdb
+    dataset_name: hubeau

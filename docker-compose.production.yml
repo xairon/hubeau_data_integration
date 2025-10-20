@@ -39,22 +39,14 @@ services:
       POSTGIS_DB: ${POSTGIS_DB:-postgres}
       POSTGIS_USER: ${POSTGIS_USER:-postgres}
       POSTGIS_PASSWORD: ${PG_PASSWORD}
-      # MinIO/S3 credentials (used by app code)
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
-      MINIO_BRONZE_BUCKET: ${MINIO_BRONZE_BUCKET:-bronze}
-      # AWS compatibility (used by boto3/s3fs)
-      AWS_ACCESS_KEY_ID: ${MINIO_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      AWS_ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
-      AWS_DEFAULT_REGION: ${MINIO_REGION:-us-east-1}
-      # DLT filesystem destination credentials (DLT-specific env vars)
-      DESTINATION__FILESYSTEM__CREDENTIALS__AWS_ACCESS_KEY_ID: ${MINIO_USER}
-      DESTINATION__FILESYSTEM__CREDENTIALS__AWS_SECRET_ACCESS_KEY: ${MINIO_PASS}
-      DESTINATION__FILESYSTEM__CREDENTIALS__ENDPOINT_URL: ${MINIO_ENDPOINT:-http://minio:9000}
-      DESTINATION__FILESYSTEM__CREDENTIALS__REGION_NAME: ${MINIO_REGION:-us-east-1}
+      # Hub'Eau schema
+      HUBEAU_SCHEMA: ${HUBEAU_SCHEMA:-hubeau}
+      # DLT PostgreSQL destination credentials
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: ${PG_DB:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: ${PG_USER:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD}
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT:-5432}
     volumes:
       - ./src:/app/src
       - ./configs:/app/configs:ro
@@ -95,11 +87,6 @@ services:
       # Application database credentials (needed for resources.py module import)
       PG_HOST: ${PG_HOST:-postgres}
       PG_PASSWORD: ${PG_PASSWORD}
-      # MinIO credentials (needed for resources.py module import)
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
@@ -129,11 +116,6 @@ services:
       # Application database credentials (needed for resources.py module import)
       PG_HOST: ${PG_HOST:-postgres}
       PG_PASSWORD: ${PG_PASSWORD}
-      # MinIO credentials (needed for resources.py module import)
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
@@ -142,42 +124,17 @@ services:
     mem_limit: 2g
     cpus: 0.7
 
-  minio:
-    image: minio/minio:latest
-    container_name: brgm-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      # VOLUME PERSISTANT: Les données MinIO survivent aux redémarrages
-      - /srv/brgm-data/minio:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+  adminer:
+    image: adminer:latest
+    container_name: brgm-adminer
     restart: unless-stopped
-    mem_limit: 512m
-    cpus: 0.2
-
-  minio_init:
-    image: hubeau-dagster:latest
-    container_name: brgm-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
+    ports:
+      - "8081:8080"
     environment:
-      MINIO_USER: ${MINIO_USER}
-      MINIO_PASS: ${MINIO_PASS}
-      MINIO_ENDPOINT: http://minio:9000
-    volumes:
-      - ./scripts:/app/scripts:ro
-    command: ["python", "/app/scripts/init_minio.py"]
-    restart: "no"
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
+    mem_limit: 256m
+    cpus: 0.1
 
 # Pas de volumes nommés : tout est dans /srv/brgm-data/ pour faciliter les backups
 # NOTE: Portainer est installé séparément sur le serveur, voir docs/PORTAINER_SETUP.md

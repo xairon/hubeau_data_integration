@@ -3,17 +3,30 @@ Sensors - Monitoring et alertes
 Surveillance des pipelines et détection d'anomalies
 """
 
-# NOTE: hubeau_freshness_sensor disabled - sync_realtime_data job was removed
-# from .data_freshness import hubeau_freshness_sensor
 from .error_detection import error_detection_sensor
+from .backfill_sensor import backfill_missing_partitions_sensor
+from .failure_sensor import (
+    pipeline_failure_alert_sensor,
+    long_running_pipeline_sensor,
+    repeated_failure_sensor,
+)
 
 all_sensors = [
-    # hubeau_freshness_sensor,  # Disabled - realtime data migrated to yearly partitions
+    # Sensors actifs par défaut
     error_detection_sensor,
+    backfill_missing_partitions_sensor,
+    pipeline_failure_alert_sensor,
+
+    # Sensors optionnels (STOPPED par défaut)
+    long_running_pipeline_sensor,
+    repeated_failure_sensor,
 ]
 
 __all__ = [
     "all_sensors",
-    # "hubeau_freshness_sensor",  # Disabled
     "error_detection_sensor",
+    "backfill_missing_partitions_sensor",
+    "pipeline_failure_alert_sensor",
+    "long_running_pipeline_sensor",
+    "repeated_failure_sensor",
 ]

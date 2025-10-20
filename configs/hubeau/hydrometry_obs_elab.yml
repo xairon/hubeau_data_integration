@@ -40,12 +40,4 @@ transformers:
     - date_obs
 destinations:
   postgres:
-    dataset_name: bronze
-    schema_name: hydrometry
-    create_indexes: true
-  filesystem:
-    bucket_url: s3://bronze
-    file_format: parquet
-    layout: '{table_name}/year={YYYY}/data.parquet'
-  duckdb:
-    database: data/hydrometry.duckdb
+    dataset_name: hubeau

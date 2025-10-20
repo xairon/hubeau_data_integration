@@ -1,12 +1,22 @@
 """
 Assets de monitoring pour Hub'Eau pipeline
 """
-from .minio_monitoring import (
-    minio_data_quality_report,
-    minio_data_quality_checks
+
+from .data_quality import (
+    piezometry_data_quality,
+    quality_rivers_data_quality,
+    global_data_quality_report,
 )
 
+all_monitoring_assets = [
+    piezometry_data_quality,
+    quality_rivers_data_quality,
+    global_data_quality_report,
+]
+
 __all__ = [
-    "minio_data_quality_report",
-    "minio_data_quality_checks"
+    "piezometry_data_quality",
+    "quality_rivers_data_quality",
+    "global_data_quality_report",
+    "all_monitoring_assets",
 ]

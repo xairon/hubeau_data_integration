@@ -12,11 +12,10 @@
 
 Ce projet est **la fondation data** de l'axe EAU du [programme JUNON](https://www.junon-cvl.fr/fr) (12,3M€, BRGM) visant à créer des **jumeaux numériques** pour la gestion des ressources en eau.
 
-**En bref** : On intègre automatiquement **8 APIs Hub'Eau** (24 endpoints, 778 attributs) dans un data lake unifié pour servir de base au jumeau numérique hydrologique.
+**En bref** : On intègre automatiquement **8 APIs Hub'Eau** (24 endpoints, 778 attributs) dans une base de données PostgreSQL unifiée pour servir de base au jumeau numérique hydrologique.
 
 ```
-Hub'Eau (8 APIs) → DLT Pipeline → MinIO (Parquet) → [Futur: ML/IA/Jumeau Numérique]
-                                                      Phase Bronze ✅
+Hub'Eau (8 APIs) → DLT Pipeline → PostgreSQL (schema: hubeau) → [Futur: ML/IA/Jumeau Numérique]
 ```
 
 ### Données intégrées
@@ -62,7 +61,8 @@ docker-compose up -d
 
 # 3. Accéder
 # Dagster UI: http://localhost:8080
-# MinIO Console: http://localhost:9001
+# Adminer: http://localhost:8081
+# PgAdmin: http://localhost:5050
 ```
 
 **Guide détaillé** : [docs/QUICK_START_LOCAL.md](docs/QUICK_START_LOCAL.md)
@@ -98,7 +98,7 @@ hubeau_data_integration/
 
 | Document | Description |
 |----------|-------------|
-| **[Architecture](docs/ARCHITECTURE.md)** | Stack technique actuelle (Dagster + DLT + MinIO) |
+| **[Architecture](docs/ARCHITECTURE.md)** | Stack technique actuelle (Dagster + DLT + PostgreSQL) |
 | **[Environment Configuration](docs/ENVIRONMENT_CONFIGURATION.md)** | Configuration multi-environnements (dev/staging/prod) |
 | **[Contributing](CONTRIBUTING.md)** | Guide de contribution |
 
@@ -108,7 +108,7 @@ hubeau_data_integration/
 |----------|-------------|
 | **[APIs Hub'Eau - Référence Complète](docs/APIS_HUBEAU_REFERENCE_COMPLETE.md)** | Schémas des 8 APIs (778 attributs) |
 | **[Autres Référentiels](docs/AUTRES_REFERENTIELS.md)** | SANDRE, BDLISA, COG, NQE, TAXREF |
-| **[Schéma BDD](docs/SCHEMA_BDD_HUBEAU.md)** | Design de la base de données Silver/Gold |
+| **[Schéma BDD](docs/SCHEMA_BDD_HUBEAU.md)** | Design de la base de données PostgreSQL |
 
 ### 🔮 Vision & Roadmap
 
@@ -121,17 +121,31 @@ hubeau_data_integration/
 
 ## 🏗️ Architecture
 
-### Stack Actuel ✅ (Phase Bronze - Production)
+### Data Flow
 
-| Composant | Technologie | Rôle |
-|-----------|-------------|------|
-| **Orchestration** | Dagster 1.11.14 | Workflow, scheduling, monitoring |
-| **Data Loading** | DLT 0.4.12 | Extraction Hub'Eau → Parquet |
-| **Data Lake** | MinIO (S3) | Stockage Parquet (Bronze) |
-| **Databases** | PostgreSQL + PostGIS | Métadonnées & données géospatiales |
-| **Monitoring** | Portainer CE | Gestion containers Docker |
+```
+Hub'Eau APIs → DLT → PostgreSQL (schema: hubeau)
+```
 
-### Roadmap 🚧 (Phases Silver/Gold)
+### Services
+
+- **Dagster**: Orchestration (http://localhost:8080)
+- **PostgreSQL**: Hub'Eau data + metadata
+- **Adminer**: Lightweight DB admin (http://localhost:8081)
+- **PgAdmin**: Full-featured DB admin (http://localhost:5050)
+- **PostGIS**: Geospatial transformations
+- **Prometheus + Grafana**: Monitoring
+
+### Database Structure
+
+All Hub'Eau data is stored in PostgreSQL under the `hubeau` schema:
+
+- **DLT manages**: Schema creation, migrations, and incremental loading
+- **write_disposition=merge**: Upsert based on primary keys (default for most tables)
+- **write_disposition=replace**: Full table replacement (for reference data)
+- **State tracking**: `_dlt_pipeline_state` table tracks pipeline state and incremental loads
+
+### Roadmap 🚧
 
 | Composant | Technologie | Status | Rôle |
 |-----------|-------------|--------|------|
@@ -158,19 +172,24 @@ dagster job execute -j hubeau_hydrometry_job  # Job hydrométrie complet
 dagster asset materialize -a temperature_chroniques --partition 2024
 ```
 
-### Accès aux Données (MinIO)
+### Accès aux Données (PostgreSQL)
 
 ```python
-import boto3
+import psycopg2
 
-s3 = boto3.client('s3',
-    endpoint_url='http://localhost:9000',
-    aws_access_key_id='admin',
-    aws_secret_access_key='your_password'
+# Connection
+conn = psycopg2.connect(
+    host='localhost',
+    port=5432,
+    database='hubeau_db',
+    user='hubeau_user',
+    password='your_password'
 )
 
-# Lister les fichiers
-s3.list_objects_v2(Bucket='bronze', Prefix='hydrometry_api/')
+# Query Hub'Eau data
+cursor = conn.cursor()
+cursor.execute("SELECT * FROM hubeau.hydrometry_stations LIMIT 10")
+stations = cursor.fetchall()
 ```
 
 ---

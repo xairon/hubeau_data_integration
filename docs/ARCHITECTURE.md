@@ -5,7 +5,7 @@ Documentation de l'architecture du pipeline Hub'Eau Data Integration.
 ## 📋 Table des Matières
 
 - [Vue d'ensemble](#vue-densemble)
-- [Architecture Actuelle (Phase Bronze)](#architecture-actuelle-phase-bronze)
+- [Architecture Actuelle](#architecture-actuelle)
 - [Stack Technique](#stack-technique)
 - [Architecture des Données](#architecture-des-données)
 - [Workflow d'Exécution](#workflow-dexécution)
@@ -16,37 +16,51 @@ Documentation de l'architecture du pipeline Hub'Eau Data Integration.
 
 ## Vue d'ensemble
 
-Le projet suit une architecture **multi-couches** (Bronze → Silver → Gold) inspirée du **Medallion Architecture** de Databricks.
+Le projet utilise une architecture simple et directe : **Hub'Eau APIs → DLT → PostgreSQL**.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         COUCHE GOLD                            │
-│             Analytics, ML/IA, Jumeau Numérique                 │
-│                    (Phase 3 - Roadmap)                         │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│                        COUCHE SILVER                           │
-│         Données nettoyées, harmonisées, enrichies              │
-│                    (Phase 2 - En cours)                        │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│                        COUCHE BRONZE ✅                        │
-│              Données brutes intégrées depuis APIs              │
-│                   (Phase 1 - Production)                       │
+│                     SOURCES DE DONNÉES                          │
 │                                                                 │
-│  Hub'Eau (8 APIs) → DLT Pipeline → MinIO (Parquet)            │
+│  8 APIs Hub'Eau (24 endpoints, 778 attributs)                 │
+│  - Piézométrie                                                 │
+│  - Hydrométrie                                                 │
+│  - Qualité des eaux (rivières + nappes)                       │
+│  - Température                                                 │
+│  - Écoulement (ONDE)                                           │
+│  - Hydrobiologie                                               │
+│  - Prélèvements                                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      DLT PIPELINE                               │
+│  - Extraction (httpx + tenacity)                               │
+│  - Pagination automatique                                       │
+│  - Gestion d'erreurs et retries                                │
+│  - Chargement incrémental (merge sur primary keys)             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    POSTGRESQL DATABASE                          │
+│                                                                 │
+│  Schema: hubeau                                                │
+│  - Tables par endpoint (ex: hydrometry_stations)               │
+│  - État DLT (_dlt_pipeline_state)                             │
+│  - Gestion schéma automatique (DLT)                           │
+│                                                                 │
+│  Administration:                                               │
+│  - Adminer (http://localhost:8081) - Requêtes rapides         │
+│  - PgAdmin (http://localhost:5050) - Admin avancée            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**État actuel** : Phase Bronze complète et en production
+**État actuel** : Pipeline d'ingestion en production. Les optimisations (hypertables, index, agrégations) seront ajoutées itérativement.
 
 ---
 
-## Architecture Actuelle (Phase Bronze)
+## Architecture Actuelle
 
 ### Schéma d'Architecture
 
@@ -71,7 +85,7 @@ Le projet suit une architecture **multi-couches** (Bronze → Silver → Gold) i
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │                    DLT Worker                            │  │
 │  │                                                          │  │
-│  │  Hub'Eau API ──► DLT Pipeline ──► Parquet ──► MinIO    │  │
+│  │  Hub'Eau API ──► DLT Pipeline ──► PostgreSQL           │  │
 │  │                                                          │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
@@ -81,10 +95,10 @@ Le projet suit une architecture **multi-couches** (Bronze → Silver → Gold) i
 ┌─────────────────────────────────────────────────────────────────┐
 │                        STORAGE LAYER                            │
 │                                                                 │
-│  ┌────────────┐   ┌────────────┐   ┌────────────┐             │
-│  │   MinIO    │   │ PostgreSQL │   │  PostGIS   │             │
-│  │  (Bronze)  │   │ (Metadata) │   │   (Geo)    │             │
-│  └────────────┘   └────────────┘   └────────────┘             │
+│  ┌────────────────┐   ┌────────────────┐                       │
+│  │  PostgreSQL    │   │     PostGIS    │                       │
+│  │ (schema:hubeau)│   │   (extension)  │                       │
+│  └────────────────┘   └────────────────┘                       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -99,7 +113,7 @@ Le projet suit une architecture **multi-couches** (Bronze → Silver → Gold) i
 | **Worker** | Exécution DLT | `hubeau-worker:latest` |
 
 **Avantages** :
-- ✅ Worker lourd (GDAL, GEOS) séparé de l'orchestrateur léger
+- ✅ Worker lourd séparé de l'orchestrateur léger
 - ✅ Scaling horizontal possible (plusieurs workers)
 - ✅ Orchestrateur redémarre rapidement
 - ✅ Workers peuvent tourner sur machines différentes
@@ -115,20 +129,20 @@ Le projet suit une architecture **multi-couches** (Bronze → Silver → Gold) i
 | **Python** | 3.11+ | Langage principal |
 | **Dagster** | 1.11.14 | Orchestration, UI, scheduling |
 | **DLT** | 0.4.12 | Data loading, transformations |
-| **MinIO** | latest | Object storage S3-compatible (Bronze) |
 | **PostgreSQL** | 16 | Base de données relationnelle |
 | **PostGIS** | 16-3.4 | Extension géospatiale PostgreSQL |
+| **Adminer** | latest | DB admin lightweight |
+| **PgAdmin** | latest | DB admin full-featured |
 | **Docker** | 24+ | Containerisation |
 | **Portainer CE** | latest | Gestion containers |
 
 ### Technologies en Roadmap 🚧
 
-| Composant | Usage prévu | Phase |
-|-----------|-------------|-------|
-| **TimescaleDB** | Time-series (> 100M lignes) | Silver |
-| **Neo4j** | Graphe SOSA/SANDRE | Gold |
-| **Prometheus** | Métriques détaillées | Silver |
-| **Grafana** | Dashboards monitoring | Silver |
+| Composant | Usage prévu |
+|-----------|-------------|
+| **TimescaleDB** | Extension PostgreSQL pour time-series optimisées |
+| **Prometheus** | Métriques détaillées |
+| **Grafana** | Dashboards monitoring |
 
 ### Dépendances Python (Principales)
 
@@ -145,9 +159,9 @@ dlt[postgres,filesystem,duckdb]==0.4.12
 # Database
 psycopg[binary]==3.1.13
 
-# S3/MinIO
-boto3==1.34.0
-s3fs==2024.3.1
+# HTTP Client
+httpx==0.27.0
+tenacity==8.2.3
 
 # Data Processing
 pandas==2.2.0
@@ -164,51 +178,58 @@ shapely==2.0.2
 
 ## Architecture des Données
 
-### Couche Bronze (Actuelle) ✅
+### PostgreSQL Schema: `hubeau`
 
-**Format** : Parquet (columnar, compressé)
-**Stockage** : MinIO (S3-compatible)
+**Format** : Tables PostgreSQL gérées par DLT
 **Structure** : 1 table = 1 endpoint API
 
 ```
-s3://bronze/
-├── hydrometry_api/
-│   ├── hydrometry_stations_reference/
-│   │   └── year=2024/
-│   │       └── *.parquet
-│   ├── hydrometry_observations/
-│   │   └── year=2024/
-│   │       └── *.parquet
-│   └── ...
-├── piezometry_api/
-├── quality_rivers_api/
-└── ...
+PostgreSQL Database
+└── Schema: hubeau
+    ├── _dlt_loads              # DLT metadata (historique chargements)
+    ├── _dlt_pipeline_state     # DLT state (incremental loading)
+    ├── _dlt_version            # DLT schema versions
+    │
+    ├── hydrometry_stations     # Stations hydrométrie
+    ├── hydrometry_obs_elab     # Observations élaborées
+    ├── piezometry_stations     # Stations piézométrie
+    ├── piezometry_chroniques   # Chroniques piézométriques
+    ├── quality_rivers_stations # Stations qualité rivières
+    ├── quality_rivers_analyses # Analyses qualité rivières
+    ├── temperature_stations    # Stations température
+    ├── temperature_chroniques  # Chroniques température
+    ├── ecoulement_stations     # Stations écoulement
+    ├── ecoulement_observations # Observations écoulement
+    ├── hydrobio_stations       # Stations hydrobiologie
+    ├── hydrobio_indices        # Indices biologiques
+    └── ...                     # 24 tables au total
 ```
 
 **Partitionnement** :
-- **Annuel** : `year={year}/` pour toutes les données temporelles
-- **Pas de partitioning** : Pour données de référence (stations)
+- **Assets Dagster** : Partitions annuelles pour données temporelles
+- **Tables PostgreSQL** : Pas de partitionnement natif (à ajouter si besoin)
 
-**Schema Management** : DLT gère automatiquement l'évolution du schéma
+**Schema Management** :
+- DLT gère automatiquement la création et l'évolution du schéma
+- `write_disposition=merge` : Upsert basé sur primary keys
+- `write_disposition=replace` : Remplacement complet (données de référence)
 
-### Couche Silver (En développement) 🚧
+**Accès aux données** :
+```python
+import psycopg2
 
-**Cibles** :
-- **PostgreSQL** : Données relationnelles harmonisées
-- **PostGIS** : Données géospatiales (stations, bassins)
-- **TimescaleDB** : Chroniques optimisées (> 100M lignes)
+conn = psycopg2.connect(
+    host='localhost',
+    port=5432,
+    database='postgres',
+    user='postgres',
+    password='your_password'
+)
 
-**Transformations** :
-1. Nettoyage (valeurs nulles, outliers)
-2. Harmonisation (unités, formats dates)
-3. Enrichissement (référentiels SANDRE, BDLISA)
-4. Déduplication
-
-### Couche Gold (Roadmap) 📋
-
-**Cibles** :
-- **Neo4j** : Graphe de connaissances (ontologie SOSA)
-- **Vues analytiques** : Agrégations pour BI/ML
+cursor = conn.cursor()
+cursor.execute("SELECT * FROM hubeau.hydrometry_stations LIMIT 10")
+stations = cursor.fetchall()
+```
 
 ---
 
@@ -243,29 +264,31 @@ s3://bronze/
          │
          ▼
 3. DLT Source génère requêtes
-   - Applique slicing strategy
-   - Gère pagination automatique
+   - Pagination automatique
+   - Filtrage temporel (partitions annuelles)
+   - Filtrage par stations actives
          │
          ▼
 4. Extract (HTTP → JSON)
-   - Retry automatique
-   - Rate limiting
-   - Gestion erreurs
+   - httpx + tenacity pour retry automatique
+   - Rate limiting respectueux
+   - Gestion erreurs API
          │
          ▼
 5. Transform (optionnel)
-   - Normalisation
-   - Type casting
+   - Normalisation types
+   - Nettoyage valeurs nulles
          │
          ▼
-6. Load (Parquet → MinIO)
-   - Compression SNAPPY
-   - Partitioning annuel
+6. Load (PostgreSQL)
+   - Insertion/upsert via DLT
+   - Gestion schéma automatique
+   - Merge sur primary keys
          │
          ▼
-7. État DLT (metadata → MinIO)
-   - _dlt_loads
-   - _dlt_version
+7. État DLT (metadata → PostgreSQL)
+   - _dlt_loads (historique)
+   - _dlt_pipeline_state (état incrémental)
 ```
 
 ### 3. Monitoring
@@ -274,7 +297,10 @@ s3://bronze/
 Dagster UI ──► Statut runs, logs
              │
              ▼
-MinIO Console ──► Données brutes
+Adminer ──► Requêtes SQL rapides
+             │
+             ▼
+PgAdmin ──► Administration avancée
              │
              ▼
 Portainer ──► Santé containers
@@ -328,15 +354,13 @@ Portainer ──► Santé containers
 DAGSTER_PG_HOST=dagster_postgres
 DAGSTER_PG_PASSWORD=***
 
-# Data Storage
+# Hub'Eau Data Storage
 PG_HOST=postgres
+PG_PORT=5432
+PG_DB=postgres
+PG_USER=postgres
 PG_PASSWORD=***
-POSTGIS_HOST=postgis
-
-# Object Storage
-MINIO_ENDPOINT=http://minio:9000
-MINIO_USER=admin
-MINIO_PASS=***
+HUBEAU_SCHEMA=hubeau
 ```
 
 **Voir** : [ENVIRONMENT_CONFIGURATION.md](ENVIRONMENT_CONFIGURATION.md)
@@ -345,27 +369,28 @@ MINIO_PASS=***
 
 ## Roadmap
 
-### Phase 2 : Silver Layer 🚧
+### Optimisations PostgreSQL 🚧
 
-**Objectif** : Données propres, harmonisées, enrichies
+**Objectif** : Optimiser la base de données itérativement selon les besoins
+
+| Tâche | Priorité | Description |
+|-------|----------|-------------|
+| **Hypertables TimescaleDB** | Moyenne | Conversion tables chroniques en hypertables (> 10M lignes) |
+| **Index spatiaux** | Haute | Index PostGIS sur colonnes géométriques (stations) |
+| **Index temporels** | Haute | Index sur colonnes date pour requêtes temporelles |
+| **Vues matérialisées** | Basse | Agrégations pré-calculées (moyennes mensuelles, etc.) |
+| **Partitionnement natif** | Basse | Partitionnement PostgreSQL par année/région |
+
+### Analytics & Visualisation 📋
+
+**Objectif** : Exploiter les données Hub'Eau
 
 | Tâche | Status | Description |
 |-------|--------|-------------|
-| TimescaleDB | Planifié | Optimisation chroniques (> 100M lignes) |
-| Enrichissement SANDRE | En cours | Référentiels codes paramètres |
-| Géocodage BDLISA | Planifié | Rattachement bassins versants |
-| Dédoublonnage | Planifié | Consolidation stations multi-sources |
-
-### Phase 3 : Gold Layer & Ontologie 📋
-
-**Objectif** : Jumeau numérique avec ontologie SOSA
-
-| Tâche | Status | Description |
-|-------|--------|-------------|
-| Neo4j | Planifié | Graphe de connaissances |
-| Ontologie SOSA | Planifié | Sensor, Observation, Sample, Actuator |
-| Vues analytiques | Planifié | Agrégations pour ML/IA |
-| API GraphQL | Vision | Requêtes sémantiques |
+| **Grafana** | Planifié | Dashboards de monitoring et visualisations |
+| **Metabase** | Vision | BI self-service pour explorations |
+| **API REST** | Vision | Exposer données Hub'Eau via API |
+| **Neo4j (optionnel)** | Vision | Graphe de connaissances (ontologie SOSA) |
 
 **Voir** : [PROJET_JUNON_VISION.md](PROJET_JUNON_VISION.md)
 
@@ -376,26 +401,26 @@ MINIO_PASS=***
 ### Capacité Actuelle
 
 - **APIs Hub'Eau** : 8 APIs, 24 endpoints
-- **Volume traité** : ~50 GB de données Parquet
-- **Fréquence** : Quotidienne (stations) / Hebdomadaire (chroniques)
-- **Durée run** : 2-5 minutes par endpoint
+- **Volume estimé** : ~10-50 GB de données PostgreSQL
+- **Fréquence** : Selon schedules (quotidien/hebdomadaire/mensuel)
+- **Durée run** : 2-10 minutes par asset selon volume
 
 ### Optimisations Implémentées
 
-1. **Slicing intelligent** : Découpage temporel/géographique automatique
-2. **Pagination** : Gestion automatique par DLT
-3. **Compression** : Parquet SNAPPY (~5x vs CSV)
-4. **Partitioning** : Partitions annuelles pour requêtes rapides
-5. **Retry automatique** : Résilience face aux timeouts API
-6. **Incremental loading** : DLT merge mode sur primary keys
+1. **Pagination automatique** : DLT gère la pagination Hub'Eau
+2. **Chargement incrémental** : Merge sur primary keys (pas de doublons)
+3. **Filtrage intelligent** : Extraction stations actives depuis PostgreSQL
+4. **Retry automatique** : Résilience face aux erreurs API (tenacity)
+5. **Partitions Dagster** : Parallélisation des assets par année
+6. **HTTP async** : httpx pour requêtes non-bloquantes
 
 ### Limites Connues
 
 | Limite | Valeur | Workaround |
 |--------|--------|------------|
-| Max records/requête | 20 000 | Slicing `station_month_chunked` |
-| Timeout API | 30s | Retry avec backoff exponentiel |
-| Taille container worker | 2 GB RAM | Ajuster dans docker-compose |
+| Max records/page Hub'Eau | Variable | DLT gère automatiquement |
+| Timeout API | 30-60s | Retry avec backoff exponentiel |
+| Mémoire container worker | 2 GB RAM | Ajuster dans docker-compose |
 
 ---
 
@@ -411,14 +436,15 @@ MINIO_PASS=***
 
 - **Orchestrator** : Expose port 8080 (UI)
 - **Worker** : Expose port 4000 (gRPC interne uniquement)
-- **MinIO** : Ports 9000 (API) + 9001 (Console)
-- **Databases** : Ports internes au réseau Docker
+- **PostgreSQL** : Port 5432 (interne réseau Docker)
+- **Adminer** : Port 8081 (HTTP)
+- **PgAdmin** : Port 5050 (HTTP)
 
 ### Backups
 
-- **MinIO data** : `/srv/brgm-data/minio` (persistant)
-- **PostgreSQL** : `/srv/brgm-data/dagster_pg` (persistant)
-- **Stratégie** : Snapshots serveur + réplication MinIO (à venir)
+- **PostgreSQL data** : `/srv/brgm-data/postgres` (persistant)
+- **Dagster metadata** : `/srv/brgm-data/dagster_pg` (persistant)
+- **Stratégie** : Snapshots serveur + backups PostgreSQL (pg_dump)
 
 ---
 
@@ -444,18 +470,21 @@ http://localhost:8080 → Runs → [Run ID] → Logs
 
 # Causes communes :
 # - API Hub'Eau indisponible (503, 504)
-# - Timeout (slicing insuffisant)
-# - Credentials MinIO incorrects
+# - Timeout (retry automatique épuisé)
+# - Credentials PostgreSQL incorrects
 ```
 
-### MinIO 403 Forbidden
+### PostgreSQL connection refused
 
 ```bash
 # Vérifier credentials
-docker exec brgm-dlt-worker env | grep MINIO
+docker exec brgm-dlt-worker env | grep PG_
 
-# Vérifier bucket existe
-docker exec brgm-minio mc ls minio/bronze
+# Vérifier que PostgreSQL est up
+docker ps | grep postgres
+
+# Tester connexion
+docker exec postgres psql -U postgres -c "SELECT 1"
 ```
 
 **Guide complet** : [GITLAB_CI_SETUP.md](../GITLAB_CI_SETUP.md)
@@ -468,3 +497,5 @@ docker exec brgm-minio mc ls minio/bronze
 - **Dagster Docs** : https://docs.dagster.io
 - **DLT Docs** : https://dlthub.com/docs
 - **Hub'Eau** : https://hubeau.eaufrance.fr
+- **PostgreSQL Docs** : https://www.postgresql.org/docs/
+- **PostGIS Docs** : https://postgis.net/documentation/

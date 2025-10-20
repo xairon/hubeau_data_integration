@@ -68,7 +68,5 @@ transformers:
     - date_debut
     - date_fin
 destinations:
-  filesystem:
-    bucket_url: s3://bronze
-    file_format: parquet
-    layout: '{table_name}/year={YYYY}/data.parquet'
+  postgres:
+    dataset_name: hubeau

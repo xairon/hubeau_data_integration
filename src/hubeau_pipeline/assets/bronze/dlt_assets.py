@@ -5,11 +5,7 @@ import io
 import logging
 
 import dlt
-from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition, MaterializeResult
-from dlt.common.typing import TSecretValue
-import pyarrow.parquet as pq
-import pyarrow.fs as pafs
-import pandas as pd
+from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
 
 from src.dlt_pipeline.hubeau_source import hubeau_rest_source, load_hubeau_config
 
@@ -29,98 +25,89 @@ except ImportError:
         """Fallback: retourne une liste vide si module non disponible"""
         return []
 
-# Import des fonctions de lecture MinIO (toujours disponibles maintenant)
-try:
-    from src.hubeau_pipeline.utils.station_minio import (
-        extract_station_codes_from_minio as _extract_station_codes_from_minio,
-        filter_active_stations_for_period as _filter_active_stations_for_period
-    )
-except ImportError as e:
-    # Fallback si le module station_minio n'est pas accessible
-    import sys
-    sys.stderr.write(f"Warning: station_minio module not found ({e}), using fallback\n")
+# Import des fonctions de lecture PostgreSQL
+from src.hubeau_pipeline.utils.station_postgres import (
+    extract_station_codes_from_postgres,
+    filter_active_stations_for_period
+)
 
-    def _extract_station_codes_from_minio(station_type: str) -> List[str]:
-        """Fallback: retourne une liste vide si module non disponible"""
-        return []
-
-    def _filter_active_stations_for_period(stations: List[str], partition_date: str, station_type: str) -> List[str]:
-        """Fallback: retourne toutes les stations si module non disponible"""
-        return stations
-
-# ✅ DEBUG: Vérifier quelle fonction est importée
-import sys
-sys.stderr.write(f"🔍 DEBUG IMPORT: _extract_station_codes_from_minio = {_extract_station_codes_from_minio}\n")
-sys.stderr.write(f"🔍 DEBUG IMPORT: _extract_station_codes_from_minio module = {_extract_station_codes_from_minio.__module__}\n")
-
-# Partitions pour les données historiques (annuelles depuis 2020)
+# Partitions pour les données historiques (annuelles depuis 2020 + partition "all")
+# La partition "all" permet de récupérer TOUTES les données sans filtre temporel
 YEARLY_PARTITIONS = StaticPartitionsDefinition(
-    [str(year) for year in range(2020, 2026)]  # 2020-2025
+    ["all"] + [str(year) for year in range(2020, 2026)]  # "all", 2020-2025
 )
 
 # ====================================
 # UTILITAIRES POUR RÉDUIRE LA REDONDANCE
 # ====================================
 
-def _get_partition_date_yearly(context: AssetExecutionContext) -> str:
-    """Convertit une partition annuelle (ex: '2024') en date (ex: '2024-01-01')."""
+def _get_partition_date_yearly(context: AssetExecutionContext) -> Optional[str]:
+    """
+    Convertit une partition annuelle (ex: '2024') en date (ex: '2024-01-01').
+    Si partition = 'all', retourne None (pas de filtre temporel).
+    """
     partition_key = context.partition_key
+    if partition_key == "all":
+        return None  # Pas de filtre temporel
     return f"{partition_key}-01-01"
 
 def _get_partition_date_daily(context: AssetExecutionContext) -> str:
     """Retourne directement la partition quotidienne (ex: '2024-01-01')."""
     return context.partition_key
 
-def _setup_observation_asset(context: AssetExecutionContext, station_type: str, partition_date: str) -> tuple[Dict[str, List[str]], str]:
+def _setup_observation_asset(context: AssetExecutionContext, station_type: str, partition_date: Optional[str]) -> tuple[Dict[str, List[str]], str]:
     """
     Configuration commune pour les assets d'observations.
+
+    Args:
+        context: Dagster execution context
+        station_type: Type de station (piezometry, hydrometry, etc.)
+        partition_date: Date de partition (YYYY-01-01) ou None si partition="all"
 
     Returns:
         tuple: (stations_data: Dict[station_code, List[months]], log_message)
     """
-    context.log.info(f"🔍 Récupération des stations {station_type} pour la partition {partition_date}")
+    partition_key = context.partition_key
 
-    # ✅ DEBUG: Vérifier quelle fonction est utilisée
-    context.log.warning(f"🔍 DEBUG: _extract_station_codes_from_minio function = {_extract_station_codes_from_minio}")
+    if partition_key == "all":
+        context.log.info(f"🌍 Récupération de TOUTES les stations {station_type} (partition 'all' - pas de filtre temporel)")
+    else:
+        context.log.info(f"🔍 Récupération des stations {station_type} pour la partition {partition_date}")
 
-    # ✅ STRATÉGIE OPTIMISÉE AVEC FALLBACK AUTOMATIQUE:
-    # 1. Récupérer TOUTES les stations depuis MinIO (référentiel complet)
+    # Récupérer TOUTES les stations depuis PostgreSQL (référentiel complet)
     try:
-        all_stations = _extract_station_codes_from_minio(station_type)
-        context.log.info(f"📂 {len(all_stations)} stations total dans référentiel MinIO")
+        all_stations = extract_station_codes_from_postgres(station_type)
+        context.log.info(f"📂 {len(all_stations)} stations total dans référentiel PostgreSQL")
     except Exception as e:
-        context.log.error(f"❌ Erreur lors de l'appel à _extract_station_codes_from_minio: {e}")
+        context.log.error(f"❌ Erreur lors de l'accès à PostgreSQL: {e}")
         import traceback
         context.log.error(f"   Traceback: {traceback.format_exc()}")
-        all_stations = []
+        raise RuntimeError(f"PostgreSQL table for {station_type} stations does not exist or is not accessible. "
+                         f"Please ensure the station reference data has been loaded into PostgreSQL first.") from e
 
     stations_data: Dict[str, List[str]] = {}
 
     if all_stations:
-        # ✅ Filtrer les stations basé sur les métadonnées MinIO (dates de mesure)
-        # Au lieu d'appeler l'API, on utilise les champs date_debut/fin_mesure du référentiel
-        context.log.info(f"📂 {len(all_stations)} stations trouvées dans MinIO")
+        # Filtrer les stations basé sur les métadonnées PostgreSQL (dates de mesure)
+        context.log.info(f"📂 {len(all_stations)} stations trouvées dans PostgreSQL")
 
-        # Filtrer pour ne garder que les stations actives dans la partition
-        filtered_stations = _filter_active_stations_for_period(all_stations, partition_date, station_type)
-        context.log.info(f"✅ {len(filtered_stations)} stations actives pour partition {partition_date}")
+        if partition_key == "all":
+            # Partition "all" : TOUTES les stations sans filtrage temporel
+            filtered_stations = all_stations
+            context.log.info(f"✅ {len(filtered_stations)} stations (TOUTES, pas de filtre temporel)")
 
-        # 2. Convertir en dict avec tous les mois de l'année
-        from datetime import datetime
-        year = datetime.strptime(partition_date, "%Y-%m-%d").year
-        all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
-        stations_data = {station: all_months for station in filtered_stations}
+            # Pour partition "all", pas de mois spécifiques - on laisse DLT gérer
+            stations_data = {station: [] for station in filtered_stations}
+        else:
+            # Partition annuelle : filtrer par période
+            filtered_stations = filter_active_stations_for_period(all_stations, partition_date, station_type)
+            context.log.info(f"✅ {len(filtered_stations)} stations actives pour partition {partition_date}")
 
-    # 4. Fallback: si aucune station n'est trouvée via MinIO (ou filtrage vide),
-    #    basculer sur la découverte des stations actives via l'API Hub'Eau
-    if not stations_data:
-        context.log.warning("⚠️ Aucune station disponible depuis MinIO après filtrage. Fallback API activé pour découvrir les stations actives/mois.")
-        try:
-            stations_data = extract_station_codes_from_result({}, station_type=station_type, partition_date=partition_date)
-            context.log.info(f"✅ Fallback API: {len(stations_data)} stations actives détectées pour {station_type}")
-        except Exception as e:
-            context.log.error(f"❌ Fallback API échoué pour {station_type}: {e}")
-            stations_data = {}
+            # Convertir en dict avec tous les mois de l'année
+            from datetime import datetime
+            year = datetime.strptime(partition_date, "%Y-%m-%d").year
+            all_months = [f"{year}-{m:02d}" for m in range(1, 13)]
+            stations_data = {station: all_months for station in filtered_stations}
 
     total_station_months = sum(len(months) for months in stations_data.values())
     log_message = f"📊 Using {len(stations_data)} {station_type} stations ({total_station_months} station-mois)"
@@ -141,238 +128,7 @@ def _setup_observation_asset(context: AssetExecutionContext, station_type: str, 
 
 # Functions have been moved to hubeau.extractors modules for better modularity
 # - extract_station_codes_from_result, get_active_departments_for_stations -> station_api.py
-# - _extract_station_codes_from_minio, _filter_active_stations_for_period -> station_minio.py
-
-def _setup_station_minio_logging(context: AssetExecutionContext):
-    """
-    Configure le logger station_minio pour capturer les logs dans Dagster.
-    Doit être appelé avant check_stations_need_update().
-    """
-    import logging
-
-    class DagsterLogHandler(logging.Handler):
-        def emit(self, record):
-            msg = self.format(record)
-            # Use warning level to ensure visibility
-            context.log.warning(f"MINIO [{record.levelname}]: {msg}")
-
-    handler = DagsterLogHandler()
-    handler.setLevel(logging.DEBUG)
-
-    # Configure station_minio logger
-    station_minio_logger = logging.getLogger('src.hubeau_pipeline.utils.station_minio')
-    station_minio_logger.setLevel(logging.DEBUG)
-
-    # Remove existing handlers to avoid duplicates
-    station_minio_logger.handlers.clear()
-
-    # Add our Dagster handler
-    station_minio_logger.addHandler(handler)
-
-    return handler
-
-def check_stations_need_update(context: AssetExecutionContext, station_type: str) -> bool:
-    """
-    Vérifie si les stations de référence existent déjà dans MinIO.
-    Si des fichiers existent, on skip l'ingestion.
-
-    Args:
-        context: Dagster execution context
-        station_type: Type de stations ("piezometry", "temperature", etc.)
-
-    Returns:
-        bool: True si une mise à jour est nécessaire, False sinon
-    """
-    import pyarrow.fs as pafs
-    import os
-
-    # Mapping des types vers les chemins MinIO
-    dataset_mapping = {
-        "piezometry": ("piezometry_api", "piezometry_stations"),
-        "hydrometry": ("hydrometry_api", "hydrometry_stations"),
-        "quality_rivers": ("quality_api", "quality_rivers_stations"),
-        "quality_groundwater": ("quality_api", "quality_groundwater_stations"),
-        "hydrobio": ("hydrobio_api", "hydrobio_stations"),
-        "ecoulement": ("ecoulement_api", "ecoulement_stations"),
-        "prelevements": ("prelevements_api", "prelevements_ouvrages"),
-        "temperature": ("temperature_api", "temperature_stations")
-    }
-
-    if station_type not in dataset_mapping:
-        context.log.warning(f"⚠️ Type de station non supporté: {station_type}, lancement de l'intégration")
-        return True
-
-    try:
-        # Configuration S3/MinIO
-        minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://srv991054.hstgr.cloud:9000")
-        minio_user = os.getenv("MINIO_ROOT_USER", "minioadmin")
-        minio_pass = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
-
-        s3 = pafs.S3FileSystem(
-            endpoint_override=minio_endpoint.replace("http://", "").replace("https://", ""),
-            access_key=minio_user,
-            secret_key=minio_pass,
-            scheme="http" if "http://" in minio_endpoint else "https"
-        )
-
-        # Construire le chemin
-        source_name, resource_name = dataset_mapping[station_type]
-        path = f"bronze/{source_name}/{resource_name}/"
-
-        context.log.info(f"🔍 Checking for existing files in: {path}")
-
-        # Vérifier si des fichiers .parquet existent
-        try:
-            files = s3.get_file_info(pafs.FileSelector(path, recursive=False))
-            parquet_files = [f for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
-
-            if parquet_files:
-                context.log.info(f"✅ Fichiers trouvés dans MinIO: {len(parquet_files)} fichier(s)")
-                context.log.info(f"   ⏭️  L'asset sera SKIPPED (données déjà présentes)")
-                return False
-            else:
-                context.log.info(f"📂 Aucun fichier dans MinIO, lancement de l'intégration")
-                return True
-
-        except Exception as read_error:
-            context.log.info(f"📂 Path n'existe pas dans MinIO: {path}")
-            context.log.info(f"   Lancement de l'intégration initiale")
-            return True
-
-    except Exception as e:
-        context.log.error(f"❌ Erreur lors de la vérification: {e}")
-        import traceback
-        context.log.error(f"📋 Traceback: {traceback.format_exc()}")
-        context.log.info(f"🔄 Lancement de l'intégration par précaution")
-        return True
-
-
-def consolidate_parquet_files(
-    context: AssetExecutionContext,
-    source_name: str,
-    resource_name: str,
-    bucket_url: str,
-    credentials: Dict
-):
-    """
-    Consolidate multiple parquet files into a single file.
-
-    This prevents accumulation of files when using merge write_disposition.
-    Reads all parquet files in the directory, deduplicates, and writes back as single file.
-
-    Args:
-        context: Dagster execution context
-        source_name: Source name (e.g., "piezometry")
-        resource_name: Resource name (e.g., "piezometry_stations")
-        bucket_url: MinIO bucket URL
-        credentials: MinIO credentials
-    """
-    import pyarrow.parquet as pq
-    import pyarrow as pa
-    import pyarrow.fs as pafs
-    from datetime import datetime
-
-    dataset_name = f"{source_name}_api"
-    path = f"{bucket_url.replace('s3://', '')}/{dataset_name}/{resource_name}/"
-
-    context.log.info(f"🔄 Consolidating parquet files in {path}")
-
-    # Create S3 filesystem
-    endpoint = credentials["endpoint_url"].replace("http://", "").replace("https://", "")
-    s3 = pafs.S3FileSystem(
-        access_key=credentials["aws_access_key_id"],
-        secret_key=credentials["aws_secret_access_key"],
-        endpoint_override=endpoint,
-        scheme="http"
-    )
-
-    try:
-        # List all parquet files
-        files = s3.get_file_info(pafs.FileSelector(path, recursive=True))
-        parquet_files = [f for f in files if f.path.endswith('.parquet') and f.type == pafs.FileType.File]
-
-        if len(parquet_files) <= 1:
-            context.log.info(f"✅ Only {len(parquet_files)} file(s), no consolidation needed")
-            return
-
-        context.log.info(f"📚 Found {len(parquet_files)} parquet files to consolidate")
-
-        # Read all files into a single table
-        tables = []
-        for file_info in parquet_files:
-            try:
-                table = pq.read_table(file_info.path, filesystem=s3)
-                tables.append(table)
-                context.log.debug(f"   Read {file_info.path}: {table.num_rows} rows")
-            except Exception as e:
-                context.log.warning(f"   ⚠️ Could not read {file_info.path}: {e}")
-
-        if not tables:
-            context.log.warning(f"⚠️ No tables could be read, skipping consolidation")
-            return
-
-        # ✅ FIX: Unify schemas before concatenation to handle nullable differences
-        # DLT may create different nullable constraints between runs
-        if len(tables) > 1:
-            # Create unified schema with all fields nullable
-            base_schema = tables[0].schema
-            unified_fields = [pa.field(f.name, f.type, nullable=True) for f in base_schema]
-            unified_schema = pa.schema(unified_fields)
-
-            # Cast all tables to unified schema
-            tables = [table.cast(unified_schema) for table in tables]
-            context.log.info(f"✅ Unified {len(tables)} schemas (all fields nullable)")
-
-        # Concatenate all tables
-        combined_table = pa.concat_tables(tables)
-        initial_rows = combined_table.num_rows
-
-        context.log.info(f"📊 Combined {len(tables)} tables: {initial_rows} total rows")
-
-        # Deduplicate based on primary key (if exists in schema)
-        # For station data, this would be code_station or code_bss
-        schema = combined_table.schema
-        primary_key_candidates = ["code_station", "code_bss", "code_ouvrage"]
-        primary_key = None
-
-        for pk in primary_key_candidates:
-            if pk in schema.names:
-                primary_key = pk
-                break
-
-        if primary_key:
-            # Convert to pandas for easy deduplication
-            df = combined_table.to_pandas()
-            df_dedup = df.drop_duplicates(subset=[primary_key], keep='last')
-            combined_table = pa.Table.from_pandas(df_dedup)
-
-            rows_removed = initial_rows - combined_table.num_rows
-            context.log.info(f"🧹 Deduplicated by '{primary_key}': removed {rows_removed} duplicate rows")
-
-        # Write consolidated file with timestamp
-        timestamp = datetime.now().timestamp()
-        consolidated_path = f"{path}{timestamp}.parquet"
-
-        pq.write_table(combined_table, consolidated_path, filesystem=s3)
-        context.log.info(f"✅ Wrote consolidated file: {consolidated_path}")
-        context.log.info(f"   Final row count: {combined_table.num_rows}")
-
-        # Delete old files
-        for file_info in parquet_files:
-            try:
-                s3.delete_file(file_info.path)
-                context.log.debug(f"   🗑️ Deleted old file: {file_info.path}")
-            except Exception as e:
-                context.log.warning(f"   ⚠️ Could not delete {file_info.path}: {e}")
-
-        context.log.info(f"✅ Consolidation complete: {len(parquet_files)} files → 1 file")
-
-    except Exception as e:
-        context.log.error(f"❌ Consolidation failed: {e}")
-        import traceback
-        context.log.error(f"   Traceback: {traceback.format_exc()}")
-        raise
-
+# - extract_station_codes_from_postgres, filter_active_stations_for_period -> station_postgres.py
 
 def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: Optional[Dict[str, List[str]]] = None, partition_date: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -416,89 +172,60 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Ajouter partition_key dans la config pour résolution du layout
         cfg["partition_key"] = partition_key
 
-        # Update slicer dates based on partition
-        if cfg.get("slicer", {}).get("mode") == "datetime":
-            # Determine if it's a year or a date
-            try:
-                # Try to parse as year (YYYY format)
-                if len(partition_key) == 4 and partition_key.isdigit():
-                    year = int(partition_key)
-                    cfg["slicer"]["start_date"] = f"{year}-01-01"
-                    cfg["slicer"]["end_date"] = f"{year}-12-31"
-                    context.log.info(f"🗓️ Ingestion pour l'année {year}")
-                else:
-                    # Parse as date (YYYY-MM-DD format)
-                    date_obj = datetime.strptime(partition_key, "%Y-%m-%d")
-                    cfg["slicer"]["start_date"] = partition_key
-                    cfg["slicer"]["end_date"] = partition_key
-                    context.log.info(f"🗓️ Ingestion pour le jour {partition_key}")
-            except ValueError:
-                context.log.warning(f"⚠️ Could not parse partition key: {partition_key}")
-        
-        # Update temporal_filter if present (pour APIs avec slicer=dept + filtre temporel)
-        if cfg.get("temporal_filter") and len(partition_key) == 4 and partition_key.isdigit():
-            year = int(partition_key)
-            # Pour les filtres temporels annuels (ex: prelevements, quality)
-            if "annee" in cfg["temporal_filter"].get("start_param", ""):
-                cfg["temporal_filter"]["start_date"] = str(year)
-                if cfg["temporal_filter"].get("end_param"):
-                    cfg["temporal_filter"]["end_date"] = str(year)
-            else:
-                # Pour les filtres temporels avec dates complètes
-                cfg["temporal_filter"]["start_date"] = f"{year}-01-01"
-                if cfg["temporal_filter"].get("end_param"):
-                    cfg["temporal_filter"]["end_date"] = f"{year}-12-31"
-            context.log.info(f"🗓️ Filtre temporel mis à jour pour l'année {year}")
+        # Skip temporal filters if partition is "all" (retrieve ALL historical data)
+        if partition_key == "all":
+            context.log.info(f"🌍 Partition 'all' détectée - PAS de filtre temporel (récupération de TOUTES les données)")
+            # Do NOT update slicer, temporal_filter, or extraction dates
+            # DLT will retrieve all available data from the API
+        else:
+            # Normal partition with temporal filtering
+            # Update slicer dates based on partition
+            if cfg.get("slicer", {}).get("mode") == "datetime":
+                # Determine if it's a year or a date
+                try:
+                    # Try to parse as year (YYYY format)
+                    if len(partition_key) == 4 and partition_key.isdigit():
+                        year = int(partition_key)
+                        cfg["slicer"]["start_date"] = f"{year}-01-01"
+                        cfg["slicer"]["end_date"] = f"{year}-12-31"
+                        context.log.info(f"🗓️ Ingestion pour l'année {year}")
+                    else:
+                        # Parse as date (YYYY-MM-DD format)
+                        date_obj = datetime.strptime(partition_key, "%Y-%m-%d")
+                        cfg["slicer"]["start_date"] = partition_key
+                        cfg["slicer"]["end_date"] = partition_key
+                        context.log.info(f"🗓️ Ingestion pour le jour {partition_key}")
+                except ValueError:
+                    context.log.warning(f"⚠️ Could not parse partition key: {partition_key}")
 
-        # ✅ FIX: Update extraction.start_date aussi (pour dept_datetime mode)
-        if cfg.get("extraction") and len(partition_key) == 4 and partition_key.isdigit():
-            year = int(partition_key)
-            if "start_date" in cfg["extraction"]:
-                cfg["extraction"]["start_date"] = f"{year}-01-01"
-                context.log.info(f"🗓️ Extraction start_date mis à jour: {year}-01-01")
-            if "end_date" in cfg["extraction"]:
-                cfg["extraction"]["end_date"] = f"{year}-12-31"
-                context.log.info(f"🗓️ Extraction end_date mis à jour: {year}-12-31")
+            # Update temporal_filter if present (pour APIs avec slicer=dept + filtre temporel)
+            if cfg.get("temporal_filter") and len(partition_key) == 4 and partition_key.isdigit():
+                year = int(partition_key)
+                # Pour les filtres temporels annuels (ex: prelevements, quality)
+                if "annee" in cfg["temporal_filter"].get("start_param", ""):
+                    cfg["temporal_filter"]["start_date"] = str(year)
+                    if cfg["temporal_filter"].get("end_param"):
+                        cfg["temporal_filter"]["end_date"] = str(year)
+                else:
+                    # Pour les filtres temporels avec dates complètes
+                    cfg["temporal_filter"]["start_date"] = f"{year}-01-01"
+                    if cfg["temporal_filter"].get("end_param"):
+                        cfg["temporal_filter"]["end_date"] = f"{year}-12-31"
+                context.log.info(f"🗓️ Filtre temporel mis à jour pour l'année {year}")
+
+            # ✅ FIX: Update extraction.start_date aussi (pour dept_datetime mode)
+            if cfg.get("extraction") and len(partition_key) == 4 and partition_key.isdigit():
+                year = int(partition_key)
+                if "start_date" in cfg["extraction"]:
+                    cfg["extraction"]["start_date"] = f"{year}-01-01"
+                    context.log.info(f"🗓️ Extraction start_date mis à jour: {year}-01-01")
+                if "end_date" in cfg["extraction"]:
+                    cfg["extraction"]["end_date"] = f"{year}-12-31"
+                    context.log.info(f"🗓️ Extraction end_date mis à jour: {year}-12-31")
 
     # Simple logging without accessing nested config fields
     # (DLT will handle the nested config structure internally)
     context.log.info(f"🚀 Starting DLT ingestion...")
-
-    # Build MinIO credentials for dlt
-    import os
-
-    # ✅ FAIL FAST: Load MinIO credentials from environment (NO DEFAULTS)
-    minio_user = os.getenv("MINIO_USER")
-    minio_pass = os.getenv("MINIO_PASS")
-    minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
-    minio_region = os.getenv("MINIO_REGION", "us-east-1")
-
-    # Validate required credentials
-    if not minio_user or not minio_pass:
-        error_msg = (
-            "❌ CRITICAL: MinIO credentials not set!\n"
-            f"   MINIO_USER: {'NOT SET' if not minio_user else 'SET'}\n"
-            f"   MINIO_PASS: {'NOT SET' if not minio_pass else 'SET'}\n"
-            "These MUST be defined in GitLab CI/CD Variables and properly exported.\n"
-            "Check .gitlab-ci.yml exports and ensure variables are not 'Protected' "
-            "or branch is protected."
-        )
-        context.log.error(error_msg)
-        raise ValueError(error_msg)
-
-    # Log MinIO credentials for debugging (masked password)
-    context.log.info(f"🔐 MinIO credentials:")
-    context.log.info(f"   - MINIO_USER: {minio_user}")
-    context.log.info(f"   - MINIO_PASS: SET")
-    context.log.info(f"   - MINIO_ENDPOINT: {minio_endpoint}")
-    context.log.info(f"   - MINIO_REGION: {minio_region}")
-
-    credentials = {
-        "aws_access_key_id": TSecretValue(minio_user),
-        "aws_secret_access_key": TSecretValue(minio_pass),
-        "endpoint_url": minio_endpoint,
-        "region_name": minio_region,
-    }
 
     # Run the dlt pipeline
     context.log.info(f"🏃 Starting DLT pipeline execution...")
@@ -558,82 +285,30 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     hubeau_source_logger2.setLevel(logging.DEBUG)
     hubeau_source_logger2.addHandler(dagster_handler)
     
-    # ✅ Capturer les logs de station_minio.py (si pas déjà configuré)
-    station_minio_logger = logging.getLogger('src.hubeau_pipeline.utils.station_minio')
-    station_minio_logger.setLevel(logging.DEBUG)
+    # ✅ Capturer les logs de station_postgres.py (si pas déjà configuré)
+    station_postgres_logger = logging.getLogger('src.hubeau_pipeline.utils.station_postgres')
+    station_postgres_logger.setLevel(logging.DEBUG)
     # Only add handler if not already present (may have been set up in asset function)
-    if dagster_handler not in station_minio_logger.handlers:
-        station_minio_logger.addHandler(dagster_handler)
+    if dagster_handler not in station_postgres_logger.handlers:
+        station_postgres_logger.addHandler(dagster_handler)
     
     try:
         # Execute DLT pipeline with monkey-patched print
         # Créer le pipeline DLT
-        # ✅ FIX: Déduire dataset_name du source.name pour éviter bronze/bronze
-        # Exemple: source.name="piezometry" → dataset_name="piezometry_api"
-        # Ça correspond aux paths dans station_minio.py (ex: "piezometry_api/piezometry_stations/")
+        # Use PostgreSQL destination
         source_name = cfg.get("source", {}).get("name", "unknown")
         resource_name = cfg.get("resource", {}).get("name", "unknown")
-        dataset_name = cfg.get("dataset_name", f"{source_name}_api")
 
-        # ✅ NOUVEAU: Utiliser le module destinations.py pour respecter la config YAML
-        from src.dlt_pipeline.destinations import get_filesystem_destination
+        # Get PostgreSQL destination
+        from src.dlt_pipeline.destinations import get_postgres_destination
+        postgres_config = cfg.get("destinations", {}).get("postgres", {})
+        if "dataset_name" not in postgres_config:
+            postgres_config["dataset_name"] = os.getenv("HUBEAU_SCHEMA", "hubeau")
+        context.log.info(f"📦 PostgreSQL destination: schema={postgres_config['dataset_name']}")
+        destination = get_postgres_destination(postgres_config)
 
-        # Préparer la configuration filesystem depuis YAML
-        filesystem_config = cfg.get("destinations", {}).get("filesystem", {})
-
-        # Override/ajouter les credentials MinIO (priorité aux env vars)
-        filesystem_config["credentials"] = {
-            "aws_access_key_id": minio_user,
-            "aws_secret_access_key": minio_pass,
-            "endpoint_url": minio_endpoint,
-            "region_name": minio_region,
-        }
-
-        # Assurer un bucket_url par défaut si non spécifié dans YAML
-        if "bucket_url" not in filesystem_config:
-            filesystem_config["bucket_url"] = "s3://bronze"
-
-        # ✅ CORRECTION CRITIQUE: Résoudre le layout avec la partition_key
-        # DLT utilise la date actuelle pour {year}, {month} etc., pas la partition !
-        # On doit résoudre manuellement les placeholders custom comme {YYYY}
-        if partition_key and "layout" in filesystem_config:
-            layout = filesystem_config["layout"]
-            
-            # Extraire l'année de la partition_key
-            try:
-                if len(partition_key) == 4 and partition_key.isdigit():
-                    # Partition annuelle : "2024"
-                    year = partition_key
-                    month = "00"  # Pas de mois spécifique
-                    day = "00"
-                elif len(partition_key) == 7:
-                    # Partition mensuelle : "2024-08"
-                    year = partition_key[:4]
-                    month = partition_key[5:7]
-                    day = "00"
-                else:
-                    # Partition quotidienne : "2024-08-15"
-                    year = partition_key[:4]
-                    month = partition_key[5:7]
-                    day = partition_key[8:10]
-                
-                # Résoudre les placeholders custom
-                layout = layout.replace("{YYYY}", year)
-                layout = layout.replace("{MM}", month)
-                layout = layout.replace("{DD}", day)
-                
-                filesystem_config["layout"] = layout
-                context.log.info(f"✅ Layout résolu: {layout} (partition: {partition_key})")
-            except Exception as e:
-                context.log.warning(f"⚠️ Erreur lors de la résolution du layout: {e}")
-
-        # Log de la config pour debug
-        context.log.info(f"📦 Filesystem config: bucket={filesystem_config.get('bucket_url')}, "
-                        f"format={filesystem_config.get('file_format', 'parquet (default)')}, "
-                        f"layout={filesystem_config.get('layout', 'default')}")
-
-        # Créer la destination avec file_format, layout depuis YAML
-        destination = get_filesystem_destination(filesystem_config)
+        # Use dataset_name from postgres_config
+        dataset_name = postgres_config["dataset_name"]
 
         # ✅ FIX: Configure pipelines_dir to use a temp directory to avoid local filesystem issues
         # DLT will store pipeline working files here, but incremental state goes to MinIO automatically
@@ -663,27 +338,8 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             partition_date=partition_date
         )
 
-        # Extract file format from config (default to parquet)
-        file_format = cfg.get("destinations", {}).get("filesystem", {}).get("file_format", "parquet")
-        context.log.info(f"🗂️ Using file format: {file_format}")
-
-        # Exécuter le pipeline avec format explicite
-        load_info = pipeline.run(source, loader_file_format=file_format)
-
-        # ✅ POST-INGESTION: Consolidate multiple parquet files into one
-        # This prevents accumulation of files with merge mode
-        if load_info and hasattr(load_info, 'load_packages') and len(load_info.load_packages) > 0:
-            try:
-                consolidate_parquet_files(
-                    context,
-                    source_name=source_name,
-                    resource_name=resource_name,
-                    bucket_url=filesystem_config.get("bucket_url", "s3://bronze"),
-                    credentials=filesystem_config["credentials"]
-                )
-            except Exception as consolidation_error:
-                context.log.warning(f"⚠️ File consolidation failed: {consolidation_error}")
-                context.log.warning(f"   Data is still valid but multiple files may accumulate")
+        # Exécuter le pipeline
+        load_info = pipeline.run(source)
 
     finally:
         # Restore original print function
@@ -693,7 +349,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         slicing_logger.removeHandler(dagster_handler)
         hubeau_source_logger.removeHandler(dagster_handler)
         hubeau_source_logger2.removeHandler(dagster_handler)
-        station_minio_logger.removeHandler(dagster_handler)
+        station_postgres_logger.removeHandler(dagster_handler)
 
     pipeline_duration = time.time() - pipeline_start_time
     context.log.info(f"✅ DLT pipeline finished in {pipeline_duration:.2f}s")
@@ -762,15 +418,14 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
     context.log.info(f"🎉 Ingestion {resource_name} completed!")
     context.log.info(f"📊 Final statistics:")
     context.log.info(f"   • Load packages: {stats['packages']}")
-    context.log.info(f"   • Files written: {stats['files']}")
     context.log.info(f"   • Duration: {pipeline_duration:.2f}s")
-    context.log.info(f"   • Data written to MinIO: ✅ (see DLT logs above for detailed metrics)")
+    context.log.info(f"   • Data written to PostgreSQL: ✅ (see DLT logs above for detailed metrics)")
 
     # Check if we have load packages (indicates successful data ingestion)
     if stats['packages'] > 0:
         context.log.info(f"✅ Data successfully ingested for {resource_name}")
         context.log.info(f"   • Detailed metrics available in DLT logs above")
-        context.log.info(f"   • Files stored in MinIO path: bronze/{dataset_name}/{resource_name}/")
+        context.log.info(f"   • Data stored in PostgreSQL schema: {dataset_name}")
         stats["rows"] = "see_dlt_logs"  # Indicate that metrics are in DLT logs
     else:
         context.log.warning(f"⚠️ No data ingested for {resource_name}! This might indicate:")
@@ -787,174 +442,48 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 # ====================================
 
 @asset(group_name="hubeau_hydrometry")
-def hydrometry_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "hydrometry"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/hydrometry_api/hydrometry_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
 
 @asset(group_name="hubeau_piezometry")
-def piezometry_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def piezometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "piezometry"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/piezometry_api/piezometry_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/piezometry_stations.yml")
 
 @asset(group_name="hubeau_quality_rivers")
-def quality_rivers_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def quality_rivers_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "quality_rivers"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/quality_api/quality_rivers_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/quality_rivers_stations.yml")
 
 @asset(group_name="hubeau_quality_groundwater")
-def quality_groundwater_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def quality_groundwater_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality groundwater stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "quality_groundwater"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/quality_api/quality_groundwater_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/quality_groundwater_stations.yml")
 
 @asset(group_name="hubeau_ecoulement")
-def ecoulement_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def ecoulement_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "ecoulement"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/ecoulement_api/ecoulement_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/ecoulement_stations.yml")
 
 @asset(group_name="hubeau_ecoulement")
 def ecoulement_campagnes_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement campaigns reference (utilisé pour caler les fenêtres d'observations)."""
     return ingest_dlt(context, "configs/hubeau/ecoulement_campagnes.yml")
 @asset(group_name="hubeau_hydrobio")
-def hydrobio_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def hydrobio_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "hydrobio"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/hydrobio_api/hydrobio_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/hydrobio_stations.yml")
 
 @asset(group_name="hubeau_prelevements")
-def prelevements_ouvrages_reference(context: AssetExecutionContext) -> MaterializeResult:
+def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """
     Ingestion du référentiel des OUVRAGES de prélèvement (~168k ouvrages).
 
     Un ouvrage = installation technique de prélèvement (infrastructure).
     Utilisé par les chroniques (code_ouvrage).
     """
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "prelevements"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/prelevements_api/prelevements_ouvrages/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
 
 @asset(group_name="hubeau_prelevements")
 def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, Any]:
@@ -968,27 +497,9 @@ def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, A
     return ingest_dlt(context, "configs/hubeau/prelevements_points.yml")
 
 @asset(group_name="hubeau_temperature")
-def temperature_stations_reference(context: AssetExecutionContext) -> MaterializeResult:
+def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature stations reference data using dlt (pas de partition)."""
-    # ✅ Setup logging BEFORE checking MinIO
-    _setup_station_minio_logging(context)
-
-    if not check_stations_need_update(context, "temperature"):
-        return MaterializeResult(
-            metadata={
-                "status": "skipped",
-                "reason": "Données inchangées - aucune ingestion nécessaire",
-                "minio_path": "bronze/temperature_api/temperature_stations/"
-            }
-        )
-
-    ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
-    return MaterializeResult(
-        metadata={
-            "status": "completed",
-            "info": "Ingestion terminée avec succès"
-        }
-    )
+    return ingest_dlt(context, "configs/hubeau/temperature_stations.yml")
 
 # ====================================
 # NOUVEAUX ASSETS POUR ENDPOINTS MANQUANTS
