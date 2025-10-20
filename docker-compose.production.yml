@@ -19,12 +19,35 @@ services:
     mem_limit: 512m
     cpus: 0.2
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: brgm-postgres
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+    volumes:
+      - /srv/brgm-data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 0.5
+
   dlt_worker:
     build:
       context: .
       dockerfile: docker/worker/Dockerfile
     image: hubeau-worker:latest
     container_name: brgm-dlt-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
