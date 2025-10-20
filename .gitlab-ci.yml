@@ -13,9 +13,9 @@ variables:
   # Solutions pour erreurs 503 Docker Hub
   FF_GITLAB_REGISTRY_HELPER_IMAGE: 1
   DOCKER_PULL_POLICY: "if-not-present"  # Préférer cache local
-  # Stratégie de retry pour erreurs réseau Docker Hub
-  DOCKER_BUILDKIT: 1
-  BUILDKIT_PROGRESS: plain
+  # Désactiver BuildKit (pas disponible avec docker-cli 25 sans buildx)
+  DOCKER_BUILDKIT: 0
+  COMPOSE_DOCKER_CLI_BUILD: 0
   # Portainer accessible sur https://srv991054.hstgr.cloud:9443 après déploiement
 
 # Stage 0: Test de connectivité Docker Hub (préventif)
