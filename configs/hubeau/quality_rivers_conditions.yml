@@ -39,7 +39,7 @@ transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_observation
+    - date_operation
 destinations:
   postgres:
     dataset_name: bronze

@@ -7,7 +7,7 @@ resource:
   base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
   primary_key:
   - code_station
-  - date_observation
+  - date_obs
   write_disposition: merge
   columns:
     code_station:
@@ -51,7 +51,6 @@ transformers:
 - normalize_dates:
     fields:
     - date_obs
-    - date_observation
 destinations:
   postgres:
     dataset_name: bronze

@@ -642,8 +642,15 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         os.makedirs(pipelines_dir, exist_ok=True)
         context.log.info(f"📁 DLT pipelines_dir: {pipelines_dir}")
 
+        # ✅ FIX: Use unique pipeline name per source/resource to avoid schema conflicts
+        # Each asset gets isolated DLT state to prevent schema leaks between sources
+        # Format: "hubeau_{source_name}_{resource_name}"
+        # Example: "hubeau_piezometry_piezometry_chroniques_historical"
+        pipeline_name = f"hubeau_{source_name}_{resource_name}"
+        context.log.info(f"📦 DLT pipeline name: {pipeline_name} (prevents schema conflicts)")
+
         pipeline = dlt.pipeline(
-            pipeline_name="hubeau_pipeline",
+            pipeline_name=pipeline_name,  # ✅ Unique per asset
             destination=destination,
             dataset_name=dataset_name,
             pipelines_dir=pipelines_dir  # Use temp directory for local working files
