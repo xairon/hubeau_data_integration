@@ -4,7 +4,7 @@ Sensor de backfill automatique pour partitions manquantes
 
 from datetime import datetime
 from typing import List
-from dagster import sensor, RunRequest, SensorEvaluationContext, DefaultSensorStatus
+from dagster import sensor, RunRequest, SensorEvaluationContext, DefaultSensorStatus, RunsFilter
 from ..jobs import sync_all_yearly_data
 
 
@@ -37,10 +37,10 @@ def backfill_missing_partitions_sensor(context: SensorEvaluationContext):
 
         # Récupérer les runs pour cette partition
         runs = context.instance.get_runs(
-            filters={
-                "job_name": "sync_all_yearly_data",
-                "tags": {"dagster/partition": partition_key},
-            },
+            filters=RunsFilter(
+                job_name="sync_all_yearly_data",
+                tags={"dagster/partition": partition_key},
+            ),
             limit=10,
         )
 

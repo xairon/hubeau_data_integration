@@ -35,27 +35,6 @@ def check_postgres() -> bool:
         return False
 
 
-def check_minio() -> bool:
-    """
-    Check simple MinIO.
-
-    Returns:
-        True si MinIO est accessible, False sinon
-    """
-    try:
-        import httpx
-
-        endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
-
-        # Essayer le health endpoint de MinIO
-        with httpx.Client(timeout=5) as client:
-            response = client.get(f"{endpoint}/minio/health/live")
-            return response.status_code == 200
-
-    except Exception:
-        return False
-
-
 def check_hubeau_api() -> bool:
     """
     Check simple Hub'Eau API.
@@ -92,7 +71,6 @@ def health_check() -> Dict[str, bool]:
     """
     return {
         "postgres": check_postgres(),
-        "minio": check_minio(),
         "hubeau_api": check_hubeau_api()
     }
 
@@ -107,6 +85,6 @@ def is_healthy() -> bool:
     health = health_check()
 
     # Services critiques (sans hubeau_api qui est externe)
-    critical_services = ["postgres", "minio"]
+    critical_services = ["postgres"]
 
     return all(health.get(service, False) for service in critical_services)

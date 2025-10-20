@@ -14,16 +14,6 @@ timeout = 30      # timeout en secondes
 page_size = 5000  # taille de page par défaut
 # max_pages non défini = pas de limite
 
-[destinations.filesystem]
-# Configuration pour MinIO/S3
-bucket_url = "s3://bronze"
-dataset_name = "bronze"
-file_format = "parquet"
-layout = "{table_name}/{load_id}.{file_id}.parquet"
-
-# Options de partitionnement
-partition_columns = []  # Pas de partitionnement par défaut
-
 [destinations.postgres]
 # Configuration PostgreSQL
 database = "hubeau"

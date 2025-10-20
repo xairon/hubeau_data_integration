@@ -121,19 +121,6 @@ pipeline_duration_seconds = Histogram(
     buckets=[60, 300, 600, 1800, 3600, 7200, 14400]  # 1min à 4h
 )
 
-# MinIO Storage Metrics (complémentaires aux métriques natives)
-minio_objects_written_total = Counter(
-    'hubeau_minio_objects_written_total',
-    'Total number of objects written to MinIO',
-    ['bucket', 'prefix']
-)
-
-minio_bytes_written_total = Counter(
-    'hubeau_minio_bytes_written_total',
-    'Total bytes written to MinIO',
-    ['bucket', 'prefix']
-)
-
 # Dagster Asset Metrics
 dagster_asset_materializations_total = Counter(
     'hubeau_dagster_asset_materializations_total',

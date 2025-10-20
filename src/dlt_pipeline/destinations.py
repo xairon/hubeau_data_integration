@@ -11,7 +11,7 @@ def get_destination(dest_type: str, config: Dict = None):
     Factory pour créer les destinations DLT.
 
     Args:
-        dest_type: Type de destination (postgres, filesystem, duckdb)
+        dest_type: Type de destination (postgres, duckdb, bigquery, snowflake)
         config: Configuration spécifique (optionnel)
 
     Returns:
@@ -21,17 +21,12 @@ def get_destination(dest_type: str, config: Dict = None):
         # PostgreSQL par défaut
         dest = get_destination("postgres")
 
-        # Filesystem avec config custom
-        dest = get_destination("filesystem", {"bucket_url": "s3://my-bucket"})
-
         # DuckDB pour tests
         dest = get_destination("duckdb", {"path": "test.db"})
     """
 
     if dest_type == "postgres":
         return get_postgres_destination(config)
-    elif dest_type == "filesystem":
-        return get_filesystem_destination(config)
     elif dest_type == "duckdb":
         return get_duckdb_destination(config)
     elif dest_type == "bigquery":
@@ -90,64 +85,6 @@ def get_postgres_destination(config: Dict = None) -> Any:
         credentials=credentials,
         dataset_name=dataset_name,
         **{k: v for k, v in config.items() if k not in ["credentials", "dataset_name", "enable_postgis"]}
-    )
-
-
-def get_filesystem_destination(config: Dict = None) -> Any:
-    """
-    Destination Filesystem (MinIO/S3/Azure/GCS).
-
-    Args:
-        config: Configuration optionnelle
-
-    Returns:
-        Destination filesystem configurée
-
-    Notes:
-        - Support MinIO, AWS S3, Azure Blob, Google Cloud Storage
-        - Layout personnalisable pour partitionnement
-        - Format parquet par défaut (plus efficace)
-    """
-    config = config or {}
-
-    # Déterminer le type de filesystem
-    bucket_url = config.get("bucket_url", os.getenv("MINIO_BUCKET_URL", "s3://bronze"))
-
-    # ✅ FIX: Utiliser config["credentials"] si fourni (priorité), sinon env vars
-    if "credentials" in config:
-        credentials = config["credentials"]
-    elif bucket_url.startswith("s3://"):
-        # Configuration MinIO/S3
-        credentials = {
-            "aws_access_key_id": os.getenv("MINIO_USER", os.getenv("AWS_ACCESS_KEY_ID")),
-            "aws_secret_access_key": os.getenv("MINIO_PASS", os.getenv("AWS_SECRET_ACCESS_KEY")),
-            "endpoint_url": os.getenv("MINIO_ENDPOINT", os.getenv("AWS_ENDPOINT_URL")),
-            "region_name": os.getenv("MINIO_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-        }
-    elif bucket_url.startswith("az://"):
-        # Configuration Azure
-        credentials = {
-            "azure_storage_account_name": os.getenv("AZURE_STORAGE_ACCOUNT"),
-            "azure_storage_account_key": os.getenv("AZURE_STORAGE_KEY")
-        }
-    elif bucket_url.startswith("gs://"):
-        # Configuration Google Cloud Storage
-        credentials = {
-            "project_id": os.getenv("GCP_PROJECT_ID"),
-            "credentials": os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        }
-    else:
-        # Filesystem local
-        credentials = {}
-
-    # Note: layout should be passed through config, not as explicit parameter
-    # Note: file_format is NOT a valid parameter for dlt.destinations.filesystem()
-    # It should be set via loader_file_format in pipeline.run() instead
-
-    return dlt.destinations.filesystem(
-        bucket_url=bucket_url,
-        credentials=credentials,
-        **{k: v for k, v in config.items() if k not in ["bucket_url", "credentials", "file_format"]}
     )
 
 
@@ -254,10 +191,10 @@ def create_multi_destination(destinations: list) -> Any:
         Liste de destinations configurées
 
     Example:
-        # Charger vers PostgreSQL ET filesystem
+        # Charger vers PostgreSQL ET DuckDB
         dests = create_multi_destination([
             ("postgres", {"dataset_name": "bronze"}),
-            ("filesystem", {"bucket_url": "s3://backup"})
+            ("duckdb", {"path": "backup.duckdb"})
         ])
     """
     configured_dests = []

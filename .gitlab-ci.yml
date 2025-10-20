@@ -142,10 +142,6 @@ deploy:production:
         echo "❌ ERREUR: DAGSTER_PG_PASSWORD non définie dans GitLab CI/CD Variables"
         exit 1
       fi
-      if [ -z "$MINIO_PASS" ]; then
-        echo "❌ ERREUR: MINIO_PASS non définie dans GitLab CI/CD Variables"
-        exit 1
-      fi
       if [ -z "$PG_PASSWORD" ]; then
         echo "❌ ERREUR: PG_PASSWORD non définie dans GitLab CI/CD Variables"
         exit 1
@@ -157,11 +153,6 @@ deploy:production:
     - export DAGSTER_PG_DB=${DAGSTER_PG_DB:-dagster}
     - export DAGSTER_PG_USER=${DAGSTER_PG_USER:-postgres}
     - export DAGSTER_PG_PASSWORD=${DAGSTER_PG_PASSWORD}
-    - export MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
-    - export MINIO_USER=${MINIO_USER}
-    - export MINIO_PASS=${MINIO_PASS}
-    - export MINIO_REGION=${MINIO_REGION:-us-east-1}
-    - export MINIO_BRONZE_BUCKET=${MINIO_BRONZE_BUCKET:-bronze}
     - export PG_HOST=${PG_HOST:-postgres}
     - export PG_PASSWORD=${PG_PASSWORD}
     - export POSTGIS_HOST=${POSTGIS_HOST:-postgis}
@@ -170,11 +161,6 @@ deploy:production:
     - echo "🔍 Debug - DAGSTER_PG_USER=$DAGSTER_PG_USER"
     - echo "🔍 Debug - DAGSTER_PG_DB=$DAGSTER_PG_DB"
     - echo "🔍 Debug - DAGSTER_PG_PASSWORD défini=$([ -n "$DAGSTER_PG_PASSWORD" ] && echo 'OUI' || echo 'NON')"
-    - echo "🔍 Debug MinIO:"
-    - echo "  - MINIO_USER=$MINIO_USER"
-    - echo "  - MINIO_PASS défini=$([ -n "$MINIO_PASS" ] && echo 'OUI' || echo 'NON')"
-    - echo "  - MINIO_ENDPOINT=$MINIO_ENDPOINT"
-    - echo "  - MINIO_BRONZE_BUCKET=$MINIO_BRONZE_BUCKET"
     - echo "🔍 Debug PostgreSQL:"
     - echo "  - PG_HOST=$PG_HOST"
     - echo "  - PG_PASSWORD défini=$([ -n "$PG_PASSWORD" ] && echo 'OUI' || echo 'NON')"
@@ -230,7 +216,7 @@ deploy:production:
     - |
       echo "Variables DAGSTER_PG dans le conteneur webserver:"
       docker exec brgm-dagster-webserver env | grep DAGSTER_PG | sed 's/PASSWORD=.*/PASSWORD=***MASKED***/' || echo "❌ Aucune variable DAGSTER_PG trouvée"
-    - echo "🔍 Vérification des variables MinIO/PG dans dlt_worker..."
+    - echo "🔍 Vérification des variables PG dans dlt_worker..."
     - |
       echo "=== Variables d'environnement dans dlt_worker ==="
       docker exec brgm-dlt-worker python -c "
@@ -238,50 +224,7 @@ deploy:production:
       print('✅ Variables détectées dans dlt_worker:')
       print('   PG_PASSWORD:', 'SET' if os.getenv('PG_PASSWORD') else 'NOT SET')
       print('   PG_HOST:', os.getenv('PG_HOST', 'NOT SET'))
-      print('   MINIO_USER:', os.getenv('MINIO_USER', 'NOT SET'))
-      print('   MINIO_PASS:', 'SET' if os.getenv('MINIO_PASS') else 'NOT SET')
-      print('   MINIO_ENDPOINT:', os.getenv('MINIO_ENDPOINT', 'NOT SET'))
-      print('   AWS_ACCESS_KEY_ID:', os.getenv('AWS_ACCESS_KEY_ID', 'NOT SET'))
-      print('   AWS_SECRET_ACCESS_KEY:', 'SET' if os.getenv('AWS_SECRET_ACCESS_KEY') else 'NOT SET')
       " || echo "❌ Erreur lors de la vérification des variables"
-    - echo "🔍 Test de connexion MinIO depuis dlt_worker..."
-    - |
-      if docker exec brgm-dlt-worker python -c "
-      import boto3
-      import os
-      endpoint = os.getenv('MINIO_ENDPOINT', 'http://minio:9000')
-      access_key = os.getenv('MINIO_USER')
-      secret_key = os.getenv('MINIO_PASS')
-      if not access_key or not secret_key:
-          print('❌ MINIO credentials not available in environment')
-          exit(1)
-      s3 = boto3.client('s3',
-          endpoint_url=endpoint,
-          aws_access_key_id=access_key,
-          aws_secret_access_key=secret_key)
-      # List buckets
-      buckets_list = s3.list_buckets()
-      bucket_names = [b['Name'] for b in buckets_list['Buckets']]
-      print('✅ Buckets MinIO:', bucket_names)
-      # Create bronze bucket if not exists
-      if 'bronze' not in bucket_names:
-          print('🪣 Creating bronze bucket...')
-          s3.create_bucket(Bucket='bronze')
-          print('✅ Bronze bucket created')
-      else:
-          print('✅ Bronze bucket already exists')
-      # Test write permission
-      print('🔧 Testing write permission...')
-      s3.put_object(Bucket='bronze', Key='_test_write', Body=b'test')
-      s3.delete_object(Bucket='bronze', Key='_test_write')
-      print('✅ Write permissions OK')
-      " 2>&1; then
-        echo "✅ MinIO accessible depuis dlt_worker"
-      else
-        echo "❌ ERREUR: MinIO non accessible depuis dlt_worker"
-        echo "📊 Logs MinIO (30 dernières lignes):"
-        docker logs brgm-minio --tail 30
-      fi
     - echo "📊 Logs DLT Worker (dernières 50 lignes):"
     - docker logs brgm-dlt-worker --tail 50 || echo "Worker logs not available"
     - echo "📊 Logs Dagster Webserver (dernières 20 lignes):"
