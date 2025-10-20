@@ -1,5 +1,34 @@
 # GitLab CI/CD - Résolution des Problèmes
 
+## 🚨 Solution Rapide pour Erreur 503 Persistante
+
+Si l'erreur 503 persiste malgré les configurations, exécuter ce script automatisé :
+
+```bash
+# SSH sur le serveur
+ssh root@srv991054.hstgr.cloud
+
+# Télécharger et exécuter le script de fix
+curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/main/scripts/fix-docker-pull.sh | bash
+
+# OU si le repo est cloné localement :
+cd /srv/brgm
+bash scripts/fix-docker-pull.sh
+
+# Redémarrer le runner
+systemctl restart gitlab-runner
+
+# Relancer le pipeline dans GitLab UI
+```
+
+**Ce script va automatiquement :**
+1. ✅ Pré-puller toutes les images Docker nécessaires
+2. ✅ Configurer le GitLab Runner pour préférer le cache local
+3. ✅ Créer un wrapper avec retry automatique
+4. ✅ Tester la connexion Docker Hub et afficher le rate limit
+
+---
+
 ## Erreur: "503 Service Unavailable" lors du pull Docker Hub
 
 ### Symptôme
@@ -17,22 +46,32 @@ received unexpected HTTP status: 503 Service Unavailable
 
 ### Solutions
 
-#### Solution 1: Retry Automatique (✅ IMPLÉMENTÉ)
+#### Solution 1: Retry Automatique (✅ IMPLÉMENTÉ V2)
 
-La configuration `.gitlab-ci.yml` inclut maintenant une stratégie de retry automatique :
+La configuration `.gitlab-ci.yml` inclut maintenant une stratégie de retry améliorée :
 
 ```yaml
+variables:
+  FF_GITLAB_REGISTRY_HELPER_IMAGE: 1
+  DOCKER_PULL_POLICY: "if-not-present"
+
 build:image:
+  image:
+    name: docker:24-cli
+    pull_policy: ["if-not-present", "always"]
   retry:
-    max: 2
+    max: 3
     when:
       - runner_system_failure
       - stuck_or_timeout_failure
+      - api_failure
 ```
 
-**Avantages**:
-- Résout automatiquement les erreurs transitoires
-- Pas de modification manuelle nécessaire
+**Améliorations V2**:
+- Pull policy "if-not-present" pour utiliser cache local en priorité
+- Retry augmenté à 3 tentatives
+- Gestion des erreurs API (503, timeouts)
+- Fallback automatique si docker CLI manquant
 
 #### Solution 2: Utiliser une Image Locale Pré-pullée
 

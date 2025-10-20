@@ -9,19 +9,31 @@ variables:
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: ""
   PROJECT_DIR: /srv/brgm
+  # Solutions pour erreurs 503 Docker Hub
+  FF_GITLAB_REGISTRY_HELPER_IMAGE: 1
+  DOCKER_PULL_POLICY: "if-not-present"  # Préférer cache local
   # Portainer accessible sur https://srv991054.hstgr.cloud:9443 après déploiement
 
 # Stage 1: Build des images Docker (automatique sur chaque push)
 build:image:
   stage: build
-  image: docker:24-cli
+  image:
+    name: docker:24-cli
+    pull_policy: ["if-not-present", "always"]  # Essayer cache local d'abord
   # Retry strategy for transient network issues
   retry:
-    max: 2
+    max: 3  # Augmenté à 3 tentatives
     when:
       - runner_system_failure
       - stuck_or_timeout_failure
+      - api_failure  # Ajouté pour erreurs API Docker Hub
   before_script:
+    # Fallback si docker CLI n'est pas disponible
+    - |
+      if ! which docker > /dev/null 2>&1; then
+        echo "⚠️  Docker CLI not found, installing as fallback..."
+        apk add --no-cache docker-cli || echo "❌ Failed to install docker-cli"
+      fi
     - apk add --no-cache bash rsync
   script:
     - echo "🚀 Build automatique déclenché par push sur main"
@@ -45,14 +57,23 @@ build:image:
 # Stage 2: Déploiement sur VPS (automatique après le build)
 deploy:production:
   stage: deploy
-  image: docker:24-cli
+  image:
+    name: docker:24-cli
+    pull_policy: ["if-not-present", "always"]  # Essayer cache local d'abord
   # Retry strategy for transient network issues
   retry:
-    max: 2
+    max: 3  # Augmenté à 3 tentatives
     when:
       - runner_system_failure
       - stuck_or_timeout_failure
+      - api_failure  # Ajouté pour erreurs API Docker Hub
   before_script:
+    # Fallback si docker CLI n'est pas disponible
+    - |
+      if ! which docker > /dev/null 2>&1; then
+        echo "⚠️  Docker CLI not found, installing as fallback..."
+        apk add --no-cache docker-cli || echo "❌ Failed to install docker-cli"
+      fi
     - apk add --no-cache bash
   script:
     - echo "🔄 Déploiement automatique sur production..."
@@ -209,7 +230,9 @@ deploy:production:
 # Job de rollback en cas de problème
 rollback:production:
   stage: deploy
-  image: docker:24-cli
+  image:
+    name: docker:24-cli
+    pull_policy: ["if-not-present", "always"]  # Essayer cache local d'abord
   before_script:
     - apk add --no-cache bash
   script:
