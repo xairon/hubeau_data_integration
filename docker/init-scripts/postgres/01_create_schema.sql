@@ -388,9 +388,16 @@ CREATE INDEX IF NOT EXISTS idx_piezometry_stations_commune ON hubeau.piezometry_
 CREATE INDEX IF NOT EXISTS idx_piezometry_stations_dept ON hubeau.piezometry_stations(code_departement);
 CREATE INDEX IF NOT EXISTS idx_hydrometry_sites_dept ON hubeau.hydrometry_sites(code_departement);
 
--- Index géospatiaux (si PostGIS est installé)
--- CREATE INDEX IF NOT EXISTS idx_piezometry_stations_geom ON hubeau.piezometry_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
--- CREATE INDEX IF NOT EXISTS idx_hydrometry_sites_geom ON hubeau.hydrometry_sites USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+-- Index géospatiaux PostGIS pour requêtes spatiales rapides
+CREATE INDEX IF NOT EXISTS idx_piezometry_stations_geom ON hubeau.piezometry_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_hydrometry_sites_geom ON hubeau.hydrometry_sites USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_hydrometry_stations_geom ON hubeau.hydrometry_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_quality_rivers_stations_geom ON hubeau.quality_rivers_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_quality_groundwater_stations_geom ON hubeau.quality_groundwater_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_ecoulement_stations_geom ON hubeau.ecoulement_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_hydrobio_stations_geom ON hubeau.hydrobio_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_prelevements_ouvrages_geom ON hubeau.prelevements_ouvrages USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
+CREATE INDEX IF NOT EXISTS idx_temperature_stations_geom ON hubeau.temperature_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
 
 -- ============================================
 -- TRIGGERS POUR UPDATE AUTOMATIQUE

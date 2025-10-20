@@ -85,8 +85,8 @@ def get_postgres_destination(config: Dict = None) -> Any:
     return dlt.destinations.postgres(
         credentials=credentials,
         dataset_name=dataset_name,
-        # Désactiver la création automatique de tables par DLT
-        replace_strategy="truncate-and-insert",  # Utiliser les tables existantes
+        # Configuration pour utiliser les tables existantes
+        create_indexes=False,  # Désactiver la création d'index automatique
         **{k: v for k, v in config.items() if k not in ["credentials", "dataset_name", "enable_postgis"]}
     )
 
