@@ -49,47 +49,6 @@ from .dlt_assets import (
     prelevements_points_reference,
 )
 
-# Assets Hub'Eau dlt COMPLETS (tous les attributs - nouvelle architecture)
-from .dlt_assets_complete import (
-    # Hydrométrie complète
-    hydrometry_stations_complete_reference,
-    hydrometry_sites_complete_reference,
-    hydrometry_obs_elab_complete,
-    
-    # Piézométrie complète
-    piezometry_stations_complete_reference,
-    piezometry_chroniques_tr_complete,
-    
-    # Qualité cours d'eau complète
-    quality_rivers_stations_complete_reference,
-    quality_rivers_operations_complete_reference,
-    quality_rivers_analyses_complete,
-    quality_rivers_conditions_complete,
-    
-    # Qualité nappes complète
-    quality_groundwater_stations_complete_reference,
-    quality_groundwater_analyses_complete,
-    
-    # Température complète
-    temperature_stations_complete_reference,
-    temperature_chroniques_complete,
-    
-    # Écoulement complet
-    ecoulement_stations_complete_reference,
-    ecoulement_campagnes_complete_reference,
-    ecoulement_observations_complete,
-    
-    # Hydrobiologie complète
-    hydrobio_stations_complete_reference,
-    hydrobio_indices_complete,
-    hydrobio_taxons_complete,
-    
-    # Prélèvements complet
-    prelevements_ouvrages_complete_reference,
-    prelevements_points_complete_reference,
-    prelevements_chroniques_complete,
-)
-
 # Sources externes (référentiels géographiques et thesaurus) - SUPPRIMÉS
 # from .legacy.bdlisa_real_ingestion import bdlisa_geographic_bronze_real
 # from .legacy.sandre_real_ingestion import sandre_thesaurus_bronze_real
@@ -126,43 +85,14 @@ hubeau_raw_assets = [
     temperature_chroniques,
 ]
 
-# Assets de production Hub'Eau COMPLETS (tous les attributs)
-hubeau_raw_assets_complete = [
-    # Assets de stations de référence COMPLETS (pas de partition)
-    hydrometry_stations_complete_reference,
-    hydrometry_sites_complete_reference,
-    piezometry_stations_complete_reference,
-    quality_rivers_stations_complete_reference,
-    quality_rivers_operations_complete_reference,
-    quality_groundwater_stations_complete_reference,
-    temperature_stations_complete_reference,
-    ecoulement_stations_complete_reference,
-    ecoulement_campagnes_complete_reference,
-    hydrobio_stations_complete_reference,
-    prelevements_ouvrages_complete_reference,
-    prelevements_points_complete_reference,
-
-    # Assets d'observations/analyses COMPLETS (avec partitions annuelles)
-    hydrometry_obs_elab_complete,
-    piezometry_chroniques_tr_complete,
-    quality_rivers_analyses_complete,
-    quality_rivers_conditions_complete,
-    quality_groundwater_analyses_complete,
-    temperature_chroniques_complete,
-    ecoulement_observations_complete,
-    hydrobio_indices_complete,
-    hydrobio_taxons_complete,
-    prelevements_chroniques_complete,
-]
-
 # Assets externes (référentiels complémentaires) - SUPPRIMÉS
 # external_raw_assets = [
 #     bdlisa_geographic_raw_real,  # BDLISA : Formations géologiques aquifères
 #     sandre_thesaurus_raw_real     # Sandre : Nomenclatures et référentiels
 # ]
 
-# ✅ NOUVELLE ARCHITECTURE: Utiliser les assets dlt complets par défaut (TOUS les attributs)
-all_raw_assets = hubeau_raw_assets_complete
+# ✅ NOUVELLE ARCHITECTURE: Utiliser les assets dlt par défaut
+all_raw_assets = hubeau_raw_assets
 
 __all__ = [
     # Assets Hub'Eau dlt (nouvelle architecture)
