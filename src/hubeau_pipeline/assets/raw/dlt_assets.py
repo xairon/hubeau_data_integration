@@ -427,6 +427,11 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
                     "libelle_station_hydrobio": "libelle_station",
                     "uri_station_hydrobio": "uri_station"
                 }
+            elif table_name == "prelevements_points":
+                column_mappings = {
+                    "code_point_prelevement": "code_point",
+                    "nom_point_prelevement": "libelle_point"
+                }
 
             postgres_bulk_destination.load_batch(
                 table_name=table_name,
