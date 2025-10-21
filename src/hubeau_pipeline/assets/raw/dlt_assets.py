@@ -364,8 +364,9 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             destination=destination,
             dataset_name=dataset_name,
             pipelines_dir=pipelines_dir,  # Use temp directory for local working files
-            # Configuration pour éviter la création de tables parasites
-            full_refresh=False  # Éviter la recréation complète
+            # Configuration pour utiliser notre schéma existant
+            full_refresh=False,  # Éviter la recréation complète
+            schema_contract="freeze"  # Utiliser les schémas existants (pas de création automatique)
         )
 
         # Créer la source Hub'Eau
