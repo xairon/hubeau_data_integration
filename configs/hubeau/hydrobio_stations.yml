@@ -7,7 +7,7 @@ resource:
   base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
   primary_key:
   - code_station_hydrobio
-  write_disposition: replace
+  write_disposition: merge
   columns:
     code_station_hydrobio:
       data_type: text

@@ -6,7 +6,7 @@ resource:
   endpoint: /referentiel/stations
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
   primary_key: [code_station]
-  write_disposition: replace
+  write_disposition: merge
   columns:
     # Identifiants (4 attributs)
     code_site:

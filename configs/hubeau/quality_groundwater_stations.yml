@@ -7,7 +7,7 @@ resource:
   base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
   primary_key:
   - code_bss
-  write_disposition: replace
+  write_disposition: merge
   columns:
     code_bss:
       data_type: text

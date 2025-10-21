@@ -7,7 +7,7 @@ resource:
   base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
   primary_key:
   - code_point_prelevement
-  write_disposition: replace
+  write_disposition: merge
   columns:
     code_point_prelevement:
       data_type: text

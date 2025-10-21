@@ -6,7 +6,7 @@ resource:
   endpoint: /stations
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
   primary_key: [code_bss]
-  write_disposition: replace
+  write_disposition: merge
   columns:
     # Identifiants (3 attributs)
     code_bss:
