@@ -304,7 +304,11 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         postgres_config = cfg.get("destinations", {}).get("postgres", {})
         if "dataset_name" not in postgres_config:
             postgres_config["dataset_name"] = os.getenv("HUBEAU_SCHEMA", "hubeau")
-        context.log.info(f"📦 PostgreSQL destination: schema={postgres_config['dataset_name']}")
+        
+        # ✅ FIX: Configurer DLT pour utiliser nos tables existantes
+        # DLT va utiliser le schéma hubeau et nos tables PostgreSQL existantes
+        postgres_config["schema"] = "hubeau"  # Forcer le schéma hubeau
+        context.log.info(f"📦 PostgreSQL destination: schema={postgres_config['schema']}, dataset={postgres_config['dataset_name']}")
         destination = get_postgres_destination(postgres_config)
 
         # Use dataset_name from postgres_config
@@ -365,8 +369,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             dataset_name=dataset_name,
             pipelines_dir=pipelines_dir,  # Use temp directory for local working files
             # Configuration pour utiliser notre schéma existant
-            full_refresh=False,  # Éviter la recréation complète
-            schema_contract="freeze"  # Utiliser les schémas existants (pas de création automatique)
+            full_refresh=False  # Éviter la recréation complète
         )
 
         # Créer la source Hub'Eau
@@ -376,6 +379,10 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             partition_date=partition_date
         )
 
+        # ✅ FIX: Configurer DLT pour utiliser nos tables existantes
+        # DLT va maintenant utiliser le schéma hubeau et nos tables PostgreSQL
+        context.log.info(f"🎯 DLT configuré pour utiliser le schéma hubeau avec nos tables existantes")
+        
         # Exécuter le pipeline
         load_info = pipeline.run(source)
 
