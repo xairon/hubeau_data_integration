@@ -1,11 +1,12 @@
 source:
-  name: quality
-  max_table_nesting: 2
+  name: quality_rivers
+  max_table_nesting: 0
 resource:
   name: quality_rivers_stations
   endpoint: /station_pc
   base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
-  primary_key: []
+  primary_key:
+  - code_station
   write_disposition: replace
   columns:
     code_station:
@@ -14,14 +15,134 @@ resource:
     libelle_station:
       data_type: text
       nullable: true
-    latitude:
+    uri_station:
+      data_type: text
+      nullable: true
+    coordonnee_x:
       data_type: double
+      nullable: true
+    coordonnee_y:
+      data_type: double
+      nullable: true
+    code_projection:
+      data_type: text
+      nullable: true
+    libelle_projection:
+      data_type: text
       nullable: true
     longitude:
       data_type: double
       nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    geometry:
+      data_type: json
+      nullable: true
+    code_commune:
+      data_type: text
+      nullable: true
+    libelle_commune:
+      data_type: text
+      nullable: true
+    code_departement:
+      data_type: text
+      nullable: true
+    libelle_departement:
+      data_type: text
+      nullable: true
+    code_region:
+      data_type: text
+      nullable: true
+    libelle_region:
+      data_type: text
+      nullable: true
+    code_cours_eau:
+      data_type: text
+      nullable: true
+    nom_cours_eau:
+      data_type: text
+      nullable: true
+    uri_cours_eau:
+      data_type: text
+      nullable: true
+    code_masse_deau:
+      data_type: text
+      nullable: true
+    code_eu_masse_deau:
+      data_type: text
+      nullable: true
+    nom_masse_deau:
+      data_type: text
+      nullable: true
+    uri_masse_deau:
+      data_type: text
+      nullable: true
+    code_eu_sous_bassin:
+      data_type: text
+      nullable: true
+    nom_sous_bassin:
+      data_type: text
+      nullable: true
+    uri_sous_bassin:
+      data_type: text
+      nullable: true
+    code_bassin:
+      data_type: text
+      nullable: true
+    code_eu_bassin:
+      data_type: text
+      nullable: true
+    nom_bassin:
+      data_type: text
+      nullable: true
+    uri_bassin:
+      data_type: text
+      nullable: true
+    durete:
+      data_type: text
+      nullable: true
+    type_entite_hydro:
+      data_type: text
+      nullable: true
+    nature:
+      data_type: text
+      nullable: true
+    localisation_precise:
+      data_type: text
+      nullable: true
+    point_kilometrique:
+      data_type: double
+      nullable: true
+    altitude_point_caracteristique:
+      data_type: double
+      nullable: true
+    superficie_bassin_versant_reel:
+      data_type: double
+      nullable: true
+    superficie_bassin_versant_topo:
+      data_type: double
+      nullable: true
+    premier_mois_annee_etiage:
+      data_type: bigint
+      nullable: true
+    finalite:
+      data_type: text
+      nullable: true
+    commentaire:
+      data_type: text
+      nullable: true
+    date_creation:
+      data_type: date
+      nullable: true
+    date_arret:
+      data_type: date
+      nullable: true
+    date_maj_information:
+      data_type: timestamp
+      nullable: true
 extraction:
-  slicing_mode: global
+  slicing_mode: dept
   pagination:
     type: page_based
   default_params: {}
@@ -35,10 +156,14 @@ transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_ouverture
-    - date_fermeture
-    - date_maj
+    - date_creation
+    - date_arret
+    - date_maj_information
 - validate_coordinates:
+    lat_field: latitude
+    lon_field: longitude
+- handle_geometry_field:
+    geometry_field: geometry
     lat_field: latitude
     lon_field: longitude
 destinations:

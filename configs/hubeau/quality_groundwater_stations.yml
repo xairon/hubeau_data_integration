@@ -1,27 +1,246 @@
 source:
-  name: quality
-  max_table_nesting: 2
+  name: quality_groundwater
+  max_table_nesting: 0
 resource:
   name: quality_groundwater_stations
   endpoint: /stations
   base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
-  primary_key: []
+  primary_key:
+  - code_bss
   write_disposition: replace
   columns:
-    code_station:
+    code_bss:
       data_type: text
       nullable: false
-    libelle_station:
+    bss_id:
       data_type: text
       nullable: true
-    latitude:
-      data_type: double
+    urn_bss:
+      data_type: text
       nullable: true
     longitude:
       data_type: double
       nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+    altitude:
+      data_type: double
+      nullable: true
+    precision_coordonnees:
+      data_type: text
+      nullable: true
+    geometry:
+      data_type: json
+      nullable: true
+    code_insee:
+      data_type: text
+      nullable: true
+    nom_commune:
+      data_type: text
+      nullable: true
+    num_departement:
+      data_type: text
+      nullable: true
+    nom_departement:
+      data_type: text
+      nullable: true
+    nom_region:
+      data_type: text
+      nullable: true
+    circonscriptions_administrative_bassin:
+      data_type: text
+      nullable: true
+    bassin_dce:
+      data_type: text
+      nullable: true
+    code_bassin_dce:
+      data_type: text
+      nullable: true
+    urn_bassin_dce:
+      data_type: text
+      nullable: true
+    code_nature_pe:
+      data_type: text
+      nullable: true
+    nom_nature_pe:
+      data_type: text
+      nullable: true
+    uri_nature_pe:
+      data_type: text
+      nullable: true
+    libelle_pe:
+      data_type: text
+      nullable: true
+    code_etat_pe:
+      data_type: text
+      nullable: true
+    nom_etat_pe:
+      data_type: text
+      nullable: true
+    uri_etat_pe:
+      data_type: text
+      nullable: true
+    commentaire_pe:
+      data_type: text
+      nullable: true
+    code_caracteristique_aquifere:
+      data_type: text
+      nullable: true
+    nom_caracteristique_aquifere:
+      data_type: text
+      nullable: true
+    uri_caracteristique_aquifere:
+      data_type: text
+      nullable: true
+    code_mode_gisement:
+      data_type: text
+      nullable: true
+    nom_mode_gisement:
+      data_type: text
+      nullable: true
+    uri_mode_gisement:
+      data_type: text
+      nullable: true
+    profondeur_investigation:
+      data_type: double
+      nullable: true
+    codes_bdlisa:
+      data_type: json
+      nullable: true
+    urns_bdlisa:
+      data_type: json
+      nullable: true
+    codes_masse_eau:
+      data_type: json
+      nullable: true
+    noms_masse_eau:
+      data_type: json
+      nullable: true
+    urns_masse_eau:
+      data_type: json
+      nullable: true
+    codes_reseau:
+      data_type: json
+      nullable: true
+    noms_reseau:
+      data_type: json
+      nullable: true
+    uris_reseau:
+      data_type: json
+      nullable: true
+    date_debut_mesure:
+      data_type: date
+      nullable: true
+    date_fin_mesure:
+      data_type: date
+      nullable: true
 extraction:
-  slicing_mode: global
+  slicing_mode: dept
+  dept_param: num_departement
+  dept_chunk_size: 10
+  dept_list:
+  - "01"
+  - "02"
+  - "03"
+  - "04"
+  - "05"
+  - "06"
+  - "07"
+  - "08"
+  - "09"
+  - "10"
+  - "11"
+  - "12"
+  - "13"
+  - "14"
+  - "15"
+  - "16"
+  - "17"
+  - "18"
+  - "19"
+  - "21"
+  - "22"
+  - "23"
+  - "24"
+  - "25"
+  - "26"
+  - "27"
+  - "28"
+  - "29"
+  - "2A"
+  - "2B"
+  - "30"
+  - "31"
+  - "32"
+  - "33"
+  - "34"
+  - "35"
+  - "36"
+  - "37"
+  - "38"
+  - "39"
+  - "40"
+  - "41"
+  - "42"
+  - "43"
+  - "44"
+  - "45"
+  - "46"
+  - "47"
+  - "48"
+  - "49"
+  - "50"
+  - "51"
+  - "52"
+  - "53"
+  - "54"
+  - "55"
+  - "56"
+  - "57"
+  - "58"
+  - "59"
+  - "60"
+  - "61"
+  - "62"
+  - "63"
+  - "64"
+  - "65"
+  - "66"
+  - "67"
+  - "68"
+  - "69"
+  - "70"
+  - "71"
+  - "72"
+  - "73"
+  - "74"
+  - "75"
+  - "76"
+  - "77"
+  - "78"
+  - "79"
+  - "80"
+  - "81"
+  - "82"
+  - "83"
+  - "84"
+  - "85"
+  - "86"
+  - "87"
+  - "88"
+  - "89"
+  - "90"
+  - "91"
+  - "92"
+  - "93"
+  - "94"
+  - "95"
+  - "971"
+  - "972"
+  - "973"
+  - "974"
+  - "976"
   pagination:
     type: page_based
   default_params: {}
@@ -35,12 +254,25 @@ transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_ouverture
-    - date_fermeture
-    - date_maj
+    - date_debut_mesure
+    - date_fin_mesure
 - validate_coordinates:
     lat_field: latitude
     lon_field: longitude
+- handle_geometry_field:
+    geometry_field: geometry
+    lat_field: latitude
+    lon_field: longitude
+- handle_jsonb_arrays:
+    fields:
+    - codes_bdlisa
+    - urns_bdlisa
+    - codes_masse_eau
+    - noms_masse_eau
+    - urns_masse_eau
+    - codes_reseau
+    - noms_reseau
+    - uris_reseau
 destinations:
   postgres:
     dataset_name: hubeau

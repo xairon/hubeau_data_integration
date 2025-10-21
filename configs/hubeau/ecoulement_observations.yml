@@ -1,13 +1,13 @@
 source:
   name: ecoulement
-  max_table_nesting: 2
+  max_table_nesting: 0
 resource:
   name: ecoulement_observations
   endpoint: /observations
   base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
   primary_key:
   - code_station
-  - date_obs
+  - date_observation
   write_disposition: merge
   columns:
     code_station:
@@ -16,41 +16,214 @@ resource:
     libelle_station:
       data_type: text
       nullable: true
-    latitude:
+    uri_station:
+      data_type: text
+      nullable: true
+    coordonnee_x_station:
       data_type: double
+      nullable: true
+    coordonnee_y_station:
+      data_type: double
+      nullable: true
+    code_projection_station:
+      data_type: text
+      nullable: true
+    libelle_projection_station:
+      data_type: text
       nullable: true
     longitude:
       data_type: double
       nullable: true
-    date_obs:
-      data_type: timestamp
-      nullable: false
-    resultat:
+    latitude:
       data_type: double
       nullable: true
-    code_parametre:
+    geometry:
+      data_type: json
+      nullable: true
+    code_departement:
+      data_type: text
+      nullable: true
+    libelle_departement:
+      data_type: text
+      nullable: true
+    code_commune:
+      data_type: text
+      nullable: true
+    libelle_commune:
+      data_type: text
+      nullable: true
+    code_region:
+      data_type: text
+      nullable: true
+    libelle_region:
+      data_type: text
+      nullable: true
+    code_bassin:
+      data_type: text
+      nullable: true
+    libelle_bassin:
+      data_type: text
+      nullable: true
+    code_cours_eau:
+      data_type: text
+      nullable: true
+    libelle_cours_eau:
+      data_type: text
+      nullable: true
+    uri_cours_eau:
+      data_type: text
+      nullable: true
+    date_observation:
+      data_type: date
+      nullable: false
+    code_campagne:
+      data_type: text
+      nullable: true
+    code_ecoulement:
+      data_type: text
+      nullable: true
+    libelle_ecoulement:
+      data_type: text
+      nullable: true
+    code_reseau:
+      data_type: text
+      nullable: true
+    libelle_reseau:
+      data_type: text
+      nullable: true
+    uri_reseau:
       data_type: text
       nullable: true
 extraction:
-  slicing_mode: global
+  slicing_mode: dept_year
+  dept_param: code_departement
+  dept_chunk_size: 10
+  dept_list:
+  - '01'
+  - '02'
+  - '03'
+  - '04'
+  - '05'
+  - '06'
+  - '07'
+  - 08
+  - 09
+  - '10'
+  - '11'
+  - '12'
+  - '13'
+  - '14'
+  - '15'
+  - '16'
+  - '17'
+  - '18'
+  - '19'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '25'
+  - '26'
+  - '27'
+  - '28'
+  - '29'
+  - '30'
+  - '31'
+  - '32'
+  - '33'
+  - '34'
+  - '35'
+  - '36'
+  - '37'
+  - '38'
+  - '39'
+  - '40'
+  - '41'
+  - '42'
+  - '43'
+  - '44'
+  - '45'
+  - '46'
+  - '47'
+  - '48'
+  - '49'
+  - '50'
+  - '51'
+  - '52'
+  - '53'
+  - '54'
+  - '55'
+  - '56'
+  - '57'
+  - '58'
+  - '59'
+  - '60'
+  - '61'
+  - '62'
+  - '63'
+  - '64'
+  - '65'
+  - '66'
+  - '67'
+  - '68'
+  - '69'
+  - '70'
+  - '71'
+  - '72'
+  - '73'
+  - '74'
+  - '75'
+  - '76'
+  - '77'
+  - '78'
+  - '79'
+  - '80'
+  - '81'
+  - '82'
+  - '83'
+  - '84'
+  - '85'
+  - '86'
+  - '87'
+  - '88'
+  - '89'
+  - '90'
+  - '91'
+  - '92'
+  - '93'
+  - '94'
+  - '95'
+  - 2A
+  - 2B
+  - '971'
+  - '972'
+  - '973'
+  - '974'
+  - '976'
+  year_param: annee
+  start_year: 2012
+  end_year: 2024
   pagination:
     type: page_based
-  default_params:
-    format: json
-  records_path: $.data
+  default_params: {}
 performance:
   parallelism: 5
   chunk_size: 10000
   retry_times: 3
   retry_delay: 2.0
-  rate_limit:
-    target_rps: 5.0
-    max_concurrency: 1
+  rate_limit: 2.0
 transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_obs
+    - date_observation
+- validate_coordinates:
+    lat_field: latitude
+    lon_field: longitude
+- handle_geometry_field:
+    geometry_field: geometry
+    lat_field: latitude
+    lon_field: longitude
 destinations:
   postgres:
     dataset_name: hubeau

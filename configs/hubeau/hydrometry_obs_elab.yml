@@ -5,39 +5,79 @@ resource:
   name: hydrometry_obs_elab
   endpoint: /obs_elab
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
-  primary_key:
-  - code_station
-  - date_obs_elab
-  - grandeur_hydro_elab
-  write_disposition: merge
+  primary_key: [code_station, date_obs_elab, grandeur_hydro_elab]
+  write_disposition: append
   columns:
-    id:
+    # Identifiants (3 attributs)
+    code_site:
       data_type: text
       nullable: true
+    code_station:
+      data_type: text
+      nullable: false
+    date_obs_elab:
+      data_type: timestamp
+      nullable: false
+    grandeur_hydro_elab:
+      data_type: text
+      nullable: false
+
+    # Localisation (2 attributs)
+    longitude:
+      data_type: double
+      nullable: true
+    latitude:
+      data_type: double
+      nullable: true
+
+    # Résultat (2 attributs)
+    resultat_obs_elab:
+      data_type: double
+      nullable: true
+    date_prod:
+      data_type: timestamp
+      nullable: true
+
+    # Qualification (6 attributs)
+    code_statut:
+      data_type: text
+      nullable: true
+    libelle_statut:
+      data_type: text
+      nullable: true
+    code_qualification:
+      data_type: text
+      nullable: true
+    libelle_qualification:
+      data_type: text
+      nullable: true
+    code_methode:
+      data_type: text
+      nullable: true
+    libelle_methode:
+      data_type: text
+      nullable: true
+
 extraction:
-  slicing_mode: global_chunked
-  station_param: code_station
-  station_chunk_size: 80
-  start_param: date_debut_obs_elab
-  end_param: date_fin_obs_elab
+  slicing_mode: station_month_chunked
   pagination:
     type: page_based
-  default_params:
-    format: json
-  records_path: $.data
+  default_params: {}
 performance:
   parallelism: 5
   chunk_size: 10000
   retry_times: 3
   retry_delay: 2.0
-  rate_limit:
-    target_rps: 5.0
-    max_concurrency: 1
+  rate_limit: 2.0
 transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_obs
+    - date_obs_elab
+    - date_prod
+- validate_coordinates:
+    lat_field: latitude
+    lon_field: longitude
 destinations:
   postgres:
     dataset_name: hubeau

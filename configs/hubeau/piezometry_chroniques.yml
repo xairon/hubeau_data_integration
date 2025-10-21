@@ -3,70 +3,76 @@ source:
   max_table_nesting: 2
 resource:
   name: piezometry_chroniques
-  endpoint: /chroniques
+  endpoint: /chroniques_tr
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-  primary_key:
-  - code_bss
-  - timestamp_mesure
-  write_disposition: merge
+  primary_key: [code_bss, timestamp_mesure]
+  write_disposition: append
   columns:
-    code_station:
+    # Identifiants (3 attributs)
+    code_bss:
       data_type: text
       nullable: false
-    libelle_station:
+    bss_id:
       data_type: text
+      nullable: true
+    urn_bss:
+      data_type: text
+      nullable: true
+
+    # Temporel (3 attributs)
+    date_mesure:
+      data_type: date
+      nullable: true
+    timestamp_mesure:
+      data_type: timestamp
+      nullable: false
+    date_maj:
+      data_type: timestamp
+      nullable: true
+
+    # Localisation (2 attributs)
+    longitude:
+      data_type: double
       nullable: true
     latitude:
       data_type: double
       nullable: true
-    longitude:
+
+    # Niveaux (3 attributs)
+    altitude_station:
       data_type: double
       nullable: true
-    date_obs:
-      data_type: timestamp
-      nullable: false
-    resultat:
+    altitude_repere:
       data_type: double
       nullable: true
-    code_parametre:
-      data_type: text
+    niveau_eau_ngf:
+      data_type: double
       nullable: true
+    profondeur_nappe:
+      data_type: double
+      nullable: true
+
 extraction:
-  slicing_mode: global_chunked
-  station_param: code_bss
-  station_chunk_size: 50
-  start_param: date_debut_mesure
-  end_param: date_fin_mesure
+  slicing_mode: station_month_chunked
   pagination:
     type: page_based
-  default_params:
-    format: json
-  records_path: $.data
-temporal_filter:
-  date_field: timestamp_mesure
-  start_param: date_debut_mesure
-  end_param: date_fin_mesure
-  start_date: "2024-01-01"
-  end_offset_days: 0
-fallbacks:
-  truncation_threshold: 20000
-  split_chain:
-    - station_month
+  default_params: {}
 performance:
   parallelism: 5
   chunk_size: 10000
   retry_times: 3
   retry_delay: 2.0
-  rate_limit:
-    target_rps: 5.0
-    max_concurrency: 1
+  rate_limit: 2.0
 transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_obs
-    - date_debut
-    - date_fin
+    - date_mesure
+    - timestamp_mesure
+    - date_maj
+- validate_coordinates:
+    lat_field: latitude
+    lon_field: longitude
 destinations:
   postgres:
     dataset_name: hubeau

@@ -5,21 +5,141 @@ resource:
   name: hydrometry_stations
   endpoint: /referentiel/stations
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
-  primary_key: []
+  primary_key: [code_station]
   write_disposition: replace
   columns:
+    # Identifiants (4 attributs)
+    code_site:
+      data_type: text
+      nullable: true
+    libelle_site:
+      data_type: text
+      nullable: true
     code_station:
       data_type: text
       nullable: false
     libelle_station:
       data_type: text
       nullable: true
-    latitude:
+
+    # Localisation (6 attributs)
+    coordonnee_x_station:
       data_type: double
       nullable: true
-    longitude:
+    coordonnee_y_station:
       data_type: double
       nullable: true
+    code_projection:
+      data_type: text
+      nullable: true
+    longitude_station:
+      data_type: double
+      nullable: true
+    latitude_station:
+      data_type: double
+      nullable: true
+    altitude_ref_alti_station:
+      data_type: double
+      nullable: true
+
+    # Administratif (10 attributs)
+    code_commune_station:
+      data_type: text
+      nullable: true
+    libelle_commune:
+      data_type: text
+      nullable: true
+    code_departement:
+      data_type: text
+      nullable: true
+    libelle_departement:
+      data_type: text
+      nullable: true
+    code_region:
+      data_type: text
+      nullable: true
+    libelle_region:
+      data_type: text
+      nullable: true
+
+    # Cours d'Eau (3 attributs)
+    code_cours_eau:
+      data_type: text
+      nullable: true
+    libelle_cours_eau:
+      data_type: text
+      nullable: true
+    uri_cours_eau:
+      data_type: text
+      nullable: true
+
+    # Caractéristiques (4 attributs)
+    type_station:
+      data_type: text
+      nullable: true
+    influence_locale_station:
+      data_type: text
+      nullable: true
+    commentaire_influence_locale_station:
+      data_type: text
+      nullable: true
+    commentaire_station:
+      data_type: text
+      nullable: true
+    descriptif_station:
+      data_type: text
+      nullable: true
+
+    # État (4 attributs)
+    en_service:
+      data_type: boolean
+      nullable: true
+    date_ouverture_station:
+      data_type: date
+      nullable: true
+    date_fermeture_station:
+      data_type: date
+      nullable: true
+    date_maj_station:
+      data_type: timestamp
+      nullable: true
+
+    # Qualité (5 attributs)
+    code_regime_station:
+      data_type: text
+      nullable: true
+    qualification_donnees_station:
+      data_type: text
+      nullable: true
+    code_finalite_station:
+      data_type: text
+      nullable: true
+    type_contexte_loi_stat_station:
+      data_type: text
+      nullable: true
+    type_loi_station:
+      data_type: text
+      nullable: true
+    code_sandre_reseau_station:
+      data_type: text
+      nullable: true
+
+    # Altimétrie (3 attributs)
+    date_debut_ref_alti_station:
+      data_type: date
+      nullable: true
+    date_activation_ref_alti_station:
+      data_type: date
+      nullable: true
+    date_maj_ref_alti_station:
+      data_type: date
+      nullable: true
+
+    # Géométrie
+    geometry:
+      data_type: json
+      nullable: true
+
 extraction:
   slicing_mode: global
   pagination:
@@ -35,12 +155,15 @@ transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_ouverture
-    - date_fermeture
-    - date_maj
+    - date_ouverture_station
+    - date_fermeture_station
+    - date_maj_station
+    - date_debut_ref_alti_station
+    - date_activation_ref_alti_station
+    - date_maj_ref_alti_station
 - validate_coordinates:
-    lat_field: latitude
-    lon_field: longitude
+    lat_field: latitude_station
+    lon_field: longitude_station
 destinations:
   postgres:
     dataset_name: hubeau
