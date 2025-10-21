@@ -47,19 +47,34 @@ class PostgresBulkDestination:
         """
         Utilise COPY FROM pour charger un DataFrame rapidement
         100x plus rapide que INSERT classique
+        Filtre automatiquement les colonnes pour correspondre à la table
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
+                # Récupérer les colonnes de la table cible
+                target_columns = self._get_target_columns(table_name)
+
+                # Filtrer le DataFrame pour ne garder que les colonnes existantes
+                df_columns = df.columns.tolist()
+                common_columns = [col for col in df_columns if col in target_columns]
+
+                if not common_columns:
+                    raise ValueError(f"Aucune colonne commune entre DataFrame et table {table_name}")
+
+                logger.info(f"📊 COPY: {len(common_columns)}/{len(df_columns)} colonnes communes")
+
+                # Filtrer le DataFrame
+                df_filtered = df[common_columns].copy()
+
                 # Créer un buffer CSV en mémoire
                 output = io.StringIO()
-                df.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
+                df_filtered.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
                 output.seek(0)
 
                 # COPY FROM STDIN
-                columns = df.columns.tolist()
                 copy_sql = f"""
-                    COPY {self.schema_name}.{table_name} ({','.join(columns)})
+                    COPY {self.schema_name}.{table_name} ({','.join(common_columns)})
                     FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')
                 """
 
@@ -75,6 +90,21 @@ class PostgresBulkDestination:
         finally:
             conn.close()
 
+    def _get_target_columns(self, table_name: str) -> List[str]:
+        """Récupère les colonnes de la table cible"""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(f"""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = %s AND table_name = %s
+                    ORDER BY ordinal_position
+                """, (self.schema_name, table_name))
+                return [row[0] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def _upsert_dataframe(
         self,
         df: pd.DataFrame,
@@ -83,42 +113,61 @@ class PostgresBulkDestination:
     ):
         """
         UPSERT optimisé avec staging table + INSERT ON CONFLICT
+        Gère automatiquement les colonnes manquantes/supplémentaires
         """
         conn = self._get_connection()
-        staging_table = f"{table_name}_staging_{int(time.time() * 1000)}"
+        staging_table = f"staging_{int(time.time() * 1000)}"
 
         try:
             with conn.cursor() as cursor:
-                # 1. Créer table staging temporaire
+                # 1. Récupérer les colonnes de la table cible
+                target_columns = self._get_target_columns(table_name)
+
+                # 2. Filtrer le DataFrame pour ne garder que les colonnes existantes
+                df_columns = df.columns.tolist()
+                common_columns = [col for col in df_columns if col in target_columns]
+
+                if not common_columns:
+                    raise ValueError(f"Aucune colonne commune entre DataFrame et table {table_name}")
+
+                # Vérifier que les primary keys sont présentes
+                missing_pks = [pk for pk in primary_keys if pk not in common_columns]
+                if missing_pks:
+                    raise ValueError(f"Primary keys manquantes dans les données: {missing_pks}")
+
+                logger.info(f"📊 Colonnes: {len(common_columns)}/{len(df_columns)} communes avec {table_name}")
+
+                # Filtrer le DataFrame
+                df_filtered = df[common_columns].copy()
+
+                # 3. Créer table staging avec les colonnes communes
                 cursor.execute(f"""
                     CREATE TEMP TABLE {staging_table}
                     (LIKE {self.schema_name}.{table_name} INCLUDING DEFAULTS)
                 """)
 
-                # 2. COPY rapide dans staging
+                # 4. COPY dans staging (seulement les colonnes communes)
                 output = io.StringIO()
-                df.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
+                df_filtered.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
                 output.seek(0)
 
-                columns = df.columns.tolist()
                 cursor.copy_expert(
-                    f"COPY {staging_table} ({','.join(columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')",
+                    f"COPY {staging_table} ({','.join(common_columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')",
                     output
                 )
 
-                # 3. UPSERT depuis staging vers table principale
-                update_cols = [c for c in columns if c not in primary_keys]
+                # 5. UPSERT depuis staging vers table principale
+                update_cols = [c for c in common_columns if c not in primary_keys]
 
                 if update_cols:
                     update_set = ', '.join([f"{c} = EXCLUDED.{c}" for c in update_cols])
                     conflict_action = f"DO UPDATE SET {update_set}"
                 else:
-                    # Si pas de colonnes à update (seulement primary keys), on ignore
                     conflict_action = "DO NOTHING"
 
                 upsert_sql = f"""
-                    INSERT INTO {self.schema_name}.{table_name} ({','.join(columns)})
-                    SELECT {','.join(columns)} FROM {staging_table}
+                    INSERT INTO {self.schema_name}.{table_name} ({','.join(common_columns)})
+                    SELECT {','.join(common_columns)} FROM {staging_table}
                     ON CONFLICT ({','.join(primary_keys)})
                     {conflict_action}
                 """
@@ -126,7 +175,6 @@ class PostgresBulkDestination:
                 cursor.execute(upsert_sql)
                 affected = cursor.rowcount
 
-                # 4. Drop staging table (auto car TEMP)
                 conn.commit()
 
                 logger.info(f"✅ UPSERT réussi: {affected} records modifiés dans {self.schema_name}.{table_name}")
