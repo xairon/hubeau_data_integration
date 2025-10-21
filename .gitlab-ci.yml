@@ -218,8 +218,16 @@ deploy:production:
       for script in /srv/brgm/docker/init-scripts/postgres/*.sql; do
         script_name=$(basename "$script")
         echo "📄 Exécution de $script_name..."
-        if docker exec -i brgm-postgres psql -U postgres -d postgres < "$script" 2>&1 | grep -i "error"; then
+
+        # Capturer la sortie pour analyse
+        output=$(docker exec -i brgm-postgres psql -U postgres -d postgres < "$script" 2>&1)
+
+        # Filtrer les erreurs bénignes (normales pour scripts idempotents)
+        errors=$(echo "$output" | grep -i "error" | grep -v "already exists" || true)
+
+        if [ -n "$errors" ]; then
           echo "❌ Erreur lors de l'exécution de $script_name"
+          echo "$errors"
           exit 1
         else
           echo "✅ $script_name exécuté avec succès"
