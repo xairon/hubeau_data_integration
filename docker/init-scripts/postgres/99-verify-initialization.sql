@@ -85,26 +85,17 @@ BEGIN
     END IF;
 END $$;
 
--- Créer la table de log si elle n'existe pas
-CREATE TABLE IF NOT EXISTS hubeau.initialization_log (
-    id SERIAL PRIMARY KEY,
-    message TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Log de succès
-INSERT INTO hubeau.initialization_log (message, created_at)
-VALUES ('Base de données Hub''Eau initialisée avec succès', CURRENT_TIMESTAMP)
-ON CONFLICT DO NOTHING;
-
--- Message de confirmation
+-- Message de confirmation final
 DO $$
+DECLARE
+    table_count INT;
 BEGIN
+    SELECT COUNT(*) INTO table_count
+    FROM information_schema.tables
+    WHERE table_schema = 'hubeau';
+
     RAISE NOTICE '✅ Initialisation Hub''Eau terminée avec succès !';
     RAISE NOTICE '📊 Schéma: hubeau';
-    RAISE NOTICE '🗄️ Tables créées: %', (
-        SELECT COUNT(*) FROM information_schema.tables 
-        WHERE table_schema = 'hubeau'
-    );
+    RAISE NOTICE '🗄️ Tables créées: %', table_count;
     RAISE NOTICE '🗺️ Extension PostGIS: installée';
 END $$;
