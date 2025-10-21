@@ -379,12 +379,15 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             partition_date=partition_date
         )
 
-        # ✅ FIX: Configurer DLT pour utiliser nos tables existantes
-        # DLT va maintenant utiliser le schéma hubeau et nos tables PostgreSQL
-        context.log.info(f"🎯 DLT configuré pour utiliser le schéma hubeau avec nos tables existantes")
+        # ✅ FIX: Configurer DLT pour utiliser nos tables PostgreSQL existantes
+        # DLT va maintenant écrire directement dans nos tables existantes
+        context.log.info(f"🎯 DLT configuré pour écrire dans les tables PostgreSQL existantes")
         
-        # Exécuter le pipeline
-        load_info = pipeline.run(source)
+        # Déterminer le nom de la table existante basé sur le fichier YAML
+        table_name = resource_name  # Utiliser le nom de la resource comme nom de table
+        
+        # Exécuter le pipeline avec le nom de table spécifique
+        load_info = pipeline.run(source, table_name=table_name)
 
     finally:
         # Restore original print function
