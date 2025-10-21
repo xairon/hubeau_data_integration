@@ -181,6 +181,29 @@ deploy:production:
         echo "ℹ️  FORCE_POSTGRES_RESET non défini ou = false - Volume PostgreSQL conservé"
         echo "💡 Pour réinitialiser PostgreSQL: définir FORCE_POSTGRES_RESET=true dans GitLab CI/CD Variables"
       fi
+    - |
+      if [ "$FORCE_HUBEAU_DB_RESET" = "true" ]; then
+        echo "⚠️  FORCE_HUBEAU_DB_RESET=true détecté dans GitLab CI/CD Variables"
+        echo "🗑️  Suppression complète du container et volume PostgreSQL Hub'Eau..."
+
+        # Arrêter et supprimer le container postgres si existant
+        docker compose -f docker-compose.production.yml stop postgres 2>/dev/null || true
+        docker compose -f docker-compose.production.yml rm -f postgres 2>/dev/null || true
+        docker rm -f brgm-postgres 2>/dev/null || true
+
+        # Supprimer le volume bind mount
+        if [ -d "/srv/brgm-data/postgres" ]; then
+          rm -rf /srv/brgm-data/postgres
+          echo "✅ Volume /srv/brgm-data/postgres supprimé"
+        else
+          echo "ℹ️  Volume /srv/brgm-data/postgres n'existe pas (déjà supprimé ou première installation)"
+        fi
+
+        echo "📝 Base Hub'Eau sera recréée avec les scripts d'initialisation au prochain démarrage"
+      else
+        echo "ℹ️  FORCE_HUBEAU_DB_RESET non défini ou = false - Volume PostgreSQL Hub'Eau conservé"
+        echo "💡 Pour réinitialiser la base Hub'Eau: définir FORCE_HUBEAU_DB_RESET=true dans GitLab CI/CD Variables"
+      fi
     - echo "🚀 Démarrage avec la nouvelle image..."
     - |
       if ! docker compose -f docker-compose.production.yml up -d; then
@@ -191,14 +214,64 @@ deploy:production:
         docker logs brgm-dagster-postgres --tail 50 2>/dev/null || echo "Postgres container not found"
         exit 1
       fi
-    - echo "⏳ Attente des services (30s initial)..."
-    - sleep 30
-    - echo "📊 Status préliminaire des conteneurs:"
-    - docker compose -f docker-compose.production.yml ps
-    - echo "📋 Logs Worker (premières 30 lignes):"
-    - docker logs brgm-dlt-worker --tail 30 || echo "⚠️  Worker logs not available yet"
-    - echo "⏳ Attente supplémentaire (60s)..."
-    - sleep 60
+    - echo "⏳ Attente et vérification complète de l'initialisation PostgreSQL Hub'Eau..."
+    - |
+      # Attendre que PostgreSQL Hub'Eau soit complètement initialisé
+      max_attempts=60
+      attempt=1
+      initialized=false
+
+      while [ $attempt -le $max_attempts ]; do
+        echo "🔍 Vérification initialisation Hub'Eau (tentative $attempt/$max_attempts)..."
+
+        # Vérifier que PostgreSQL répond
+        if ! docker exec brgm-postgres pg_isready -U postgres -d postgres > /dev/null 2>&1; then
+          echo "   ⏳ PostgreSQL pas encore prêt..."
+          sleep 5
+          attempt=$((attempt + 1))
+          continue
+        fi
+
+        # Vérifier que le schéma hubeau existe
+        if ! docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT 1 FROM information_schema.schemata WHERE schema_name='hubeau'" 2>/dev/null | grep -q "1"; then
+          echo "   ⏳ Schéma hubeau pas encore créé..."
+          sleep 5
+          attempt=$((attempt + 1))
+          continue
+        fi
+
+        # Compter les tables créées
+        table_count=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hubeau'" 2>/dev/null | tr -d ' ')
+
+        if [ -z "$table_count" ] || [ "$table_count" -lt 15 ]; then
+          echo "   ⏳ Seulement $table_count tables créées (minimum 15 requis)..."
+          sleep 5
+          attempt=$((attempt + 1))
+          continue
+        fi
+
+        # Vérifier que la table initialization_log existe et contient des données
+        log_count=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM hubeau.initialization_log" 2>/dev/null | tr -d ' ')
+        if [ -n "$log_count" ] && [ "$log_count" -ge 1 ]; then
+          echo "✅ Initialisation Hub'Eau complète ! ($table_count tables créées)"
+          initialized=true
+          break
+        else
+          echo "   ⏳ Table initialization_log vide ou inexistante..."
+          sleep 5
+          attempt=$((attempt + 1))
+          continue
+        fi
+      done
+
+      if [ "$initialized" = "false" ]; then
+        echo "❌ ERREUR: PostgreSQL Hub'Eau non initialisé après $max_attempts tentatives (5 minutes)"
+        echo "📊 Logs PostgreSQL Hub'Eau (100 dernières lignes):"
+        docker logs brgm-postgres --tail 100
+        echo "📊 Status du container:"
+        docker inspect brgm-postgres --format='{{.State.Status}}: {{.State.Error}}'
+        exit 1
+      fi
     - echo "✅ Vérification des conteneurs..."
     - docker compose -f docker-compose.production.yml ps
     - echo "🔍 Test de connexion PostgreSQL Dagster..."
@@ -212,6 +285,19 @@ deploy:production:
         docker logs brgm-dagster-postgres --tail 50
         exit 1
       fi
+    - echo "📊 Résumé final de l'initialisation Hub'Eau..."
+    - |
+      # Afficher un résumé (vérification déjà faite dans l'étape précédente)
+      table_count=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hubeau'" | tr -d ' ')
+      echo "✅ PostgreSQL Hub'Eau initialisé et vérifié"
+      echo "📊 Résumé:"
+      echo "   - Schéma: hubeau"
+      echo "   - Tables créées: $table_count"
+      echo "   - PostGIS: installé"
+
+      # Afficher les premières tables comme confirmation
+      echo "📋 Exemples de tables créées:"
+      docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT '   - ' || table_name FROM information_schema.tables WHERE table_schema='hubeau' ORDER BY table_name LIMIT 5"
     - echo "🔍 Vérification des variables d'environnement dans dagster_webserver..."
     - |
       echo "Variables DAGSTER_PG dans le conteneur webserver:"
