@@ -166,8 +166,13 @@ deploy:production:
     - echo "  - PG_PASSWORD défini=$([ -n "$PG_PASSWORD" ] && echo 'OUI' || echo 'NON')"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down
+    - echo "🔍 DEBUG - Vérification des variables d'environnement:"
+    - echo "  FORCE_HUBEAU_DB_RESET = '$FORCE_HUBEAU_DB_RESET'"
+    - echo "  Type: $([ -z "$FORCE_HUBEAU_DB_RESET" ] && echo 'VIDE' || echo 'DÉFINIE')"
+    - echo "  Valeur brute: [$FORCE_HUBEAU_DB_RESET]"
+    - env | grep FORCE || echo "  Aucune variable FORCE trouvée"
     - |
-      if [ "$FORCE_POSTGRES_RESET" = "true" ]; then
+      if [ "$(echo "$FORCE_POSTGRES_RESET" | tr '[:upper:]' '[:lower:]' | tr -d ' ')" = "true" ]; then
         echo "⚠️  FORCE_POSTGRES_RESET=true détecté dans GitLab CI/CD Variables"
         echo "🗑️  Suppression du volume PostgreSQL Dagster pour forcer la réinitialisation..."
         if [ -d "/srv/brgm-data/dagster_pg" ]; then
@@ -182,7 +187,7 @@ deploy:production:
         echo "💡 Pour réinitialiser PostgreSQL: définir FORCE_POSTGRES_RESET=true dans GitLab CI/CD Variables"
       fi
     - |
-      if [ "$FORCE_HUBEAU_DB_RESET" = "true" ]; then
+      if [ "$(echo "$FORCE_HUBEAU_DB_RESET" | tr '[:upper:]' '[:lower:]' | tr -d ' ')" = "true" ]; then
         echo "⚠️  FORCE_HUBEAU_DB_RESET=true détecté dans GitLab CI/CD Variables"
         echo "🗑️  Suppression complète du container et volume PostgreSQL Hub'Eau..."
 
@@ -220,6 +225,9 @@ deploy:production:
       max_attempts=60
       attempt=1
       initialized=false
+
+      # Désactiver l'arrêt sur erreur pour la boucle de vérification
+      set +e
 
       while [ $attempt -le $max_attempts ]; do
         echo "🔍 Vérification initialisation Hub'Eau (tentative $attempt/$max_attempts)..."
@@ -263,6 +271,9 @@ deploy:production:
           continue
         fi
       done
+
+      # Réactiver l'arrêt sur erreur après la boucle
+      set -e
 
       if [ "$initialized" = "false" ]; then
         echo "❌ ERREUR: PostgreSQL Hub'Eau non initialisé après $max_attempts tentatives (5 minutes)"
