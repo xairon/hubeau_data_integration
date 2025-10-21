@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrometry_observations (
 -- Table des stations de piézométrie
 CREATE TABLE IF NOT EXISTS hubeau.piezometry_stations (
     code_bss VARCHAR(20) PRIMARY KEY,
-    urn_bss VARCHAR(50),
+    urn_bss VARCHAR(100),
     date_recherche DATE,
     bss_id VARCHAR(20),
     code_commune_insee VARCHAR(10),

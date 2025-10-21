@@ -131,8 +131,15 @@ class PostgresBulkDestination:
             # Nettoyer les colonnes object qui peuvent contenir des listes/dicts
             if df_clean[col].dtype == 'object':
                 def clean_value(val):
-                    if val is None or pd.isna(val):
+                    if val is None:
                         return None
+                    # Handle pandas NA values and arrays properly
+                    try:
+                        if pd.isna(val):
+                            return None
+                    except (ValueError, TypeError):
+                        # pd.isna() failed on array/list, continue processing
+                        pass
                     # Si c'est une liste, prendre le premier élément
                     if isinstance(val, (list, tuple)):
                         if len(val) > 0:
@@ -320,7 +327,8 @@ class PostgresBulkDestination:
         table_name: str,
         data: List[Dict[str, Any]],
         write_disposition: str,
-        primary_keys: Optional[List[str]] = None
+        primary_keys: Optional[List[str]] = None,
+        column_mappings: Optional[Dict[str, str]] = None
     ):
         """
         Point d'entrée principal pour charger un batch de données
@@ -330,6 +338,7 @@ class PostgresBulkDestination:
             data: Liste de dictionnaires (records)
             write_disposition: "replace", "merge", ou "append"
             primary_keys: Clés primaires pour UPSERT (requis pour merge)
+            column_mappings: Dict mapping API column names to DB column names
         """
         if not data:
             logger.warning(f"⚠️ Pas de données pour {table_name}")
@@ -337,6 +346,13 @@ class PostgresBulkDestination:
 
         # Convertir en DataFrame
         df = pd.DataFrame(data)
+
+        # Apply column mappings if provided
+        if column_mappings:
+            df = df.rename(columns=column_mappings)
+            # Also map primary keys if they're in the mapping
+            if primary_keys:
+                primary_keys = [column_mappings.get(pk, pk) for pk in primary_keys]
 
         logger.info(f"🚀 Chargement de {len(df)} records → {table_name} (mode: {write_disposition})")
 

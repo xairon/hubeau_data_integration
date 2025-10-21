@@ -419,11 +419,21 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             context.log.info(f"💾 Phase 2/2: Chargement optimisé PostgreSQL...")
             load_start = time.time()
 
+            # Add column mappings for specific tables
+            column_mappings = None
+            if table_name == "hydrobio_stations":
+                column_mappings = {
+                    "code_station_hydrobio": "code_station",
+                    "libelle_station_hydrobio": "libelle_station",
+                    "uri_station_hydrobio": "uri_station"
+                }
+
             postgres_bulk_destination.load_batch(
                 table_name=table_name,
                 data=extracted_data,
                 write_disposition=write_disposition,
-                primary_keys=primary_keys if primary_keys else None
+                primary_keys=primary_keys if primary_keys else None,
+                column_mappings=column_mappings
             )
 
             load_duration = time.time() - load_start
@@ -431,9 +441,14 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             context.log.info(f"⚡ Performance: {len(extracted_data)/load_duration:.0f} records/seconde")
 
             # Créer un load_info simulé pour compatibilité
+            class LoadPackage:
+                def __init__(self, records_loaded):
+                    self.load_id = f"custom_load_{int(time.time() * 1000)}"
+                    self.records = records_loaded
+
             class LoadInfo:
                 def __init__(self, records_loaded):
-                    self.load_packages = [{"records": records_loaded}]
+                    self.load_packages = [LoadPackage(records_loaded)]
                     self.metrics = {"rows_loaded": records_loaded}
 
             load_info = LoadInfo(len(extracted_data))
