@@ -166,9 +166,7 @@ deploy:production:
     - echo "  - PG_PASSWORD défini=$([ -n "$PG_PASSWORD" ] && echo 'OUI' || echo 'NON')"
     - echo "🛑 Arrêt des anciens conteneurs..."
     - docker compose -f docker-compose.production.yml down
-    - echo "🔍 DEBUG - Vérification des variables d'environnement:"
-    - echo "  FORCE_HUBEAU_DB_RESET = '$FORCE_HUBEAU_DB_RESET'"
-    - echo "  Type: $([ -z "$FORCE_HUBEAU_DB_RESET" ] && echo 'VIDE' || echo 'DÉFINIE')"
+    - echo "🔍 DEBUG - Variables FORCE detectees"
     - env | grep FORCE || echo "  Aucune variable FORCE trouvée"
     - |
       if [ "$(echo "$FORCE_POSTGRES_RESET" | tr '[:upper:]' '[:lower:]' | tr -d ' ')" = "true" ]; then
