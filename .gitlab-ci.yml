@@ -169,7 +169,7 @@ deploy:production:
     - echo "🔍 DEBUG - Vérification des variables d'environnement:"
     - echo "  FORCE_HUBEAU_DB_RESET = '$FORCE_HUBEAU_DB_RESET'"
     - echo "  Type: $([ -z "$FORCE_HUBEAU_DB_RESET" ] && echo 'VIDE' || echo 'DÉFINIE')"
-    - echo "  Valeur brute: [$FORCE_HUBEAU_DB_RESET]"
+    - 'echo "  Valeur brute: [$FORCE_HUBEAU_DB_RESET]"'
     - env | grep FORCE || echo "  Aucune variable FORCE trouvée"
     - |
       if [ "$(echo "$FORCE_POSTGRES_RESET" | tr '[:upper:]' '[:lower:]' | tr -d ' ')" = "true" ]; then
