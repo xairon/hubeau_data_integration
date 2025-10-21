@@ -385,40 +385,61 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         
         # Déterminer le nom de la table existante basé sur le fichier YAML
         table_name = resource_name  # Utiliser le nom de la resource comme nom de table
-        
-        # ✅ OPTIMISATION: Si write_disposition=merge, faire un TRUNCATE CASCADE intelligent
-        # pour éviter les UPDATE/INSERT row-by-row ultra lents
+
+        # ✅ OPTIMISATION: Utiliser notre custom destination PostgreSQL optimisée
+        # avec COPY natif au lieu du DLT standard qui fait row-by-row
         write_disposition = cfg.get("resource", {}).get("write_disposition", "append")
-        if write_disposition == "merge":
-            context.log.info(f"🔧 Optimisation MERGE → utilisation de TRUNCATE CASCADE + INSERT rapide")
-            try:
-                import psycopg2
-                conn = psycopg2.connect(
-                    host=os.getenv("PG_HOST", "postgres"),
-                    port=os.getenv("PG_PORT", "5432"),
-                    database=os.getenv("PG_DB", "postgres"),
-                    user=os.getenv("PG_USER", "postgres"),
-                    password=os.getenv("PG_PASSWORD")
-                )
-                with conn.cursor() as cur:
-                    # TRUNCATE CASCADE pour vider la table ET les tables dépendantes
-                    truncate_sql = f"TRUNCATE TABLE hubeau.{table_name} CASCADE"
-                    context.log.info(f"🗑️ Exécution: {truncate_sql}")
-                    cur.execute(truncate_sql)
-                    conn.commit()
-                    context.log.info(f"✅ Table {table_name} vidée avec CASCADE (incluant tables dépendantes)")
-                conn.close()
+        primary_keys = cfg.get("resource", {}).get("primary_key", [])
+        if isinstance(primary_keys, str):
+            primary_keys = [primary_keys]
 
-                # Maintenant qu'on a TRUNCATE, on peut utiliser append au lieu de merge
-                # pour des INSERT massifs rapides
-                cfg["resource"]["write_disposition"] = "append"
-                context.log.info(f"🚀 write_disposition changé de 'merge' → 'append' pour performance")
-            except Exception as e:
-                context.log.warning(f"⚠️ TRUNCATE CASCADE échoué: {e}")
-                context.log.warning(f"   → Fallback sur MERGE standard (sera lent)")
+        # Import de notre custom destination optimisée
+        from hubeau_pipeline.destinations import postgres_bulk_destination
+        from hubeau_pipeline.utils.postgres_helpers import PostgresHelper
 
-        # Exécuter le pipeline avec le nom de table spécifique
-        load_info = pipeline.run(source, table_name=table_name)
+        # Déterminer si c'est une table de référence
+        is_reference = any(keyword in table_name for keyword in [
+            "stations", "sites", "ouvrages", "points", "campagnes"
+        ])
+
+        context.log.info(f"🎯 Table {table_name}: type={'référence' if is_reference else 'temporelle'}, disposition={write_disposition}")
+
+        # Exécuter l'extraction avec DLT
+        context.log.info(f"📥 Phase 1/2: Extraction des données avec DLT...")
+        extract_start = time.time()
+
+        # Extraire les données (DLT excelle ici)
+        extracted_data = list(source)  # Convertir le générateur en liste
+
+        extract_duration = time.time() - extract_start
+        context.log.info(f"✅ Extraction terminée en {extract_duration:.2f}s - {len(extracted_data)} records extraits")
+
+        if extracted_data:
+            # Charger avec notre destination optimisée
+            context.log.info(f"💾 Phase 2/2: Chargement optimisé PostgreSQL...")
+            load_start = time.time()
+
+            postgres_bulk_destination.load_batch(
+                table_name=table_name,
+                data=extracted_data,
+                write_disposition=write_disposition,
+                primary_keys=primary_keys if primary_keys else None
+            )
+
+            load_duration = time.time() - load_start
+            context.log.info(f"✅ Chargement terminé en {load_duration:.2f}s")
+            context.log.info(f"⚡ Performance: {len(extracted_data)/load_duration:.0f} records/seconde")
+
+            # Créer un load_info simulé pour compatibilité
+            class LoadInfo:
+                def __init__(self, records_loaded):
+                    self.load_packages = [{"records": records_loaded}]
+                    self.metrics = {"rows_loaded": records_loaded}
+
+            load_info = LoadInfo(len(extracted_data))
+        else:
+            context.log.warning(f"⚠️ Aucune donnée extraite pour {table_name}")
+            load_info = None
 
     finally:
         # Restore original print function
