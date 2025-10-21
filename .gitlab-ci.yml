@@ -216,7 +216,42 @@ deploy:production:
         docker logs brgm-dagster-postgres --tail 50 2>/dev/null || echo "Postgres container not found"
         exit 1
       fi
-    - echo "⏳ Attente et vérification complète de l'initialisation PostgreSQL Hub'Eau..."
+    - echo "⏳ Attente que PostgreSQL démarre..."
+    - |
+      # Attendre que PostgreSQL soit prêt avant de vérifier l'initialisation
+      max_wait=30
+      waited=0
+      while [ $waited -lt $max_wait ]; do
+        if docker exec brgm-postgres pg_isready -U postgres -d postgres > /dev/null 2>&1; then
+          echo "✅ PostgreSQL est prêt après ${waited}s"
+          break
+        fi
+        echo "⏳ PostgreSQL pas encore prêt (${waited}s/${max_wait}s)..."
+        sleep 2
+        waited=$((waited + 2))
+      done
+    - echo "🔍 Vérification si les scripts d'initialisation ont été exécutés..."
+    - |
+      # Vérifier si le schéma hubeau existe
+      if ! docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT 1 FROM information_schema.schemata WHERE schema_name='hubeau'" 2>/dev/null | grep -q "1"; then
+        echo "⚠️  Schéma hubeau inexistant - Les scripts /docker-entrypoint-initdb.d n'ont PAS été exécutés"
+        echo "🔧 Exécution manuelle des scripts d'initialisation..."
+
+        # Lister et exécuter tous les scripts SQL dans l'ordre
+        for script in /srv/brgm/docker/init-scripts/postgres/*.sql; do
+          script_name=$(basename "$script")
+          echo "   📄 Exécution de $script_name..."
+          if docker exec -i brgm-postgres psql -U postgres -d postgres < "$script" 2>&1 | grep -i "error"; then
+            echo "   ❌ Erreur lors de l'exécution de $script_name"
+          else
+            echo "   ✅ $script_name exécuté"
+          fi
+        done
+        echo "✅ Scripts d'initialisation exécutés manuellement"
+      else
+        echo "✅ Schéma hubeau existe - Scripts d'initialisation déjà exécutés"
+      fi
+    - echo "⏳ Vérification complète de l'initialisation PostgreSQL Hub'Eau..."
     - |
       # Attendre que PostgreSQL Hub'Eau soit complètement initialisé
       max_attempts=60
