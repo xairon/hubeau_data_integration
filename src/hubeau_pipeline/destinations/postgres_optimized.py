@@ -68,6 +68,18 @@ class PostgresBulkDestination:
                 df_filtered = df[common_columns].copy()
                 df_filtered = self._clean_dataframe(df_filtered)
 
+                # Vérifier si la table a des colonnes DLT (_dlt_load_id, _dlt_id)
+                # Si oui, générer des valeurs pour elles
+                if '_dlt_load_id' in target_columns:
+                    load_id = f"load_{int(time.time() * 1000)}"
+                    df_filtered['_dlt_load_id'] = load_id
+                    common_columns.append('_dlt_load_id')
+
+                if '_dlt_id' in target_columns:
+                    # Générer un ID unique par row (simple index pour COPY)
+                    df_filtered['_dlt_id'] = [f"row_{i}_{int(time.time() * 1000)}" for i in range(len(df_filtered))]
+                    common_columns.append('_dlt_id')
+
                 # Créer un buffer CSV en mémoire
                 output = io.StringIO()
                 df_filtered.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
@@ -230,17 +242,45 @@ class PostgresBulkDestination:
                 )
 
                 # 5. UPSERT depuis staging vers table principale
+                # Vérifier si la table a des colonnes DLT (_dlt_load_id, _dlt_id)
+                dlt_columns = []
+                if '_dlt_load_id' in target_columns:
+                    dlt_columns.append('_dlt_load_id')
+                if '_dlt_id' in target_columns:
+                    dlt_columns.append('_dlt_id')
+
+                # Colonnes à insérer = colonnes communes + colonnes DLT
+                insert_columns = common_columns.copy()
+                select_columns = common_columns.copy()
+
+                # Générer des valeurs pour les colonnes DLT si nécessaires
+                if '_dlt_load_id' in dlt_columns:
+                    insert_columns.append('_dlt_load_id')
+                    # Générer un load_id unique pour ce batch
+                    load_id = f"load_{int(time.time() * 1000)}"
+                    select_columns.append(f"'{load_id}'::TEXT")
+
+                if '_dlt_id' in dlt_columns:
+                    insert_columns.append('_dlt_id')
+                    # Générer un ID unique par row basé sur primary key
+                    pk_concat = ' || '.join([f"COALESCE({pk}::TEXT, '')" for pk in primary_keys])
+                    select_columns.append(f"MD5({pk_concat})::TEXT")
+
+                # Colonnes à update (exclure PK et colonnes DLT)
                 update_cols = [c for c in common_columns if c not in primary_keys]
 
                 if update_cols:
                     update_set = ', '.join([f"{c} = EXCLUDED.{c}" for c in update_cols])
+                    # Mettre à jour aussi updated_at si présent
+                    if 'updated_at' in target_columns and 'updated_at' not in update_cols:
+                        update_set += ", updated_at = CURRENT_TIMESTAMP"
                     conflict_action = f"DO UPDATE SET {update_set}"
                 else:
                     conflict_action = "DO NOTHING"
 
                 upsert_sql = f"""
-                    INSERT INTO {self.schema_name}.{table_name} ({','.join(common_columns)})
-                    SELECT {','.join(common_columns)} FROM {staging_table}
+                    INSERT INTO {self.schema_name}.{table_name} ({','.join(insert_columns)})
+                    SELECT {','.join(select_columns)} FROM {staging_table}
                     ON CONFLICT ({','.join(primary_keys)})
                     {conflict_action}
                 """
