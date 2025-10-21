@@ -37,8 +37,8 @@ BEGIN
     FOREACH table_name IN ARRAY required_tables
     LOOP
         IF NOT EXISTS (
-            SELECT 1 FROM information_schema.tables 
-            WHERE table_schema = 'hubeau' AND table_name = table_name
+            SELECT 1 FROM information_schema.tables t
+            WHERE t.table_schema = 'hubeau' AND t.table_name = table_name
         ) THEN
             missing_tables := array_append(missing_tables, table_name);
         END IF;
