@@ -173,11 +173,51 @@ class PostgresBulkDestination:
                 df_filtered = df[common_columns].copy()
                 df_filtered = self._clean_dataframe(df_filtered)
 
-                # 3. Créer table staging avec les colonnes communes
+                # 3. Créer table staging avec seulement les colonnes communes
+                # On récupère le type de chaque colonne depuis la table originale
                 cursor.execute(f"""
-                    CREATE TEMP TABLE {staging_table}
-                    (LIKE {self.schema_name}.{table_name} INCLUDING DEFAULTS)
-                """)
+                    SELECT column_name, data_type, character_maximum_length, is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = %s AND table_name = %s
+                    AND column_name = ANY(%s)
+                    ORDER BY ordinal_position
+                """, (self.schema_name, table_name, common_columns))
+
+                col_definitions = []
+                for col_name, data_type, max_length, is_nullable in cursor.fetchall():
+                    # Construire la définition de colonne
+                    if data_type == 'character varying' and max_length:
+                        col_def = f"{col_name} VARCHAR({max_length})"
+                    elif data_type in ('timestamp without time zone', 'timestamp with time zone'):
+                        col_def = f"{col_name} TIMESTAMP"
+                    elif data_type == 'double precision':
+                        col_def = f"{col_name} DOUBLE PRECISION"
+                    elif data_type == 'integer':
+                        col_def = f"{col_name} INTEGER"
+                    elif data_type == 'bigint':
+                        col_def = f"{col_name} BIGINT"
+                    elif data_type == 'text':
+                        col_def = f"{col_name} TEXT"
+                    elif data_type == 'boolean':
+                        col_def = f"{col_name} BOOLEAN"
+                    elif data_type == 'json' or data_type == 'jsonb':
+                        col_def = f"{col_name} JSONB"
+                    elif data_type == 'date':
+                        col_def = f"{col_name} DATE"
+                    elif data_type.startswith('numeric'):
+                        col_def = f"{col_name} NUMERIC"
+                    else:
+                        col_def = f"{col_name} {data_type}"
+
+                    # Pas de contrainte NOT NULL sur staging table pour plus de flexibilité
+                    col_definitions.append(col_def)
+
+                create_staging_sql = f"""
+                    CREATE TEMP TABLE {staging_table} (
+                        {', '.join(col_definitions)}
+                    )
+                """
+                cursor.execute(create_staging_sql)
 
                 # 4. COPY dans staging (seulement les colonnes communes)
                 output = io.StringIO()
