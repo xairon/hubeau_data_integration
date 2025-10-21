@@ -64,8 +64,9 @@ class PostgresBulkDestination:
 
                 logger.info(f"📊 COPY: {len(common_columns)}/{len(df_columns)} colonnes communes")
 
-                # Filtrer le DataFrame
+                # Filtrer et nettoyer le DataFrame
                 df_filtered = df[common_columns].copy()
+                df_filtered = self._clean_dataframe(df_filtered)
 
                 # Créer un buffer CSV en mémoire
                 output = io.StringIO()
@@ -105,6 +106,37 @@ class PostgresBulkDestination:
         finally:
             conn.close()
 
+    def _clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Nettoie le DataFrame pour PostgreSQL :
+        - Convertit les listes en string (premier élément)
+        - Gère les types Python qui causent des erreurs COPY
+        - Convertit les dicts en JSON
+        """
+        df_clean = df.copy()
+
+        for col in df_clean.columns:
+            # Nettoyer les colonnes object qui peuvent contenir des listes/dicts
+            if df_clean[col].dtype == 'object':
+                def clean_value(val):
+                    if val is None or pd.isna(val):
+                        return None
+                    # Si c'est une liste, prendre le premier élément
+                    if isinstance(val, (list, tuple)):
+                        if len(val) > 0:
+                            return str(val[0]) if val[0] is not None else None
+                        return None
+                    # Si c'est un dict, le convertir en JSON
+                    if isinstance(val, dict):
+                        import json
+                        return json.dumps(val)
+                    # Sinon retourner la string
+                    return str(val) if val != '' else None
+
+                df_clean[col] = df_clean[col].apply(clean_value)
+
+        return df_clean
+
     def _upsert_dataframe(
         self,
         df: pd.DataFrame,
@@ -137,8 +169,9 @@ class PostgresBulkDestination:
 
                 logger.info(f"📊 Colonnes: {len(common_columns)}/{len(df_columns)} communes avec {table_name}")
 
-                # Filtrer le DataFrame
+                # Filtrer et nettoyer le DataFrame
                 df_filtered = df[common_columns].copy()
+                df_filtered = self._clean_dataframe(df_filtered)
 
                 # 3. Créer table staging avec les colonnes communes
                 cursor.execute(f"""
