@@ -6,16 +6,16 @@ resource:
   endpoint: /stations_hydrobio
   base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
   primary_key:
-  - code_station_hydrobio
+  - code_station
   write_disposition: merge
   columns:
-    code_station_hydrobio:
+    code_station:
       data_type: text
       nullable: false
-    libelle_station_hydrobio:
+    libelle_station:
       data_type: text
       nullable: true
-    uri_station_hydrobio:
+    uri_station:
       data_type: text
       nullable: true
     coordonnee_x:

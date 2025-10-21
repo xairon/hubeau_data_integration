@@ -541,7 +541,14 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 # ASSETS DE STATIONS DE RÉFÉRENCE (définis en premier)
 # ====================================
 
+# ⚠️ IMPORTANT: hydrometry_sites DOIT être chargé AVANT hydrometry_stations
+# car hydrometry_stations a une FK vers hydrometry_sites
 @asset(group_name="hubeau_hydrometry")
+def hydrometry_sites_reference(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Ingests hydrometry sites reference data using dlt (pas de partition)."""
+    return ingest_dlt(context, "configs/hubeau/hydrometry_sites.yml")
+
+@asset(group_name="hubeau_hydrometry", deps=[hydrometry_sites_reference])
 def hydrometry_stations_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry stations reference data using dlt (pas de partition)."""
     return ingest_dlt(context, "configs/hubeau/hydrometry_stations.yml")
@@ -604,11 +611,6 @@ def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, 
 # ====================================
 # NOUVEAUX ASSETS POUR ENDPOINTS MANQUANTS
 # ====================================
-
-@asset(group_name="hubeau_hydrometry")
-def hydrometry_sites_reference(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Ingests hydrometry sites reference data using dlt (pas de partition)."""
-    return ingest_dlt(context, "configs/hubeau/hydrometry_sites.yml")
 
 @asset(group_name="hubeau_hydrometry", partitions_def=YEARLY_PARTITIONS, deps=[hydrometry_stations_reference])
 def hydrometry_obs_elab(context: AssetExecutionContext) -> Dict[str, Any]:
