@@ -393,8 +393,8 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         if isinstance(primary_keys, str):
             primary_keys = [primary_keys]
 
-        # Import de notre custom destination optimisée
-        from hubeau_pipeline.destinations import postgres_bulk_destination
+        # Import de notre custom destination optimisée V2 avec pool de connexions
+        from hubeau_pipeline.destinations.postgres_optimized_v2 import postgres_bulk_destination_v2 as postgres_bulk_destination
         from hubeau_pipeline.utils.postgres_helpers import PostgresHelper
 
         # Déterminer si c'est une table de référence
