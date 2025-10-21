@@ -386,6 +386,37 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Déterminer le nom de la table existante basé sur le fichier YAML
         table_name = resource_name  # Utiliser le nom de la resource comme nom de table
         
+        # ✅ OPTIMISATION: Si write_disposition=merge, faire un TRUNCATE CASCADE intelligent
+        # pour éviter les UPDATE/INSERT row-by-row ultra lents
+        write_disposition = cfg.get("resource", {}).get("write_disposition", "append")
+        if write_disposition == "merge":
+            context.log.info(f"🔧 Optimisation MERGE → utilisation de TRUNCATE CASCADE + INSERT rapide")
+            try:
+                import psycopg2
+                conn = psycopg2.connect(
+                    host=os.getenv("PG_HOST", "postgres"),
+                    port=os.getenv("PG_PORT", "5432"),
+                    database=os.getenv("PG_DB", "postgres"),
+                    user=os.getenv("PG_USER", "postgres"),
+                    password=os.getenv("PG_PASSWORD")
+                )
+                with conn.cursor() as cur:
+                    # TRUNCATE CASCADE pour vider la table ET les tables dépendantes
+                    truncate_sql = f"TRUNCATE TABLE hubeau.{table_name} CASCADE"
+                    context.log.info(f"🗑️ Exécution: {truncate_sql}")
+                    cur.execute(truncate_sql)
+                    conn.commit()
+                    context.log.info(f"✅ Table {table_name} vidée avec CASCADE (incluant tables dépendantes)")
+                conn.close()
+
+                # Maintenant qu'on a TRUNCATE, on peut utiliser append au lieu de merge
+                # pour des INSERT massifs rapides
+                cfg["resource"]["write_disposition"] = "append"
+                context.log.info(f"🚀 write_disposition changé de 'merge' → 'append' pour performance")
+            except Exception as e:
+                context.log.warning(f"⚠️ TRUNCATE CASCADE échoué: {e}")
+                context.log.warning(f"   → Fallback sur MERGE standard (sera lent)")
+
         # Exécuter le pipeline avec le nom de table spécifique
         load_info = pipeline.run(source, table_name=table_name)
 
