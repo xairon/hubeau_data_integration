@@ -13,10 +13,10 @@ END $$;
 DO $$
 DECLARE
     missing_tables TEXT[] := ARRAY[]::TEXT[];
-    table_name TEXT;
+    tbl_name TEXT;
     required_tables TEXT[] := ARRAY[
         'hydrometry_sites',
-        'hydrometry_stations', 
+        'hydrometry_stations',
         'hydrometry_observations',
         'piezometry_stations',
         'piezometry_chroniques',
@@ -34,16 +34,16 @@ DECLARE
         'prelevements_chroniques'
     ];
 BEGIN
-    FOREACH table_name IN ARRAY required_tables
+    FOREACH tbl_name IN ARRAY required_tables
     LOOP
         IF NOT EXISTS (
-            SELECT 1 FROM information_schema.tables t
-            WHERE t.table_schema = 'hubeau' AND t.table_name = table_name
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'hubeau' AND table_name = tbl_name
         ) THEN
-            missing_tables := array_append(missing_tables, table_name);
+            missing_tables := array_append(missing_tables, tbl_name);
         END IF;
     END LOOP;
-    
+
     IF array_length(missing_tables, 1) > 0 THEN
         RAISE EXCEPTION 'Tables manquantes: %', array_to_string(missing_tables, ', ');
     END IF;
