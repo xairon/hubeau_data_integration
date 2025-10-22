@@ -612,7 +612,7 @@ def prelevements_ouvrages_reference(context: AssetExecutionContext) -> Dict[str,
     """
     return ingest_dlt(context, "configs/hubeau/prelevements_ouvrages.yml")
 
-@asset(group_name="hubeau_prelevements")
+@asset(group_name="hubeau_prelevements", deps=[prelevements_ouvrages_reference])
 def prelevements_points_reference(context: AssetExecutionContext) -> Dict[str, Any]:
     """
     Ingestion du référentiel des POINTS de prélèvement (~186k points).
