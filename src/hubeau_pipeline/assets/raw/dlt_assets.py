@@ -408,13 +408,28 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Évite de charger 300k+ records en RAM d'un coup
         context.log.info(f"📥 Phase 1/2: Extraction et chargement par batch (streaming)...")
 
-        # Add column mappings for specific tables
+        # Add column mappings for specific tables where API column names differ from DB
         column_mappings = None
         if table_name == "hydrobio_stations":
             column_mappings = {
                 "code_station_hydrobio": "code_station",
                 "libelle_station_hydrobio": "libelle_station",
                 "uri_station_hydrobio": "uri_station"
+            }
+        elif table_name == "hydrobio_indices":
+            column_mappings = {
+                "code_station_hydrobio": "code_station",
+                "code_support": "code_support",  # Keep as is
+                # Add other mappings if needed
+            }
+        elif table_name == "hydrobio_taxons":
+            column_mappings = {
+                "code_station_hydrobio": "code_station",
+                # Add other mappings if needed
+            }
+        elif table_name == "ecoulement_observations":
+            column_mappings = {
+                "date_observation": "date_obs",  # API uses date_observation, DB has date_obs
             }
         elif table_name == "prelevements_points":
             column_mappings = {
