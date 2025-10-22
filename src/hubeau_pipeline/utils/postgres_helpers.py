@@ -123,3 +123,72 @@ class PostgresHelper:
 
         logger.info(f"✅ {table_name}: À jour ({db_count} records, diff={diff})")
         return False
+
+    @staticmethod
+    def get_partitions_to_load(
+        table_name: str,
+        date_column: str,
+        schema: str = "hubeau",
+        start_year: int = 2010
+    ) -> list:
+        """
+        Détermine intelligemment les partitions (années) à charger
+
+        Logique:
+        - Si table vide ou n'existe pas → retourne toutes les années depuis start_year
+        - Si table existe → retourne années depuis (max_date + 1 jour) jusqu'à aujourd'hui
+
+        Args:
+            table_name: Nom de la table
+            date_column: Colonne de date à vérifier
+            schema: Schéma PostgreSQL
+            start_year: Année de début si table vide (défaut: 2010)
+
+        Returns:
+            Liste d'années à charger, ex: [2022, 2023, 2024]
+        """
+        from datetime import datetime, timedelta
+
+        current_year = datetime.now().year
+
+        # Vérifier si table existe et a des données
+        if not PostgresHelper.table_exists(table_name, schema):
+            logger.info(f"📊 {table_name}: Table n'existe pas → chargement depuis {start_year}")
+            return list(range(start_year, current_year + 1))
+
+        count = PostgresHelper.get_table_count(table_name, schema)
+        if count == 0:
+            logger.info(f"📊 {table_name}: Table vide → chargement depuis {start_year}")
+            return list(range(start_year, current_year + 1))
+
+        # Table existe avec données, récupérer max_date
+        max_date_str = PostgresHelper.get_max_date(table_name, date_column, schema)
+
+        if not max_date_str:
+            logger.warning(f"⚠️ {table_name}: Impossible de récupérer max_date → chargement depuis {start_year}")
+            return list(range(start_year, current_year + 1))
+
+        # Parser la date
+        try:
+            if 'T' in max_date_str:
+                max_date = datetime.fromisoformat(max_date_str.replace('Z', '+00:00'))
+            else:
+                max_date = datetime.strptime(max_date_str, '%Y-%m-%d')
+
+            # Calculer next_date = max_date + 1 jour
+            next_date = max_date + timedelta(days=1)
+            next_year = next_date.year
+
+            # Générer liste d'années depuis next_year jusqu'à aujourd'hui
+            years_to_load = list(range(next_year, current_year + 1))
+
+            if years_to_load:
+                logger.info(f"📊 {table_name}: Max date = {max_date_str} → chargement années {years_to_load}")
+            else:
+                logger.info(f"✅ {table_name}: À jour (max_date = {max_date_str})")
+
+            return years_to_load
+
+        except Exception as e:
+            logger.error(f"❌ Erreur parsing date {max_date_str}: {e} → chargement depuis {start_year}")
+            return list(range(start_year, current_year + 1))

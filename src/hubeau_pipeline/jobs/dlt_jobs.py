@@ -179,5 +179,70 @@ sync_all_yearly_data = define_asset_job(
     executor_def=in_process_executor,  # ✅ OPTIMISATION MÉMOIRE: Exécution in-process
 )
 
+# ====================================
+# JOBS GLOBAUX INTELLIGENTS (OBSERVATIONS)
+# ====================================
+
+# Job intelligent: Charge automatiquement les années manquantes
+# Utilise get_partitions_to_load() pour déterminer quelles années charger
+sync_all_observations_auto = define_asset_job(
+    name="sync_all_observations_auto",
+    selection=AssetSelection.assets(
+        # Observations/analyses avec partitions annuelles
+        hydrometry_obs_elab,
+        hydrobio_taxons,
+        hydrobio_indices,
+        piezometry_chroniques,
+        quality_rivers_analyses,
+        quality_rivers_operations,
+        quality_rivers_conditions,
+        quality_groundwater_analyses,
+        ecoulement_observations,
+        prelevements_chroniques,
+        temperature_chroniques,
+    ),
+    description="""Job intelligent: Charge automatiquement les observations manquantes
+
+    Pour chaque asset:
+    - Si table vide → charge depuis 2010
+    - Si table existe → charge depuis (max_date + 1 jour)
+
+    Exemple: Si max_date=2023-06-15 aujourd'hui=2024-10-22
+    → Charge partitions 2023 et 2024
+
+    Idéal pour: Scheduling quotidien/hebdomadaire automatique
+    """,
+    executor_def=in_process_executor,
+)
+
+# Job manuel: Charge les années spécifiées par l'utilisateur
+sync_all_observations_by_year = define_asset_job(
+    name="sync_all_observations_by_year",
+    selection=AssetSelection.assets(
+        # Observations/analyses avec partitions annuelles
+        hydrometry_obs_elab,
+        hydrobio_taxons,
+        hydrobio_indices,
+        piezometry_chroniques,
+        quality_rivers_analyses,
+        quality_rivers_operations,
+        quality_rivers_conditions,
+        quality_groundwater_analyses,
+        ecoulement_observations,
+        prelevements_chroniques,
+        temperature_chroniques,
+    ),
+    description="""Job manuel: Charge les années spécifiées
+
+    Utilisation:
+    - Dans Dagster UI: Sélectionner les partitions (années) manuellement
+    - CLI: dagster job execute -j sync_all_observations_by_year -p '2023'
+    - CLI multi-années: -p '2020,2021,2022,2023'
+
+    Idéal pour: Backfill manuel, rechargement d'années spécifiques
+    """,
+    executor_def=in_process_executor,
+)
+
 # ✅ SIMPLIFIÉ: Tous les jobs utilisent maintenant des partitions annuelles
 # sync_all_daily_data et sync_realtime_data supprimés car observations_tr retiré
