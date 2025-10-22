@@ -201,7 +201,8 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_analyses (
     code_support VARCHAR(10),
     code_fraction VARCHAR(10),
     resultat DECIMAL(15, 6),
-    unite VARCHAR(20),
+    code_unite VARCHAR(10),
+    symbole_unite VARCHAR(20),
     code_remarque VARCHAR(5),
     limite_detection DECIMAL(15, 6),
     limite_quantification DECIMAL(15, 6),
@@ -271,7 +272,8 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_groundwater_analyses (
     code_support VARCHAR(10),
     code_fraction VARCHAR(10),
     resultat DECIMAL(15, 6),
-    unite VARCHAR(20),
+    code_unite VARCHAR(10),
+    symbole_unite VARCHAR(20),
     code_remarque VARCHAR(5),
     limite_detection DECIMAL(15, 6),
     limite_quantification DECIMAL(15, 6),
@@ -361,6 +363,8 @@ CREATE TABLE IF NOT EXISTS hubeau.ecoulement_observations (
     code_campagne VARCHAR(50),
     date_observation DATE NOT NULL,
     libelle_observation VARCHAR(200),
+    -- Contrainte d'unicité
+    UNIQUE(code_station, date_observation),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -395,7 +399,8 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrobio_indices (
     code_indice VARCHAR(20),
     libelle_indice VARCHAR(100),
     code_support VARCHAR(20),
-    valeur DECIMAL(5, 2),
+    resultat_indice DECIMAL(5, 2),
+    unite_indice VARCHAR(20),
     classe_qualite VARCHAR(20),
     -- Contrainte d'unicité
     UNIQUE(code_station_hydrobio, date_prelevement, code_indice, code_support),
@@ -413,7 +418,7 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrobio_taxons (
     code_support VARCHAR(20),
     code_taxon VARCHAR(20),
     libelle_taxon VARCHAR(200),
-    abondance INTEGER,
+    resultat_taxon DECIMAL(12, 3),
     -- Contrainte d'unicité (alignée avec primary_key API)
     UNIQUE(code_station_hydrobio, date_prelevement, code_appel_taxon, code_support),
     -- Métadonnées

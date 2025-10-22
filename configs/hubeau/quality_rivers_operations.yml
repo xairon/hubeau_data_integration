@@ -6,6 +6,8 @@ resource:
   endpoint: /operation_pc
   base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
   primary_key:
+  - code_station
+  - date_prelevement
   - code_operation
   write_disposition: merge
   columns:
