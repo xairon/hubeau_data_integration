@@ -404,46 +404,82 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
 
         context.log.info(f"🎯 Table {table_name}: type={'référence' if is_reference else 'temporelle'}, disposition={write_disposition}")
 
-        # Exécuter l'extraction avec DLT
-        context.log.info(f"📥 Phase 1/2: Extraction des données avec DLT...")
+        # ✅ OPTIMISATION MÉMOIRE: Streaming par batch au lieu de list()
+        # Évite de charger 300k+ records en RAM d'un coup
+        context.log.info(f"📥 Phase 1/2: Extraction et chargement par batch (streaming)...")
+
+        # Add column mappings for specific tables
+        column_mappings = None
+        if table_name == "hydrobio_stations":
+            column_mappings = {
+                "code_station_hydrobio": "code_station",
+                "libelle_station_hydrobio": "libelle_station",
+                "uri_station_hydrobio": "uri_station"
+            }
+        elif table_name == "prelevements_points":
+            column_mappings = {
+                "code_point_prelevement": "code_point",
+                "nom_point_prelevement": "libelle_point"
+            }
+
+        # Streaming par batch de 50k records
+        BATCH_SIZE = 50000
+        batch = []
+        total_records = 0
+        batch_count = 0
         extract_start = time.time()
+        load_total_duration = 0
 
-        # Extraire les données (DLT excelle ici)
-        extracted_data = list(source)  # Convertir le générateur en liste
+        for record in source:
+            batch.append(record)
 
-        extract_duration = time.time() - extract_start
-        context.log.info(f"✅ Extraction terminée en {extract_duration:.2f}s - {len(extracted_data)} records extraits")
+            # Charger quand le batch est plein
+            if len(batch) >= BATCH_SIZE:
+                batch_count += 1
+                context.log.info(f"💾 Batch {batch_count}: Chargement de {len(batch)} records...")
 
-        if extracted_data:
-            # Charger avec notre destination optimisée
-            context.log.info(f"💾 Phase 2/2: Chargement optimisé PostgreSQL...")
+                load_start = time.time()
+                postgres_bulk_destination.load_batch(
+                    table_name=table_name,
+                    data=batch,
+                    write_disposition=write_disposition if batch_count == 1 else "append",  # Premier batch: disposition config, suivants: append
+                    primary_keys=primary_keys if primary_keys else None,
+                    column_mappings=column_mappings
+                )
+                load_duration = time.time() - load_start
+                load_total_duration += load_duration
+
+                total_records += len(batch)
+                context.log.info(f"✅ Batch {batch_count}: {len(batch)} records chargés en {load_duration:.2f}s ({len(batch)/load_duration:.0f} rec/s)")
+
+                # Vider le batch
+                batch = []
+
+        # Charger le dernier batch (reste)
+        if batch:
+            batch_count += 1
+            context.log.info(f"💾 Batch {batch_count} (final): Chargement de {len(batch)} records...")
+
             load_start = time.time()
-
-            # Add column mappings for specific tables
-            column_mappings = None
-            if table_name == "hydrobio_stations":
-                column_mappings = {
-                    "code_station_hydrobio": "code_station",
-                    "libelle_station_hydrobio": "libelle_station",
-                    "uri_station_hydrobio": "uri_station"
-                }
-            elif table_name == "prelevements_points":
-                column_mappings = {
-                    "code_point_prelevement": "code_point",
-                    "nom_point_prelevement": "libelle_point"
-                }
-
             postgres_bulk_destination.load_batch(
                 table_name=table_name,
-                data=extracted_data,
-                write_disposition=write_disposition,
+                data=batch,
+                write_disposition=write_disposition if batch_count == 1 else "append",
                 primary_keys=primary_keys if primary_keys else None,
                 column_mappings=column_mappings
             )
-
             load_duration = time.time() - load_start
-            context.log.info(f"✅ Chargement terminé en {load_duration:.2f}s")
-            context.log.info(f"⚡ Performance: {len(extracted_data)/load_duration:.0f} records/seconde")
+            load_total_duration += load_duration
+
+            total_records += len(batch)
+            context.log.info(f"✅ Batch {batch_count}: {len(batch)} records chargés en {load_duration:.2f}s ({len(batch)/load_duration:.0f} rec/s)")
+
+        extract_duration = time.time() - extract_start
+
+        if total_records > 0:
+            context.log.info(f"✅ Extraction et chargement terminés en {extract_duration:.2f}s")
+            context.log.info(f"📊 Total: {total_records} records en {batch_count} batch(s)")
+            context.log.info(f"⚡ Performance globale: {total_records/extract_duration:.0f} records/seconde")
 
             # Créer un load_info simulé pour compatibilité
             class LoadPackage:
@@ -456,7 +492,7 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
                     self.load_packages = [LoadPackage(records_loaded)]
                     self.metrics = {"rows_loaded": records_loaded}
 
-            load_info = LoadInfo(len(extracted_data))
+            load_info = LoadInfo(total_records)
         else:
             context.log.warning(f"⚠️ Aucune donnée extraite pour {table_name}")
             load_info = None
