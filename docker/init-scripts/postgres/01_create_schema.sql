@@ -42,9 +42,11 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrometry_sites (
 );
 
 -- Table des stations hydrométriques
+-- Note: Pas de FK sur code_site car l'API Hub'Eau retourne des références incohérentes
+--       (des stations référencent des sites qui n'existent pas dans /referentiel/sites)
 CREATE TABLE IF NOT EXISTS hubeau.hydrometry_stations (
     code_station VARCHAR(20) PRIMARY KEY,
-    code_site VARCHAR(20) REFERENCES hubeau.hydrometry_sites(code_site),
+    code_site VARCHAR(20),  -- Pas de FK - données Hub'Eau incohérentes
     libelle_station VARCHAR(200),
     type_station VARCHAR(50),
     longitude_station DECIMAL(10, 6),
@@ -462,6 +464,9 @@ CREATE INDEX IF NOT EXISTS idx_temperature_chroniques_year ON hubeau.temperature
 CREATE INDEX IF NOT EXISTS idx_piezometry_stations_commune ON hubeau.piezometry_stations(code_commune_insee);
 CREATE INDEX IF NOT EXISTS idx_piezometry_stations_dept ON hubeau.piezometry_stations(code_departement);
 CREATE INDEX IF NOT EXISTS idx_hydrometry_sites_dept ON hubeau.hydrometry_sites(code_departement);
+
+-- Index pour JOINs (sans FK, l'index n'est pas créé automatiquement)
+CREATE INDEX IF NOT EXISTS idx_hydrometry_stations_code_site ON hubeau.hydrometry_stations(code_site);
 
 -- Index géospatiaux PostGIS pour requêtes spatiales rapides
 CREATE INDEX IF NOT EXISTS idx_piezometry_stations_geom ON hubeau.piezometry_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
