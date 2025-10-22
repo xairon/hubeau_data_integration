@@ -340,11 +340,12 @@ CREATE TABLE IF NOT EXISTS hubeau.ecoulement_campagnes (
 );
 
 -- Table des observations d'écoulement
+-- Note: Nom de colonne date_observation aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.ecoulement_observations (
     id SERIAL PRIMARY KEY,
     code_station VARCHAR(20) REFERENCES hubeau.ecoulement_stations(code_station),
     code_campagne VARCHAR(50),
-    date_obs DATE NOT NULL,
+    date_observation DATE NOT NULL,
     libelle_observation VARCHAR(200),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -355,9 +356,11 @@ CREATE TABLE IF NOT EXISTS hubeau.ecoulement_observations (
 -- ============================================
 
 -- Table des stations hydrobiologiques
+-- Note: Noms de colonnes alignés avec l'API Hub'Eau (code_station_hydrobio, libelle_station_hydrobio, etc.)
 CREATE TABLE IF NOT EXISTS hubeau.hydrobio_stations (
-    code_station VARCHAR(20) PRIMARY KEY,
-    libelle_station VARCHAR(200),
+    code_station_hydrobio VARCHAR(20) PRIMARY KEY,
+    libelle_station_hydrobio VARCHAR(200),
+    uri_station_hydrobio TEXT,
     code_cours_eau VARCHAR(20),
     libelle_cours_eau VARCHAR(100),
     code_commune VARCHAR(10),
@@ -370,25 +373,30 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrobio_stations (
 );
 
 -- Table des indices biologiques
+-- Note: Nom de colonne code_station_hydrobio aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.hydrobio_indices (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.hydrobio_stations(code_station),
+    code_station_hydrobio VARCHAR(20) REFERENCES hubeau.hydrobio_stations(code_station_hydrobio),
     date_prelevement DATE NOT NULL,
     code_indice VARCHAR(20),
     libelle_indice VARCHAR(100),
+    code_support VARCHAR(20),
     valeur DECIMAL(5, 2),
     classe_qualite VARCHAR(20),
     -- Contrainte d'unicité
-    UNIQUE(code_station, date_prelevement, code_indice),
+    UNIQUE(code_station_hydrobio, date_prelevement, code_indice, code_support),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Table des taxons
+-- Note: Nom de colonne code_station_hydrobio aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.hydrobio_taxons (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.hydrobio_stations(code_station),
+    code_station_hydrobio VARCHAR(20) REFERENCES hubeau.hydrobio_stations(code_station_hydrobio),
     date_prelevement DATE NOT NULL,
+    code_appel_taxon VARCHAR(20),
+    code_support VARCHAR(20),
     code_taxon VARCHAR(20),
     libelle_taxon VARCHAR(200),
     abondance INTEGER,
@@ -423,10 +431,11 @@ CREATE TABLE IF NOT EXISTS hubeau.prelevements_ouvrages (
 );
 
 -- Table des points de prélèvement
+-- Note: Noms de colonnes alignés avec l'API Hub'Eau (code_point_prelevement, nom_point_prelevement)
 CREATE TABLE IF NOT EXISTS hubeau.prelevements_points (
-    code_point VARCHAR(50) PRIMARY KEY,
+    code_point_prelevement VARCHAR(50) PRIMARY KEY,
     code_ouvrage VARCHAR(50) REFERENCES hubeau.prelevements_ouvrages(code_ouvrage),
-    libelle_point VARCHAR(200),
+    nom_point_prelevement VARCHAR(200),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
