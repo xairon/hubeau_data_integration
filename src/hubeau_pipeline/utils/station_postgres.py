@@ -38,12 +38,13 @@ def _get_table_and_column_for_station_type(station_type: str) -> tuple[str, str]
         Tuple (table_name, code_column_name)
     """
     # Mapping type → (table, colonne_code)
+    # Note: Noms de colonnes alignés avec API Hub'Eau
     mapping = {
         "piezometry": ("piezometry_stations", "code_bss"),
         "hydrometry": ("hydrometry_stations", "code_station"),
         "quality_rivers": ("quality_rivers_stations", "code_station"),
         "quality_groundwater": ("quality_groundwater_stations", "code_station"),
-        "hydrobio": ("hydrobio_stations", "code_station"),
+        "hydrobio": ("hydrobio_stations", "code_station_hydrobio"),  # ← API Hub'Eau naming
         "ecoulement": ("ecoulement_stations", "code_station"),
         "prelevements": ("prelevements_ouvrages", "code_ouvrage"),
         "temperature": ("temperature_stations", "code_station")
