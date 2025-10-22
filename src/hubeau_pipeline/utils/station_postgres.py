@@ -43,7 +43,7 @@ def _get_table_and_column_for_station_type(station_type: str) -> tuple[str, str]
         "piezometry": ("piezometry_stations", "code_bss"),
         "hydrometry": ("hydrometry_stations", "code_station"),
         "quality_rivers": ("quality_rivers_stations", "code_station"),
-        "quality_groundwater": ("quality_groundwater_stations", "code_station"),
+        "quality_groundwater": ("quality_groundwater_stations", "code_bss"),  # ← Uses code_bss not code_station
         "hydrobio": ("hydrobio_stations", "code_station_hydrobio"),  # ← API Hub'Eau naming
         "ecoulement": ("ecoulement_stations", "code_station"),
         "prelevements": ("prelevements_ouvrages", "code_ouvrage"),
