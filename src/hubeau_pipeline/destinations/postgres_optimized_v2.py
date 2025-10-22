@@ -225,21 +225,44 @@ class PostgresBulkDestinationV2:
                     df = df[common_columns]
                 df = self._clean_dataframe_inplace(df)
 
-                # Créer staging table (simplifiée)
+                # Créer staging table (simplifiée avec gestion des NULL)
                 cursor.execute(f"""
                     SELECT column_name,
                            CASE
-                               WHEN data_type = 'character varying' THEN 'VARCHAR(' || character_maximum_length || ')'
+                               WHEN data_type = 'character varying' AND character_maximum_length IS NOT NULL
+                                   THEN 'VARCHAR(' || character_maximum_length || ')'
+                               WHEN data_type = 'character varying' AND character_maximum_length IS NULL
+                                   THEN 'TEXT'
+                               WHEN data_type = 'text' THEN 'TEXT'
                                WHEN data_type IN ('timestamp without time zone', 'timestamp with time zone') THEN 'TIMESTAMP'
                                WHEN data_type = 'double precision' THEN 'DOUBLE PRECISION'
-                               ELSE data_type
+                               WHEN data_type = 'integer' THEN 'INTEGER'
+                               WHEN data_type = 'bigint' THEN 'BIGINT'
+                               WHEN data_type = 'boolean' THEN 'BOOLEAN'
+                               WHEN data_type = 'date' THEN 'DATE'
+                               WHEN data_type = 'time without time zone' THEN 'TIME'
+                               WHEN data_type = 'numeric' THEN 'NUMERIC'
+                               WHEN data_type = 'real' THEN 'REAL'
+                               WHEN data_type = 'json' THEN 'JSON'
+                               WHEN data_type = 'jsonb' THEN 'JSONB'
+                               ELSE UPPER(data_type)
                            END as col_type
                     FROM information_schema.columns
                     WHERE table_schema = %s AND table_name = %s
                     AND column_name = ANY(%s)
+                    ORDER BY ordinal_position
                 """, (self.schema_name, table_name, common_columns))
 
-                col_defs = [f"{name} {dtype}" for name, dtype in cursor.fetchall()]
+                results = cursor.fetchall()
+                if not results:
+                    raise ValueError(f"Aucune colonne trouvée pour la table {table_name}")
+
+                col_defs = []
+                for name, dtype in results:
+                    if dtype is None:
+                        logger.warning(f"Type NULL détecté pour colonne {name}, utilisation de TEXT par défaut")
+                        dtype = 'TEXT'
+                    col_defs.append(f"{name} {dtype}")
 
                 cursor.execute(f"""
                     CREATE TEMP TABLE {staging_table} (
