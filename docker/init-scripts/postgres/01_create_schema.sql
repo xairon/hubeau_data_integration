@@ -63,20 +63,21 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrometry_stations (
 );
 
 -- Table des observations hydrométriques élaborées
+-- Note: Noms de colonnes alignés avec l'API Hub'Eau (date_obs_elab, grandeur_hydro_elab, etc.)
 CREATE TABLE IF NOT EXISTS hubeau.hydrometry_observations (
     id SERIAL PRIMARY KEY,
     code_station VARCHAR(20) REFERENCES hubeau.hydrometry_stations(code_station),
-    date_obs TIMESTAMP NOT NULL,
-    grandeur_hydro VARCHAR(10),
-    resultat DECIMAL(12, 3),
+    date_obs_elab TIMESTAMP NOT NULL,
+    grandeur_hydro_elab VARCHAR(10),
+    resultat_obs_elab DECIMAL(12, 3),
     code_qualification VARCHAR(10),
     libelle_qualification VARCHAR(50),
     code_methode VARCHAR(20),
     libelle_methode VARCHAR(100),
     -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_obs)) STORED,
+    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_obs_elab)) STORED,
     -- Contrainte d'unicité
-    UNIQUE(code_station, date_obs, grandeur_hydro),
+    UNIQUE(code_station, date_obs_elab, grandeur_hydro_elab),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -121,10 +122,12 @@ CREATE TABLE IF NOT EXISTS hubeau.piezometry_stations (
 );
 
 -- Table des chroniques piézométriques
+-- Note: Nom de colonne timestamp_mesure aligné avec l'API Hub'Eau (PK)
 CREATE TABLE IF NOT EXISTS hubeau.piezometry_chroniques (
     id SERIAL PRIMARY KEY,
     code_bss VARCHAR(20) REFERENCES hubeau.piezometry_stations(code_bss),
-    date_mesure TIMESTAMP NOT NULL,
+    date_mesure DATE,
+    timestamp_mesure TIMESTAMP NOT NULL,
     niveau_eau_ngf DECIMAL(10, 3),
     niveau_eau_relative DECIMAL(10, 3),
     profondeur_nappe DECIMAL(10, 3),
@@ -135,9 +138,9 @@ CREATE TABLE IF NOT EXISTS hubeau.piezometry_chroniques (
     continuité VARCHAR(20),
     producteur VARCHAR(100),
     -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_mesure)) STORED,
+    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM timestamp_mesure)) STORED,
     -- Contrainte d'unicité
-    UNIQUE(code_bss, date_mesure),
+    UNIQUE(code_bss, timestamp_mesure),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -171,6 +174,7 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_stations (
 );
 
 -- Table des opérations de prélèvement qualité cours d'eau
+-- Note: nom_methode aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_operations (
     id SERIAL PRIMARY KEY,
     code_station VARCHAR(20) REFERENCES hubeau.quality_rivers_stations(code_station),
@@ -180,7 +184,7 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_operations (
     code_support VARCHAR(10),
     libelle_support VARCHAR(50),
     code_methode VARCHAR(20),
-    libelle_methode VARCHAR(100),
+    nom_methode VARCHAR(100),
     -- Contrainte d'unicité
     UNIQUE(code_station, date_prelevement, code_operation),
     -- Métadonnées
@@ -194,6 +198,8 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_analyses (
     date_prelevement DATE NOT NULL,
     code_parametre VARCHAR(10),
     libelle_parametre VARCHAR(200),
+    code_support VARCHAR(10),
+    code_fraction VARCHAR(10),
     resultat DECIMAL(15, 6),
     unite VARCHAR(20),
     code_remarque VARCHAR(5),
@@ -204,6 +210,8 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_analyses (
     producteur VARCHAR(100),
     -- Partition key
     year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_prelevement)) STORED,
+    -- Contrainte d'unicité (alignée avec primary_key API)
+    UNIQUE(code_station, date_prelevement, code_parametre, code_support, code_fraction),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -260,6 +268,8 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_groundwater_analyses (
     date_prelevement DATE NOT NULL,
     code_parametre VARCHAR(10),
     libelle_parametre VARCHAR(200),
+    code_support VARCHAR(10),
+    code_fraction VARCHAR(10),
     resultat DECIMAL(15, 6),
     unite VARCHAR(20),
     code_remarque VARCHAR(5),
@@ -270,6 +280,8 @@ CREATE TABLE IF NOT EXISTS hubeau.quality_groundwater_analyses (
     producteur VARCHAR(100),
     -- Partition key
     year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_prelevement)) STORED,
+    -- Contrainte d'unicité (alignée avec primary_key API)
+    UNIQUE(code_bss, date_prelevement, code_parametre, code_support, code_fraction),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -294,17 +306,19 @@ CREATE TABLE IF NOT EXISTS hubeau.temperature_stations (
 );
 
 -- Table des chroniques de température
+-- Note: Noms de colonnes alignés avec l'API Hub'Eau (date_mesure_temp, resultat)
 CREATE TABLE IF NOT EXISTS hubeau.temperature_chroniques (
     id SERIAL PRIMARY KEY,
     code_station VARCHAR(20) REFERENCES hubeau.temperature_stations(code_station),
-    date_mesure TIMESTAMP NOT NULL,
-    temperature DECIMAL(5, 2),
-    statut VARCHAR(20),
-    qualification VARCHAR(20),
+    date_mesure_temp TIMESTAMP NOT NULL,
+    heure_mesure_temp TIME,
+    resultat DECIMAL(5, 2),
+    code_qualification VARCHAR(20),
+    libelle_qualification VARCHAR(50),
     -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_mesure)) STORED,
+    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_mesure_temp)) STORED,
     -- Contrainte d'unicité
-    UNIQUE(code_station, date_mesure),
+    UNIQUE(code_station, date_mesure_temp),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -400,6 +414,8 @@ CREATE TABLE IF NOT EXISTS hubeau.hydrobio_taxons (
     code_taxon VARCHAR(20),
     libelle_taxon VARCHAR(200),
     abondance INTEGER,
+    -- Contrainte d'unicité (alignée avec primary_key API)
+    UNIQUE(code_station_hydrobio, date_prelevement, code_appel_taxon, code_support),
     -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -442,11 +458,12 @@ CREATE TABLE IF NOT EXISTS hubeau.prelevements_points (
 );
 
 -- Table des prélèvements
+-- Note: volume aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.prelevements_chroniques (
     id SERIAL PRIMARY KEY,
     code_ouvrage VARCHAR(50) REFERENCES hubeau.prelevements_ouvrages(code_ouvrage),
     annee INTEGER NOT NULL,
-    volume_preleve DECIMAL(15, 3),
+    volume DECIMAL(15, 3),
     code_usage VARCHAR(20),
     libelle_usage VARCHAR(100),
     -- Contrainte d'unicité
@@ -460,13 +477,13 @@ CREATE TABLE IF NOT EXISTS hubeau.prelevements_chroniques (
 -- ============================================
 
 -- Index sur les dates pour les requêtes temporelles
-CREATE INDEX IF NOT EXISTS idx_piezometry_chroniques_date ON hubeau.piezometry_chroniques(date_mesure);
+CREATE INDEX IF NOT EXISTS idx_piezometry_chroniques_date ON hubeau.piezometry_chroniques(timestamp_mesure);
 CREATE INDEX IF NOT EXISTS idx_piezometry_chroniques_year ON hubeau.piezometry_chroniques(year);
-CREATE INDEX IF NOT EXISTS idx_hydrometry_observations_date ON hubeau.hydrometry_observations(date_obs);
+CREATE INDEX IF NOT EXISTS idx_hydrometry_observations_date ON hubeau.hydrometry_observations(date_obs_elab);
 CREATE INDEX IF NOT EXISTS idx_hydrometry_observations_year ON hubeau.hydrometry_observations(year);
 CREATE INDEX IF NOT EXISTS idx_quality_rivers_analyses_date ON hubeau.quality_rivers_analyses(date_prelevement);
 CREATE INDEX IF NOT EXISTS idx_quality_groundwater_analyses_date ON hubeau.quality_groundwater_analyses(date_prelevement);
-CREATE INDEX IF NOT EXISTS idx_temperature_chroniques_date ON hubeau.temperature_chroniques(date_mesure);
+CREATE INDEX IF NOT EXISTS idx_temperature_chroniques_date ON hubeau.temperature_chroniques(date_mesure_temp);
 CREATE INDEX IF NOT EXISTS idx_temperature_chroniques_year ON hubeau.temperature_chroniques(year);
 
 -- Index sur les codes géographiques
