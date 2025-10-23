@@ -389,3 +389,74 @@ def apply_standard_quality_checks(
     )
 
     yield from pipeline
+
+
+@dlt.transformer(name="handle_jsonb_arrays")
+def handle_jsonb_arrays(
+    items: Iterator[Dict[str, Any]],
+    fields: List[str]
+) -> Iterator[Dict[str, Any]]:
+    """
+    Convert fields to proper JSON arrays for JSONB storage
+
+    Handles cases where API returns:
+    - Single string value → convert to [value]
+    - Comma-separated string → split and convert to array
+    - Already an array → keep as-is
+    - null/None → keep as null
+
+    Args:
+        items: Iterator of records
+        fields: List of fields that should be JSONB arrays
+
+    Yields:
+        Records with properly formatted JSONB arrays
+
+    Usage in YAML:
+        transformers:
+          - handle_jsonb_arrays:
+              fields:
+                - codes_bdlisa
+                - libelles_supports
+                - codes_points_prelevements
+    """
+    import json
+
+    for item in items:
+        for field in fields:
+            if field in item and item[field] is not None:
+                value = item[field]
+
+                try:
+                    # If already a list, keep it
+                    if isinstance(value, list):
+                        item[field] = json.dumps(value)
+                    # If it's a string, try to parse as JSON first
+                    elif isinstance(value, str):
+                        try:
+                            # Try to parse as JSON array
+                            parsed = json.loads(value)
+                            if isinstance(parsed, list):
+                                item[field] = value  # Already valid JSON
+                            else:
+                                # Single value, wrap in array
+                                item[field] = json.dumps([value])
+                        except json.JSONDecodeError:
+                            # Not JSON, check if comma-separated
+                            if ',' in value:
+                                # Split by comma and create array
+                                array_values = [v.strip() for v in value.split(',')]
+                                item[field] = json.dumps(array_values)
+                            else:
+                                # Single string value, wrap in array
+                                item[field] = json.dumps([value])
+                    else:
+                        # Other types (int, dict, etc.), convert to JSON
+                        item[field] = json.dumps([value])
+
+                except Exception as e:
+                    logger.warning(f"Failed to convert field {field} to JSONB: {e}, value: {value}")
+                    # Keep as-is and let DB handle it
+                    pass
+
+        yield item
