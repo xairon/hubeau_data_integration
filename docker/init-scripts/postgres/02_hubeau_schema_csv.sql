@@ -1013,6 +1013,6 @@ CREATE INDEX IF NOT EXISTS idx_prelevements_chroniques_station_date ON hubeau.pr
 -- PERMISSIONS
 -- ========================================================
 
-GRANT USAGE ON SCHEMA hubeau TO hubeau_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA hubeau TO hubeau_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA hubeau GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO hubeau_user;
+GRANT ALL PRIVILEGES ON SCHEMA hubeau TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA hubeau TO postgres;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA hubeau TO postgres;
