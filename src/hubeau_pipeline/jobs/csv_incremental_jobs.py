@@ -21,17 +21,8 @@ incremental_chroniques_job = define_asset_job(
         AssetKey("hydrobio_taxons_csv"),
         AssetKey("ecoulement_observations_csv"),
         AssetKey("prelevements_chroniques_csv")
-    ),
-    config={
-        "ops": {
-            "**": {
-                "config": {
-                    "mode": "incremental",
-                    "incremental_days": 2
-                }
-            }
-        }
-    }
+    )
+    # Config will be provided by schedule or at runtime
 )
 
 
@@ -51,16 +42,8 @@ incremental_references_job = define_asset_job(
         AssetKey("ecoulement_campagnes_csv"),
         AssetKey("prelevements_points_csv"),
         AssetKey("prelevements_ouvrages_csv")
-    ),
-    config={
-        "ops": {
-            "**": {
-                "config": {
-                    "mode": "full"
-                }
-            }
-        }
-    }
+    )
+    # Config will be provided by schedule or at runtime
 )
 
 
@@ -75,8 +58,34 @@ def daily_chroniques_schedule(context):
     Schedule quotidien pour chroniques
     Recupere les donnees des dernieres 48h
     """
+    # Build config for all chroniques assets
+    asset_names = [
+        "piezometry_chroniques_csv",
+        "quality_groundwater_analyses_csv",
+        "quality_rivers_analyses_csv",
+        "quality_rivers_conditions_csv",
+        "quality_rivers_operations_csv",
+        "temperature_chroniques_csv",
+        "hydrometry_obs_elab_csv",
+        "hydrobio_indices_csv",
+        "hydrobio_taxons_csv",
+        "ecoulement_observations_csv",
+        "prelevements_chroniques_csv"
+    ]
+
+    ops_config = {
+        asset_name: {
+            "config": {
+                "mode": "incremental",
+                "incremental_days": 2
+            }
+        }
+        for asset_name in asset_names
+    }
+
     return RunRequest(
         run_key=f"daily_chroniques_{context.scheduled_execution_time.strftime('%Y%m%d')}",
+        run_config={"ops": ops_config},
         tags={
             "mode": "incremental",
             "incremental_days": "2",
@@ -96,8 +105,33 @@ def weekly_references_schedule(context):
     Schedule hebdomadaire pour referentiels
     Full refresh (les referentiels changent rarement)
     """
+    # Build config for all reference assets
+    asset_names = [
+        "piezometry_stations_csv",
+        "quality_groundwater_stations_csv",
+        "quality_rivers_stations_csv",
+        "temperature_stations_csv",
+        "hydrometry_sites_csv",
+        "hydrometry_stations_csv",
+        "hydrobio_stations_csv",
+        "ecoulement_stations_csv",
+        "ecoulement_campagnes_csv",
+        "prelevements_points_csv",
+        "prelevements_ouvrages_csv"
+    ]
+
+    ops_config = {
+        asset_name: {
+            "config": {
+                "mode": "full"
+            }
+        }
+        for asset_name in asset_names
+    }
+
     return RunRequest(
         run_key=f"weekly_references_{context.scheduled_execution_time.strftime('%Y%m%d')}",
+        run_config={"ops": ops_config},
         tags={
             "mode": "full",
             "scheduled": "true"
