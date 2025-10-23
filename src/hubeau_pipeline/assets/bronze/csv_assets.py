@@ -10,7 +10,6 @@ Factory pattern pour generer automatiquement 22 assets avec support multi-mode :
 import dlt
 import yaml
 import time
-import os
 from pathlib import Path
 from dagster import asset, AssetExecutionContext, Output, MetadataValue, Config
 from pydantic import Field
@@ -94,20 +93,11 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         elif config.mode == "incremental":
             context.log.info(f"   Derniers {config.incremental_days} jours")
 
-        # PostgreSQL credentials from environment
-        # Match docker-compose.production.yml variable names
-        pg_credentials = {
-            "database": os.getenv("PG_DB", "postgres"),        # PG_DB (not PG_DATABASE)
-            "username": os.getenv("PG_USER", "postgres"),
-            "password": os.getenv("PG_PASSWORD"),
-            "host": os.getenv("PG_HOST", "postgres"),
-            "port": int(os.getenv("PG_PORT", "5432"))
-        }
-
-        # Pipeline DLT avec credentials explicites
+        # Pipeline DLT - uses credentials from DESTINATION__POSTGRES__CREDENTIALS__* env vars
+        # These are already set in docker-compose.production.yml (lines 72-76)
         pipeline = dlt.pipeline(
             pipeline_name=f"hubeau_{resource_name}_csv_{config.mode}",
-            destination=dlt.destinations.postgres(credentials=pg_credentials),
+            destination="postgres",  # DLT auto-reads DESTINATION__POSTGRES__CREDENTIALS__* env vars
             dataset_name="hubeau",
             pipelines_dir="src/hubeau_pipeline/config"
         )
