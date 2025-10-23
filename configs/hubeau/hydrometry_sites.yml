@@ -3,7 +3,7 @@ source:
   max_table_nesting: 2
 resource:
   name: hydrometry_sites
-  endpoint: /referentiel/sites
+  endpoint: /referentiel/sites.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
   primary_key: [code_site]
   write_disposition: merge

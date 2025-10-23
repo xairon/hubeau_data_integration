@@ -3,7 +3,7 @@ source:
   max_table_nesting: 2
 resource:
   name: quality_groundwater_analyses
-  endpoint: /analyses
+  endpoint: /analyses.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
   primary_key:
   - code_bss

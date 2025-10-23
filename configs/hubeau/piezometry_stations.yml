@@ -3,7 +3,7 @@ source:
   max_table_nesting: 2
 resource:
   name: piezometry_stations
-  endpoint: /stations
+  endpoint: /stations.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
   primary_key: [code_bss]
   write_disposition: merge

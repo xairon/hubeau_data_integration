@@ -3,7 +3,7 @@ source:
   max_table_nesting: 2
 resource:
   name: piezometry_chroniques
-  endpoint: /chroniques_tr
+  endpoint: /chroniques_tr.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
   primary_key: [code_bss, timestamp_mesure]
   write_disposition: append

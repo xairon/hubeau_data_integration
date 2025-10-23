@@ -3,7 +3,7 @@ source:
   max_table_nesting: 0
 resource:
   name: hydrobio_stations
-  endpoint: /stations_hydrobio
+  endpoint: /stations_hydrobio.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/hydrobio
   primary_key:
   - code_station_hydrobio

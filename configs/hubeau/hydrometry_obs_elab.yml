@@ -3,7 +3,7 @@ source:
   max_table_nesting: 2
 resource:
   name: hydrometry_observations
-  endpoint: /obs_elab
+  endpoint: /obs_elab.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
   primary_key: [code_station, date_obs_elab, grandeur_hydro_elab]
   write_disposition: append

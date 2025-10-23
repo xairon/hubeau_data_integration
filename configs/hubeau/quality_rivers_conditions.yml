@@ -3,7 +3,7 @@ source:
   max_table_nesting: 0
 resource:
   name: quality_rivers_conditions
-  endpoint: /condition_environnementale_pc
+  endpoint: /condition_environnementale_pc.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
   primary_key:
   - code_station

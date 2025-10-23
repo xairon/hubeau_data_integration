@@ -3,7 +3,7 @@ source:
   max_table_nesting: 0
 resource:
   name: prelevements_chroniques
-  endpoint: /chroniques
+  endpoint: /chroniques.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
   primary_key:
   - code_ouvrage

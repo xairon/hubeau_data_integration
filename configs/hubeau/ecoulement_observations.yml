@@ -3,7 +3,7 @@ source:
   max_table_nesting: 0
 resource:
   name: ecoulement_observations
-  endpoint: /observations
+  endpoint: /observations.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
   primary_key:
   - code_station

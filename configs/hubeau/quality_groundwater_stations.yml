@@ -3,7 +3,7 @@ source:
   max_table_nesting: 0
 resource:
   name: quality_groundwater_stations
-  endpoint: /stations
+  endpoint: /stations.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
   primary_key:
   - code_bss

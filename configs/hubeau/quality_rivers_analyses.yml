@@ -3,7 +3,7 @@ source:
   max_table_nesting: 2
 resource:
   name: quality_rivers_analyses
-  endpoint: /analyse_pc
+  endpoint: /analyse_pc.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
   primary_key:
   - code_station

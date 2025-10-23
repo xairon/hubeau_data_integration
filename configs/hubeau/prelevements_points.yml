@@ -3,7 +3,7 @@ source:
   max_table_nesting: 0
 resource:
   name: prelevements_points
-  endpoint: /referentiel/points_prelevement
+  endpoint: /referentiel/points_prelevement.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
   primary_key:
   - code_point_prelevement
