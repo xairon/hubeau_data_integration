@@ -95,8 +95,9 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             context.log.info(f"   Derniers {config.incremental_days} jours")
 
         # PostgreSQL credentials from environment
+        # Match docker-compose.production.yml variable names
         pg_credentials = {
-            "database": os.getenv("PG_DATABASE", "postgres"),
+            "database": os.getenv("PG_DB", "postgres"),        # PG_DB (not PG_DATABASE)
             "username": os.getenv("PG_USER", "postgres"),
             "password": os.getenv("PG_PASSWORD"),
             "host": os.getenv("PG_HOST", "postgres"),
