@@ -1,520 +1,938 @@
--- Script d'initialisation de la base de données Hub'Eau
--- Exécuté automatiquement au démarrage du container PostgreSQL
--- Basé sur la documentation complète des APIs Hub'Eau
+-- ============================================
+-- SCH�MA COMPLET Hub'Eau - TOUTES LES COLONNES
+-- G�n�r� depuis les configs YAML
+-- ============================================
 
--- Créer le schéma hubeau
 CREATE SCHEMA IF NOT EXISTS hubeau;
-
--- Extension PostGIS pour les données géospatiales
 CREATE EXTENSION IF NOT EXISTS postgis;
-
--- Set search path
 SET search_path TO hubeau, public;
 
 -- ============================================
--- HYDROMÉTRIE (Débits et hauteurs)
+-- HYDROMETRY
 -- ============================================
 
--- Table des sites hydrométriques (groupements de stations)
-CREATE TABLE IF NOT EXISTS hubeau.hydrometry_sites (
-    code_site VARCHAR(20) PRIMARY KEY,
-    libelle_site VARCHAR(200),
-    type_site VARCHAR(50),
-    code_cours_eau VARCHAR(20),
-    libelle_cours_eau VARCHAR(100),
-    code_commune_site VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    code_departement VARCHAR(3),
-    libelle_departement VARCHAR(100),
-    code_region VARCHAR(5),
-    libelle_region VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    altitude DECIMAL(8, 2),
-    surface_bv DECIMAL(12, 2),
-    statut_site VARCHAR(50),
-    date_ouverture DATE,
-    date_fermeture DATE,
-    producteur VARCHAR(100),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Table des stations hydrométriques
--- Note: Pas de FK sur code_site car l'API Hub'Eau retourne des références incohérentes
---       (des stations référencent des sites qui n'existent pas dans /referentiel/sites)
-CREATE TABLE IF NOT EXISTS hubeau.hydrometry_stations (
-    code_station VARCHAR(20) PRIMARY KEY,
-    code_site VARCHAR(20),  -- Pas de FK - données Hub'Eau incohérentes
-    libelle_station VARCHAR(200),
-    type_station VARCHAR(50),
-    longitude_station DECIMAL(10, 6),
-    latitude_station DECIMAL(10, 6),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    altitude_zero DECIMAL(8, 2),
-    date_ouverture DATE,
-    date_fermeture DATE,
-    en_service BOOLEAN,
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Table des observations hydrométriques élaborées
--- Note: Noms de colonnes alignés avec l'API Hub'Eau (date_obs_elab, grandeur_hydro_elab, etc.)
 CREATE TABLE IF NOT EXISTS hubeau.hydrometry_observations (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.hydrometry_stations(code_station),
+    code_methode TEXT,
+    code_qualification TEXT,
+    code_site TEXT,
+    code_station TEXT NOT NULL,
+    code_statut TEXT,
     date_obs_elab TIMESTAMP NOT NULL,
-    grandeur_hydro_elab VARCHAR(10),
-    resultat_obs_elab DECIMAL(12, 3),
-    code_qualification VARCHAR(10),
-    libelle_qualification VARCHAR(50),
-    code_methode VARCHAR(20),
-    libelle_methode VARCHAR(100),
-    -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_obs_elab)) STORED,
-    -- Contrainte d'unicité
+    date_prod TIMESTAMP,
+    grandeur_hydro_elab TEXT NOT NULL,
+    latitude DOUBLE PRECISION,
+    libelle_methode TEXT,
+    libelle_qualification TEXT,
+    libelle_statut TEXT,
+    longitude DOUBLE PRECISION,
+    resultat_obs_elab DOUBLE PRECISION,
     UNIQUE(code_station, date_obs_elab, grandeur_hydro_elab),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- PIÉZOMÉTRIE (Niveaux des nappes)
--- ============================================
-
--- Table des stations de piézométrie
-CREATE TABLE IF NOT EXISTS hubeau.piezometry_stations (
-    code_bss VARCHAR(20) PRIMARY KEY,
-    urn_bss VARCHAR(100),
-    date_recherche DATE,
-    bss_id VARCHAR(20),
-    code_commune_insee VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    code_departement VARCHAR(3),
-    libelle_departement VARCHAR(100),
-    code_region VARCHAR(5),
-    libelle_region VARCHAR(100),
-    coordonnees_x DECIMAL(10, 6),
-    coordonnees_y DECIMAL(10, 6),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    altitude_sol DECIMAL(8, 2),
-    altitude_repere DECIMAL(8, 2),
-    profondeur_totale DECIMAL(8, 2),
-    code_entite_hydrogeo VARCHAR(20),
-    libelle_entite_hydrogeo VARCHAR(200),
-    code_masse_eau VARCHAR(20),
-    libelle_masse_eau VARCHAR(200),
-    nature_eau VARCHAR(50),
-    milieu VARCHAR(50),
-    niveau_acces_donnees VARCHAR(20),
-    producteur_donnees VARCHAR(100),
-    date_debut_mesure DATE,
-    date_fin_mesure DATE,
-    nb_mesures INTEGER,
-    -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des chroniques piézométriques
--- Note: Nom de colonne timestamp_mesure aligné avec l'API Hub'Eau (PK)
+CREATE TABLE IF NOT EXISTS hubeau.hydrometry_sites (
+    id SERIAL PRIMARY KEY,
+    altitude_site DOUBLE PRECISION,
+    code_commune_site TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_entite_hydro_site TEXT,
+    code_projection TEXT,
+    code_region TEXT,
+    code_site TEXT NOT NULL,
+    code_systeme_alti_site TEXT,
+    code_troncon_hydro_site TEXT,
+    code_zone_hydro_site TEXT,
+    commentaire_influence_generale_site TEXT,
+    commentaire_site TEXT,
+    coordonnee_x_site DOUBLE PRECISION,
+    coordonnee_y_site DOUBLE PRECISION,
+    date_maj_site TIMESTAMP,
+    date_premiere_donnee_dispo_site DATE,
+    geometry JSONB,
+    grandeur_hydro TEXT,
+    influence_generale_site TEXT,
+    latitude_site DOUBLE PRECISION,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_region TEXT,
+    libelle_site TEXT,
+    longitude_site DOUBLE PRECISION,
+    premier_mois_annee_hydro_site INTEGER,
+    premier_mois_etiage_site INTEGER,
+    statut_site TEXT,
+    surface_bv DOUBLE PRECISION,
+    type_contexte_loi_stat_site TEXT,
+    type_loi_site TEXT,
+    type_site TEXT,
+    uri_cours_eau TEXT,
+    UNIQUE(code_site),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hubeau.hydrometry_stations (
+    id SERIAL PRIMARY KEY,
+    altitude_ref_alti_station DOUBLE PRECISION,
+    code_commune_station TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_finalite_station TEXT,
+    code_projection TEXT,
+    code_regime_station TEXT,
+    code_region TEXT,
+    code_sandre_reseau_station TEXT,
+    code_site TEXT,
+    code_station TEXT NOT NULL,
+    commentaire_influence_locale_station TEXT,
+    commentaire_station TEXT,
+    coordonnee_x_station DOUBLE PRECISION,
+    coordonnee_y_station DOUBLE PRECISION,
+    date_activation_ref_alti_station DATE,
+    date_debut_ref_alti_station DATE,
+    date_fermeture_station DATE,
+    date_maj_ref_alti_station DATE,
+    date_maj_station TIMESTAMP,
+    date_ouverture_station DATE,
+    descriptif_station TEXT,
+    en_service BOOLEAN,
+    geometry JSONB,
+    influence_locale_station TEXT,
+    latitude_station DOUBLE PRECISION,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_region TEXT,
+    libelle_site TEXT,
+    libelle_station TEXT,
+    longitude_station DOUBLE PRECISION,
+    qualification_donnees_station TEXT,
+    type_contexte_loi_stat_station TEXT,
+    type_loi_station TEXT,
+    type_station TEXT,
+    uri_cours_eau TEXT,
+    UNIQUE(code_station),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- PIEZOMETRY
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS hubeau.piezometry_chroniques (
     id SERIAL PRIMARY KEY,
-    code_bss VARCHAR(20) REFERENCES hubeau.piezometry_stations(code_bss),
+    altitude_repere DOUBLE PRECISION,
+    altitude_station DOUBLE PRECISION,
+    bss_id TEXT,
+    code_bss TEXT NOT NULL,
+    date_maj TIMESTAMP,
     date_mesure DATE,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    niveau_eau_ngf DOUBLE PRECISION,
+    profondeur_nappe DOUBLE PRECISION,
     timestamp_mesure TIMESTAMP NOT NULL,
-    niveau_eau_ngf DECIMAL(10, 3),
-    niveau_eau_relative DECIMAL(10, 3),
-    profondeur_nappe DECIMAL(10, 3),
-    niveau_eau_indicateur DECIMAL(10, 3),
-    qualification VARCHAR(20),
-    statut VARCHAR(20),
-    mode_obtention VARCHAR(50),
-    continuité VARCHAR(20),
-    producteur VARCHAR(100),
-    -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM timestamp_mesure)) STORED,
-    -- Contrainte d'unicité
+    urn_bss TEXT,
     UNIQUE(code_bss, timestamp_mesure),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- QUALITÉ DES EAUX - COURS D'EAU
--- ============================================
-
--- Table des stations de qualité cours d'eau
-CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_stations (
-    code_station VARCHAR(20) PRIMARY KEY,
-    libelle_station VARCHAR(200),
-    code_cours_eau VARCHAR(20),
-    libelle_cours_eau VARCHAR(100),
-    code_commune VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    code_departement VARCHAR(3),
-    libelle_departement VARCHAR(100),
-    code_region VARCHAR(5),
-    libelle_region VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    code_masse_eau VARCHAR(20),
-    libelle_masse_eau VARCHAR(200),
-    statut_station VARCHAR(50),
-    date_ouverture DATE,
-    date_fermeture DATE,
-    -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des opérations de prélèvement qualité cours d'eau
--- Note: nom_methode aligné avec l'API Hub'Eau
-CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_operations (
+CREATE TABLE IF NOT EXISTS hubeau.piezometry_stations (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.quality_rivers_stations(code_station),
-    date_prelevement DATE NOT NULL,
-    code_operation VARCHAR(20),
-    heure_prelevement TIME,
-    code_support VARCHAR(10),
-    libelle_support VARCHAR(50),
-    code_methode VARCHAR(20),
-    nom_methode VARCHAR(100),
-    -- Contrainte d'unicité
-    UNIQUE(code_station, date_prelevement, code_operation),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    altitude_station DOUBLE PRECISION,
+    bss_id TEXT,
+    code_bss TEXT NOT NULL,
+    code_commune_insee TEXT,
+    code_departement TEXT,
+    codes_bdlisa JSONB,
+    codes_masse_eau_edl JSONB,
+    date_debut_mesure DATE,
+    date_fin_mesure DATE,
+    date_maj TIMESTAMP,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_pe TEXT,
+    longitude DOUBLE PRECISION,
+    nb_mesures_piezo INTEGER,
+    nom_commune TEXT,
+    nom_departement TEXT,
+    noms_masse_eau_edl JSONB,
+    profondeur_investigation DOUBLE PRECISION,
+    urn_bss TEXT,
+    urns_bdlisa JSONB,
+    urns_masse_eau_edl JSONB,
+    x DOUBLE PRECISION,
+    y DOUBLE PRECISION,
+    UNIQUE(code_bss),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des analyses qualité cours d'eau
+-- ============================================
+-- QUALITY_RIVERS
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_analyses (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.quality_rivers_stations(code_station),
+    agrement TEXT,
+    code_accreditation TEXT,
+    code_analyse TEXT,
+    code_banque_reference TEXT,
+    code_difficulte_analyse TEXT,
+    code_fraction TEXT NOT NULL,
+    code_groupe_parametre TEXT,
+    code_insitu TEXT,
+    code_laboratoire TEXT,
+    code_methode_analyse TEXT,
+    code_methode_extraction TEXT,
+    code_methode_fractionnement TEXT,
+    code_operation TEXT,
+    code_parametre TEXT NOT NULL,
+    code_point_eau_surface TEXT,
+    code_prelevement TEXT,
+    code_preleveur TEXT,
+    code_producteur_analyse TEXT,
+    code_qualification TEXT,
+    code_remarque TEXT,
+    code_reseau TEXT,
+    code_station TEXT NOT NULL,
+    code_statut TEXT,
+    code_support TEXT NOT NULL,
+    code_unite TEXT,
+    commentaires_analyse TEXT,
+    commentaires_resultat_analyse TEXT,
+    date_maj_analyse TIMESTAMP,
     date_prelevement DATE NOT NULL,
-    code_parametre VARCHAR(10),
-    libelle_parametre VARCHAR(200),
-    code_support VARCHAR(10),
-    code_fraction VARCHAR(10),
-    resultat DECIMAL(15, 6),
-    code_unite VARCHAR(10),
-    symbole_unite VARCHAR(20),
-    code_remarque VARCHAR(5),
-    limite_detection DECIMAL(15, 6),
-    limite_quantification DECIMAL(15, 6),
-    code_statut VARCHAR(5),
-    code_qualification VARCHAR(5),
-    producteur VARCHAR(100),
-    -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_prelevement)) STORED,
-    -- Contrainte d'unicité (alignée avec primary_key API)
+    geometry JSONB,
+    heure_analyse TIME,
+    heure_prelevement TIME,
+    incertitude_analytique DOUBLE PRECISION,
+    latitude DOUBLE PRECISION,
+    libelle_fraction TEXT,
+    libelle_groupe_parametre TEXT,
+    libelle_insitu TEXT,
+    libelle_parametre TEXT,
+    libelle_qualification TEXT,
+    libelle_station TEXT,
+    libelle_support TEXT,
+    limite_detection DOUBLE PRECISION,
+    limite_quantification DOUBLE PRECISION,
+    limite_saturation DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    mnemo_accreditation TEXT,
+    mnemo_difficulte_analyse TEXT,
+    mnemo_remarque TEXT,
+    mnemo_statut TEXT,
+    nom_laboratoire TEXT,
+    nom_methode_analyse TEXT,
+    nom_methode_extraction TEXT,
+    nom_methode_fractionnement TEXT,
+    nom_preleveur TEXT,
+    nom_producteur_analyse TEXT,
+    nom_reseau TEXT,
+    rendement_extraction DOUBLE PRECISION,
+    resultat DOUBLE PRECISION,
+    symbole_unite TEXT,
+    uri_fraction TEXT,
+    uri_groupe_parametre TEXT,
+    uri_laboratoire TEXT,
+    uri_methode_analyse TEXT,
+    uri_methode_extraction TEXT,
+    uri_methode_fractionnement TEXT,
+    uri_parametre TEXT,
+    uri_preleveur TEXT,
+    uri_producteur_prelevement TEXT,
+    uri_reseau TEXT,
+    uri_station TEXT,
+    uri_support TEXT,
+    uri_unite TEXT,
     UNIQUE(code_station, date_prelevement, code_parametre, code_support, code_fraction),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des conditions environnementales qualité cours d'eau
 CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_conditions (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.quality_rivers_stations(code_station),
+    code_banque_reference TEXT,
+    code_eu_masse_deau TEXT,
+    code_groupe_parametre TEXT,
+    code_masse_deau TEXT,
+    code_methode TEXT,
+    code_operation_cep TEXT,
+    code_parametre TEXT NOT NULL,
+    code_point_eau_surface TEXT,
+    code_prelevement TEXT,
+    code_preleveur TEXT,
+    code_producteur TEXT,
+    code_qualification TEXT,
+    code_remarque TEXT,
+    code_station TEXT NOT NULL,
+    code_statut TEXT,
+    code_unite TEXT,
+    commentaire TEXT,
+    date_maj TIMESTAMP,
+    date_mesure DATE,
     date_prelevement DATE NOT NULL,
-    code_parametre VARCHAR(10),
-    libelle_parametre VARCHAR(200),
-    resultat DECIMAL(15, 6),
-    code_unite VARCHAR(10),
-    symbole_unite VARCHAR(20),
-    code_qualification VARCHAR(5),
-    libelle_qualification VARCHAR(50),
-    -- Contrainte d'unicité
+    geometry JSONB,
+    heure_mesure TIME,
+    latitude DOUBLE PRECISION,
+    libelle_groupe_parametre TEXT,
+    libelle_parametre TEXT,
+    libelle_qualification TEXT,
+    libelle_resultat TEXT,
+    libelle_station TEXT,
+    longitude DOUBLE PRECISION,
+    mnemo_remarque TEXT,
+    mnemo_statut TEXT,
+    nom_masse_deau TEXT,
+    nom_methode TEXT,
+    nom_preleveur TEXT,
+    nom_producteur TEXT,
+    resultat DOUBLE PRECISION,
+    symbole_unite TEXT,
+    uri_groupe_parametre TEXT,
+    uri_methode TEXT,
+    uri_parametre TEXT,
+    uri_preleveur TEXT,
+    uri_producteur TEXT,
+    uri_station TEXT,
+    uri_unite TEXT,
     UNIQUE(code_station, date_prelevement, code_parametre),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- QUALITÉ DES EAUX - NAPPES SOUTERRAINES
--- ============================================
-
--- Table des stations qualité eau souterraine
-CREATE TABLE IF NOT EXISTS hubeau.quality_groundwater_stations (
-    code_bss VARCHAR(20) PRIMARY KEY,
-    libelle_point VARCHAR(200),
-    code_commune_insee VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    code_departement VARCHAR(3),
-    libelle_departement VARCHAR(100),
-    code_region VARCHAR(5),
-    libelle_region VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    altitude DECIMAL(8, 2),
-    profondeur DECIMAL(8, 2),
-    code_masse_eau VARCHAR(20),
-    libelle_masse_eau VARCHAR(200),
-    nature_point VARCHAR(50),
-    usage_point VARCHAR(100),
-    -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des analyses qualité eau souterraine
+CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_operations (
+    id SERIAL PRIMARY KEY,
+    agrement TEXT,
+    code_accreditation TEXT,
+    code_banque_reference TEXT,
+    code_difficulte TEXT,
+    code_finalite TEXT,
+    code_methode TEXT,
+    code_operation TEXT NOT NULL,
+    code_point_eau_surface TEXT,
+    code_prelevement TEXT,
+    code_preleveur TEXT,
+    code_producteur TEXT,
+    code_projection TEXT,
+    code_reseau TEXT,
+    code_station TEXT NOT NULL,
+    code_support TEXT,
+    code_zone_verticale_prospectee TEXT,
+    commentaires TEXT,
+    date_fin DATE,
+    date_prelevement DATE NOT NULL,
+    geometry JSONB,
+    heure_fin TIME,
+    heure_prelevement TIME,
+    latitude DOUBLE PRECISION,
+    libelle_finalite TEXT,
+    libelle_projection TEXT,
+    libelle_station TEXT,
+    libelle_support TEXT,
+    longitude DOUBLE PRECISION,
+    mnemo_accreditation TEXT,
+    mnemo_difficulte TEXT,
+    mnemo_zone_verticale_prospectee TEXT,
+    nom_methode TEXT,
+    nom_preleveur TEXT,
+    nom_producteur TEXT,
+    nom_reseau TEXT,
+    profondeur DOUBLE PRECISION,
+    uri_methode TEXT,
+    uri_preleveur TEXT,
+    uri_producteur TEXT,
+    uri_reseau TEXT,
+    uri_station TEXT,
+    uri_support TEXT,
+    x_prelevement DOUBLE PRECISION,
+    y_prelevement DOUBLE PRECISION,
+    UNIQUE(code_station, date_prelevement, code_operation),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hubeau.quality_rivers_stations (
+    id SERIAL PRIMARY KEY,
+    altitude_point_caracteristique DOUBLE PRECISION,
+    code_bassin TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_eu_bassin TEXT,
+    code_eu_masse_deau TEXT,
+    code_eu_sous_bassin TEXT,
+    code_masse_deau TEXT,
+    code_projection TEXT,
+    code_region TEXT,
+    code_station TEXT NOT NULL,
+    commentaire TEXT,
+    coordonnee_x DOUBLE PRECISION,
+    coordonnee_y DOUBLE PRECISION,
+    date_arret DATE,
+    date_creation DATE,
+    date_maj_information TIMESTAMP,
+    durete TEXT,
+    finalite TEXT,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_commune TEXT,
+    libelle_departement TEXT,
+    libelle_projection TEXT,
+    libelle_region TEXT,
+    libelle_station TEXT,
+    localisation_precise TEXT,
+    longitude DOUBLE PRECISION,
+    nature TEXT,
+    nom_bassin TEXT,
+    nom_cours_eau TEXT,
+    nom_masse_deau TEXT,
+    nom_sous_bassin TEXT,
+    point_kilometrique DOUBLE PRECISION,
+    premier_mois_annee_etiage TEXT,
+    superficie_bassin_versant_reel DOUBLE PRECISION,
+    superficie_bassin_versant_topo DOUBLE PRECISION,
+    type_entite_hydro TEXT,
+    uri_bassin TEXT,
+    uri_cours_eau TEXT,
+    uri_masse_deau TEXT,
+    uri_sous_bassin TEXT,
+    uri_station TEXT,
+    UNIQUE(code_station),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- QUALITY_GROUNDWATER
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS hubeau.quality_groundwater_analyses (
     id SERIAL PRIMARY KEY,
-    code_bss VARCHAR(20) REFERENCES hubeau.quality_groundwater_stations(code_bss),
-    date_prelevement DATE NOT NULL,
-    code_parametre VARCHAR(10),
-    libelle_parametre VARCHAR(200),
-    code_support VARCHAR(10),
-    code_fraction VARCHAR(10),
-    resultat DECIMAL(15, 6),
-    code_unite VARCHAR(10),
-    symbole_unite VARCHAR(20),
-    code_remarque VARCHAR(5),
-    limite_detection DECIMAL(15, 6),
-    limite_quantification DECIMAL(15, 6),
-    code_statut VARCHAR(5),
-    code_qualification VARCHAR(5),
-    producteur VARCHAR(100),
-    -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_prelevement)) STORED,
-    -- Contrainte d'unicité (alignée avec primary_key API)
-    UNIQUE(code_bss, date_prelevement, code_parametre, code_support, code_fraction),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- TEMPÉRATURE DES COURS D'EAU
--- ============================================
-
--- Table des stations de température
-CREATE TABLE IF NOT EXISTS hubeau.temperature_stations (
-    code_station VARCHAR(20) PRIMARY KEY,
-    libelle_station VARCHAR(200),
-    code_cours_eau VARCHAR(20),
-    libelle_cours_eau VARCHAR(100),
-    code_commune VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    -- Métadonnées
+    bss_id TEXT,
+    code_bss TEXT NOT NULL,
+    code_fraction TEXT NOT NULL,
+    code_lieu_analyse TEXT,
+    code_methode TEXT,
+    code_param TEXT NOT NULL,
+    code_producteur TEXT,
+    code_qualification TEXT,
+    code_remarque_analyse TEXT,
+    code_statut_analyse TEXT,
+    code_unite TEXT,
+    codes_groupe_parametre JSONB,
+    date_debut_prelevement DATE NOT NULL,
+    incertitude_analytique DOUBLE PRECISION,
+    latitude DOUBLE PRECISION,
+    limite_detection DOUBLE PRECISION,
+    limite_quantification DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    nom_fraction TEXT,
+    nom_lieu_analyse TEXT,
+    nom_methode TEXT,
+    nom_param TEXT,
+    nom_producteur TEXT,
+    nom_qualification TEXT,
+    nom_remarque_analyse TEXT,
+    nom_statut_analyse TEXT,
+    nom_unite TEXT,
+    noms_groupe_parametre JSONB,
+    resultat DOUBLE PRECISION,
+    seuil_saturation DOUBLE PRECISION,
+    symbole_unite TEXT,
+    uri_fraction TEXT,
+    uri_lieu_analyse TEXT,
+    uri_methode TEXT,
+    uri_param TEXT,
+    uri_producteur TEXT,
+    uri_qualification TEXT,
+    uri_remarque_analyse TEXT,
+    uri_statut_analyse TEXT,
+    uri_unite TEXT,
+    uris_groupe_parametre JSONB,
+    urn_bss TEXT,
+    UNIQUE(code_bss, date_debut_prelevement, code_param, code_fraction),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des chroniques de température
--- Note: Noms de colonnes alignés avec l'API Hub'Eau (date_mesure_temp, resultat)
+CREATE TABLE IF NOT EXISTS hubeau.quality_groundwater_stations (
+    id SERIAL PRIMARY KEY,
+    altitude DOUBLE PRECISION,
+    bassin_dce TEXT,
+    bss_id TEXT,
+    circonscriptions_administrative_bassin TEXT,
+    code_bassin_dce TEXT,
+    code_bss TEXT NOT NULL,
+    code_caracteristique_aquifere TEXT,
+    code_etat_pe TEXT,
+    code_insee TEXT,
+    code_mode_gisement TEXT,
+    code_nature_pe TEXT,
+    codes_bdlisa JSONB,
+    codes_masse_eau JSONB,
+    codes_reseau JSONB,
+    commentaire_pe TEXT,
+    date_debut_mesure DATE,
+    date_fin_mesure DATE,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_pe TEXT,
+    longitude DOUBLE PRECISION,
+    nom_caracteristique_aquifere TEXT,
+    nom_commune TEXT,
+    nom_departement TEXT,
+    nom_etat_pe TEXT,
+    nom_mode_gisement TEXT,
+    nom_nature_pe TEXT,
+    nom_region TEXT,
+    noms_masse_eau JSONB,
+    noms_reseau JSONB,
+    num_departement TEXT,
+    precision_coordonnees TEXT,
+    profondeur_investigation DOUBLE PRECISION,
+    uri_caracteristique_aquifere TEXT,
+    uri_etat_pe TEXT,
+    uri_mode_gisement TEXT,
+    uri_nature_pe TEXT,
+    uris_reseau JSONB,
+    urn_bassin_dce TEXT,
+    urn_bss TEXT,
+    urns_bdlisa JSONB,
+    urns_masse_eau JSONB,
+    UNIQUE(code_bss),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- TEMPERATURE
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS hubeau.temperature_chroniques (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.temperature_stations(code_station),
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_parametre TEXT,
+    code_qualification TEXT,
+    code_station TEXT NOT NULL,
+    code_unite TEXT,
     date_mesure_temp TIMESTAMP NOT NULL,
+    geometry JSONB,
     heure_mesure_temp TIME,
-    resultat DECIMAL(5, 2),
-    code_qualification VARCHAR(20),
-    libelle_qualification VARCHAR(50),
-    -- Partition key
-    year INTEGER GENERATED ALWAYS AS (EXTRACT(YEAR FROM date_mesure_temp)) STORED,
-    -- Contrainte d'unicité
+    latitude DOUBLE PRECISION,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_parametre TEXT,
+    libelle_qualification TEXT,
+    libelle_station TEXT,
+    localisation TEXT,
+    longitude DOUBLE PRECISION,
+    resultat DOUBLE PRECISION,
+    symbole_unite TEXT,
+    uri_cours_eau TEXT,
+    uri_station TEXT,
     UNIQUE(code_station, date_mesure_temp),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- ÉCOULEMENT (ONDE)
--- ============================================
-
--- Table des stations d'observation des écoulements
-CREATE TABLE IF NOT EXISTS hubeau.ecoulement_stations (
-    code_station VARCHAR(20) PRIMARY KEY,
-    libelle_station VARCHAR(200),
-    code_cours_eau VARCHAR(20),
-    libelle_cours_eau VARCHAR(100),
-    code_commune VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des campagnes d'observation
+CREATE TABLE IF NOT EXISTS hubeau.temperature_stations (
+    id SERIAL PRIMARY KEY,
+    altitude DOUBLE PRECISION,
+    code_bassin TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_eu_bassin TEXT,
+    code_eu_masse_eau TEXT,
+    code_masse_eau TEXT,
+    code_region TEXT,
+    code_sous_bassin TEXT,
+    code_station TEXT NOT NULL,
+    code_troncon_hydro TEXT,
+    code_type_projection TEXT,
+    codes_reseaux JSONB,
+    commentaire TEXT,
+    coordonnee_x DOUBLE PRECISION,
+    coordonnee_y DOUBLE PRECISION,
+    date_maj_infos TIMESTAMP,
+    date_mise_en_service DATE,
+    date_mise_hors_service DATE,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_bassin TEXT,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_masse_eau TEXT,
+    libelle_region TEXT,
+    libelle_sous_bassin TEXT,
+    libelle_station TEXT,
+    libelle_type_projection TEXT,
+    localisation TEXT,
+    longitude DOUBLE PRECISION,
+    nature_station TEXT,
+    pk DOUBLE PRECISION,
+    premier_mois_etiage TEXT,
+    superficie_reelle DOUBLE PRECISION,
+    superficie_topo DOUBLE PRECISION,
+    type_entite_hydro TEXT,
+    uri_bassin TEXT,
+    uri_cours_eau TEXT,
+    uri_masse_eau TEXT,
+    uri_sous_bassin TEXT,
+    uri_station TEXT,
+    UNIQUE(code_station),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- ECOULEMENT
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS hubeau.ecoulement_campagnes (
     id SERIAL PRIMARY KEY,
-    code_campagne VARCHAR(50),
-    libelle_campagne VARCHAR(200),
-    date_debut DATE,
-    date_fin DATE,
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    code_campagne TEXT,
+    code_departement TEXT NOT NULL,
+    commentaire TEXT,
+    date_campagne DATE NOT NULL,
+    libelle_campagne TEXT,
+    nb_observations TEXT,
+    nb_stations TEXT,
+    UNIQUE(code_departement, date_campagne),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des observations d'écoulement
--- Note: Nom de colonne date_observation aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.ecoulement_observations (
     id SERIAL PRIMARY KEY,
-    code_station VARCHAR(20) REFERENCES hubeau.ecoulement_stations(code_station),
-    code_campagne VARCHAR(50),
+    code_bassin TEXT,
+    code_campagne TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_ecoulement TEXT,
+    code_projection_station TEXT,
+    code_region TEXT,
+    code_reseau TEXT,
+    code_station TEXT NOT NULL,
+    coordonnee_x_station DOUBLE PRECISION,
+    coordonnee_y_station DOUBLE PRECISION,
     date_observation DATE NOT NULL,
-    libelle_observation VARCHAR(200),
-    -- Contrainte d'unicité
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_bassin TEXT,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_ecoulement TEXT,
+    libelle_projection_station TEXT,
+    libelle_region TEXT,
+    libelle_reseau TEXT,
+    libelle_station TEXT,
+    longitude DOUBLE PRECISION,
+    uri_cours_eau TEXT,
+    uri_reseau TEXT,
+    uri_station TEXT,
     UNIQUE(code_station, date_observation),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- HYDROBIOLOGIE
--- ============================================
-
--- Table des stations hydrobiologiques
--- Note: Noms de colonnes alignés avec l'API Hub'Eau (code_station_hydrobio, libelle_station_hydrobio, etc.)
-CREATE TABLE IF NOT EXISTS hubeau.hydrobio_stations (
-    code_station_hydrobio VARCHAR(20) PRIMARY KEY,
-    libelle_station_hydrobio VARCHAR(200),
-    uri_station_hydrobio TEXT,
-    code_cours_eau VARCHAR(20),
-    libelle_cours_eau VARCHAR(100),
-    code_commune VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des indices biologiques
--- Note: Nom de colonne code_station_hydrobio aligné avec l'API Hub'Eau
+CREATE TABLE IF NOT EXISTS hubeau.ecoulement_stations (
+    id SERIAL PRIMARY KEY,
+    code_bassin TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_epsg_station TEXT,
+    code_projection_station TEXT,
+    code_region TEXT,
+    code_station TEXT NOT NULL,
+    coordonnee_x_station DOUBLE PRECISION,
+    coordonnee_y_station DOUBLE PRECISION,
+    date_maj_station TIMESTAMP,
+    etat_station TEXT,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_bassin TEXT,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_projection_station TEXT,
+    libelle_region TEXT,
+    libelle_station TEXT,
+    longitude DOUBLE PRECISION,
+    uri_cours_eau TEXT,
+    uri_station TEXT,
+    UNIQUE(code_station),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- HYDROBIO
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS hubeau.hydrobio_indices (
     id SERIAL PRIMARY KEY,
-    code_station_hydrobio VARCHAR(20) REFERENCES hubeau.hydrobio_stations(code_station_hydrobio),
+    code_banque_reference TEXT,
+    code_bassin TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_indice TEXT NOT NULL,
+    code_masse_eau TEXT,
+    code_methode TEXT,
+    code_operation_prelevement TEXT,
+    code_prelevement TEXT,
+    code_projection TEXT,
+    code_qualification TEXT,
+    code_region TEXT,
+    code_sous_bassin TEXT,
+    code_station_hydrobio TEXT NOT NULL,
+    code_support TEXT NOT NULL,
+    coordonnee_x DOUBLE PRECISION,
+    coordonnee_y DOUBLE PRECISION,
     date_prelevement DATE NOT NULL,
-    code_indice VARCHAR(20),
-    libelle_indice VARCHAR(100),
-    code_support VARCHAR(20),
-    resultat_indice DECIMAL(5, 2),
-    unite_indice VARCHAR(20),
-    classe_qualite VARCHAR(20),
-    -- Contrainte d'unicité
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_accreditation TEXT,
+    libelle_bassin TEXT,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_indice TEXT,
+    libelle_masse_eau TEXT,
+    libelle_methode TEXT,
+    libelle_qualification TEXT,
+    libelle_region TEXT,
+    libelle_sous_bassin TEXT,
+    libelle_station_hydrobio TEXT,
+    libelle_support TEXT,
+    longitude DOUBLE PRECISION,
+    resultat_indice DOUBLE PRECISION,
+    unite_indice TEXT,
+    uri_cours_eau TEXT,
+    uri_masse_eau TEXT,
+    uri_station_hydrobio TEXT,
     UNIQUE(code_station_hydrobio, date_prelevement, code_indice, code_support),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des taxons
--- Note: Nom de colonne code_station_hydrobio aligné avec l'API Hub'Eau
+CREATE TABLE IF NOT EXISTS hubeau.hydrobio_stations (
+    id SERIAL PRIMARY KEY,
+    code_bassin TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_masse_eau TEXT,
+    code_projection TEXT,
+    code_region TEXT,
+    code_sous_bassin TEXT,
+    code_station_hydrobio TEXT NOT NULL,
+    codes_appel_taxons JSONB,
+    codes_indices JSONB,
+    codes_reseaux JSONB,
+    codes_supports JSONB,
+    coordonnee_x DOUBLE PRECISION,
+    coordonnee_y DOUBLE PRECISION,
+    date_dernier_prelevement DATE,
+    date_premier_prelevement DATE,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_bassin TEXT,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_masse_eau TEXT,
+    libelle_region TEXT,
+    libelle_sous_bassin TEXT,
+    libelle_station_hydrobio TEXT,
+    libelles_appel_taxons JSONB,
+    libelles_indices JSONB,
+    libelles_reseaux JSONB,
+    libelles_supports JSONB,
+    longitude DOUBLE PRECISION,
+    uri_cours_eau TEXT,
+    uri_masse_eau TEXT,
+    uri_station_hydrobio TEXT,
+    UNIQUE(code_station_hydrobio),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS hubeau.hydrobio_taxons (
     id SERIAL PRIMARY KEY,
-    code_station_hydrobio VARCHAR(20) REFERENCES hubeau.hydrobio_stations(code_station_hydrobio),
+    code_appel_taxon TEXT NOT NULL,
+    code_banque_reference TEXT,
+    code_bassin TEXT,
+    code_commune TEXT,
+    code_cours_eau TEXT,
+    code_departement TEXT,
+    code_lot TEXT,
+    code_masse_eau TEXT,
+    code_methode TEXT,
+    code_operation_prelevement TEXT,
+    code_prelevement TEXT,
+    code_projection TEXT,
+    code_qualification TEXT,
+    code_region TEXT,
+    code_sous_bassin TEXT,
+    code_station_hydrobio TEXT NOT NULL,
+    code_support TEXT NOT NULL,
+    code_type_resultat TEXT,
+    codes_indices_operation JSONB,
+    codes_taxons_parents JSONB,
+    coordonnee_x DOUBLE PRECISION,
+    coordonnee_y DOUBLE PRECISION,
     date_prelevement DATE NOT NULL,
-    code_appel_taxon VARCHAR(20),
-    code_support VARCHAR(20),
-    code_taxon VARCHAR(20),
-    libelle_taxon VARCHAR(200),
-    resultat_taxon DECIMAL(12, 3),
-    -- Contrainte d'unicité (alignée avec primary_key API)
+    geometry JSONB,
+    hauteur_moyenne_lame_eau DOUBLE PRECISION,
+    largeur_moyenne_lame_eau DOUBLE PRECISION,
+    latitude DOUBLE PRECISION,
+    libelle_appel_taxon TEXT,
+    libelle_bassin TEXT,
+    libelle_commune TEXT,
+    libelle_cours_eau TEXT,
+    libelle_departement TEXT,
+    libelle_liste_faune_flore TEXT,
+    libelle_masse_eau TEXT,
+    libelle_methode TEXT,
+    libelle_qualification TEXT,
+    libelle_region TEXT,
+    libelle_sous_bassin TEXT,
+    libelle_station_hydrobio TEXT,
+    libelle_support TEXT,
+    libelle_type_resultat TEXT,
+    libelles_taxons_parents JSONB,
+    longitude DOUBLE PRECISION,
+    longueur_prospectee DOUBLE PRECISION,
+    resultat_taxon DOUBLE PRECISION,
+    uri_cours_eau TEXT,
+    uri_masse_eau TEXT,
+    uri_station_hydrobio TEXT,
     UNIQUE(code_station_hydrobio, date_prelevement, code_appel_taxon, code_support),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ============================================
--- PRÉLÈVEMENTS D'EAU
--- ============================================
-
--- Table des ouvrages de prélèvement
-CREATE TABLE IF NOT EXISTS hubeau.prelevements_ouvrages (
-    code_ouvrage VARCHAR(50) PRIMARY KEY,
-    libelle_ouvrage VARCHAR(200),
-    type_ouvrage VARCHAR(50),
-    code_commune_insee VARCHAR(10),
-    libelle_commune VARCHAR(100),
-    code_departement VARCHAR(3),
-    libelle_departement VARCHAR(100),
-    code_region VARCHAR(5),
-    libelle_region VARCHAR(100),
-    longitude_wgs84 DECIMAL(10, 6),
-    latitude_wgs84 DECIMAL(10, 6),
-    code_milieu VARCHAR(20),
-    libelle_milieu VARCHAR(100),
-    code_usage VARCHAR(20),
-    libelle_usage VARCHAR(100),
-    -- Métadonnées
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table des points de prélèvement
--- Note: Noms de colonnes alignés avec l'API Hub'Eau (code_point_prelevement, nom_point_prelevement)
-CREATE TABLE IF NOT EXISTS hubeau.prelevements_points (
-    code_point_prelevement VARCHAR(50) PRIMARY KEY,
-    code_ouvrage VARCHAR(50) REFERENCES hubeau.prelevements_ouvrages(code_ouvrage),
-    nom_point_prelevement VARCHAR(200),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- ============================================
+-- PRELEVEMENTS
+-- ============================================
 
--- Table des prélèvements
--- Note: volume aligné avec l'API Hub'Eau
 CREATE TABLE IF NOT EXISTS hubeau.prelevements_chroniques (
     id SERIAL PRIMARY KEY,
-    code_ouvrage VARCHAR(50) REFERENCES hubeau.prelevements_ouvrages(code_ouvrage),
-    annee INTEGER NOT NULL,
-    volume DECIMAL(15, 3),
-    code_usage VARCHAR(20),
-    libelle_usage VARCHAR(100),
-    -- Contrainte d'unicité
+    annee TEXT NOT NULL,
+    code_commune_insee TEXT,
+    code_departement TEXT,
+    code_mode_obtention_volume TEXT,
+    code_ouvrage TEXT NOT NULL,
+    code_qualification_volume TEXT,
+    code_statut_instruction TEXT,
+    code_statut_volume TEXT,
+    code_usage TEXT NOT NULL,
+    geometry JSONB,
+    latitude DOUBLE PRECISION,
+    libelle_departement TEXT,
+    libelle_mode_obtention_volume TEXT,
+    libelle_qualification_volume TEXT,
+    libelle_statut_instruction TEXT,
+    libelle_statut_volume TEXT,
+    libelle_usage TEXT,
+    longitude DOUBLE PRECISION,
+    nom_commune TEXT,
+    nom_ouvrage TEXT,
+    prelevement_ecrasant BOOLEAN,
+    producteur_donnee TEXT,
+    uri_ouvrage TEXT,
+    volume DOUBLE PRECISION,
     UNIQUE(code_ouvrage, annee, code_usage),
-    -- Métadonnées
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ============================================
--- INDEX POUR OPTIMISATION
--- ============================================
+CREATE TABLE IF NOT EXISTS hubeau.prelevements_ouvrages (
+    id SERIAL PRIMARY KEY,
+    code_bdlisa TEXT,
+    code_commune_insee TEXT,
+    code_departement TEXT,
+    code_entite_hydro_cours_eau TEXT,
+    code_entite_hydro_plan_eau TEXT,
+    code_mer_ocean TEXT,
+    code_ouvrage TEXT NOT NULL,
+    code_point_referent TEXT,
+    code_precision_coord TEXT,
+    code_type_milieu TEXT,
+    codes_points_prelevements JSONB,
+    commentaire TEXT,
+    date_exploitation_debut DATE,
+    date_exploitation_fin DATE,
+    geometry JSONB,
+    id_local_ouvrage TEXT,
+    latitude DOUBLE PRECISION,
+    libelle_departement TEXT,
+    libelle_precision_coord TEXT,
+    libelle_type_milieu TEXT,
+    longitude DOUBLE PRECISION,
+    nom_commune TEXT,
+    nom_ouvrage TEXT,
+    ressource_cont_non_referencee BOOLEAN,
+    ressource_cont_non_referencee_info TEXT,
+    uri_bdlisa TEXT,
+    uri_entite_hydro_cours_eau TEXT,
+    uri_entite_hydro_plan_eau TEXT,
+    uri_ouvrage TEXT,
+    UNIQUE(code_ouvrage),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Index sur les dates pour les requêtes temporelles
-CREATE INDEX IF NOT EXISTS idx_piezometry_chroniques_date ON hubeau.piezometry_chroniques(timestamp_mesure);
-CREATE INDEX IF NOT EXISTS idx_piezometry_chroniques_year ON hubeau.piezometry_chroniques(year);
-CREATE INDEX IF NOT EXISTS idx_hydrometry_observations_date ON hubeau.hydrometry_observations(date_obs_elab);
-CREATE INDEX IF NOT EXISTS idx_hydrometry_observations_year ON hubeau.hydrometry_observations(year);
-CREATE INDEX IF NOT EXISTS idx_quality_rivers_analyses_date ON hubeau.quality_rivers_analyses(date_prelevement);
-CREATE INDEX IF NOT EXISTS idx_quality_groundwater_analyses_date ON hubeau.quality_groundwater_analyses(date_prelevement);
-CREATE INDEX IF NOT EXISTS idx_temperature_chroniques_date ON hubeau.temperature_chroniques(date_mesure_temp);
-CREATE INDEX IF NOT EXISTS idx_temperature_chroniques_year ON hubeau.temperature_chroniques(year);
+CREATE TABLE IF NOT EXISTS hubeau.prelevements_points (
+    id SERIAL PRIMARY KEY,
+    code_bdlisa TEXT,
+    code_bss_point_eau TEXT,
+    code_commune_insee TEXT,
+    code_departement TEXT,
+    code_entite_hydro_cours_eau TEXT,
+    code_entite_hydro_plan_eau TEXT,
+    code_mer_ocean TEXT,
+    code_nature TEXT,
+    code_ouvrage TEXT,
+    code_point_prelevement TEXT NOT NULL,
+    code_type_milieu TEXT,
+    code_zone_hydro TEXT,
+    commentaire TEXT,
+    date_exploitation_debut DATE,
+    date_exploitation_fin DATE,
+    libelle_departement TEXT,
+    libelle_nature TEXT,
+    libelle_type_milieu TEXT,
+    lieu_dit TEXT,
+    nappe_accompagnement TEXT,
+    nom_commune TEXT,
+    nom_point_prelevement TEXT,
+    uri_bdlisa TEXT,
+    uri_bss_point_eau TEXT,
+    uri_entite_hydro_cours_eau TEXT,
+    uri_entite_hydro_plan_eau TEXT,
+    uri_ouvrage TEXT,
+    uri_zone_hydro TEXT,
+    UNIQUE(code_point_prelevement),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Index sur les codes géographiques
-CREATE INDEX IF NOT EXISTS idx_piezometry_stations_commune ON hubeau.piezometry_stations(code_commune_insee);
-CREATE INDEX IF NOT EXISTS idx_piezometry_stations_dept ON hubeau.piezometry_stations(code_departement);
-CREATE INDEX IF NOT EXISTS idx_hydrometry_sites_dept ON hubeau.hydrometry_sites(code_departement);
-
--- Index pour JOINs (sans FK, l'index n'est pas créé automatiquement)
-CREATE INDEX IF NOT EXISTS idx_hydrometry_stations_code_site ON hubeau.hydrometry_stations(code_site);
-
--- Index géospatiaux PostGIS pour requêtes spatiales rapides
-CREATE INDEX IF NOT EXISTS idx_piezometry_stations_geom ON hubeau.piezometry_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_hydrometry_sites_geom ON hubeau.hydrometry_sites USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_hydrometry_stations_geom ON hubeau.hydrometry_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_quality_rivers_stations_geom ON hubeau.quality_rivers_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_quality_groundwater_stations_geom ON hubeau.quality_groundwater_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_ecoulement_stations_geom ON hubeau.ecoulement_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_hydrobio_stations_geom ON hubeau.hydrobio_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_freelevements_ouvrages_geom ON hubeau.prelevements_ouvrages USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-CREATE INDEX IF NOT EXISTS idx_temperature_stations_geom ON hubeau.temperature_stations USING GIST(ST_MakePoint(longitude_wgs84, latitude_wgs84));
-
--- ============================================
--- TRIGGERS POUR UPDATE AUTOMATIQUE
--- ============================================
-
--- Fonction pour mettre à jour le timestamp
+-- Trigger pour updated_at
 CREATE OR REPLACE FUNCTION hubeau.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -522,52 +940,3 @@ BEGIN
     RETURN NEW;
 END;
 $$ language 'plpgsql';
-
--- Triggers pour les tables avec updated_at
-CREATE TRIGGER update_piezometry_stations_modtime
-    BEFORE UPDATE ON hubeau.piezometry_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_hydrometry_sites_modtime
-    BEFORE UPDATE ON hubeau.hydrometry_sites
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_hydrometry_stations_modtime
-    BEFORE UPDATE ON hubeau.hydrometry_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_quality_rivers_stations_modtime
-    BEFORE UPDATE ON hubeau.quality_rivers_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_quality_groundwater_stations_modtime
-    BEFORE UPDATE ON hubeau.quality_groundwater_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_ecoulement_stations_modtime
-    BEFORE UPDATE ON hubeau.ecoulement_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_hydrobio_stations_modtime
-    BEFORE UPDATE ON hubeau.hydrobio_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_prelevements_ouvrages_modtime
-    BEFORE UPDATE ON hubeau.prelevements_ouvrages
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
-CREATE TRIGGER update_temperature_stations_modtime
-    BEFORE UPDATE ON hubeau.temperature_stations
-    FOR EACH ROW EXECUTE FUNCTION hubeau.update_updated_at_column();
-
--- ============================================
--- PERMISSIONS
--- ============================================
-
--- Grant usage on schema
-GRANT USAGE ON SCHEMA hubeau TO PUBLIC;
-GRANT CREATE ON SCHEMA hubeau TO PUBLIC;
-
--- Grant permissions on all tables
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA hubeau TO PUBLIC;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA hubeau TO PUBLIC;

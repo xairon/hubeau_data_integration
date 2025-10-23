@@ -426,13 +426,24 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
             # Charger quand le batch est plein
             if len(batch) >= BATCH_SIZE:
                 batch_count += 1
-                context.log.info(f"💾 Batch {batch_count}: Chargement de {len(batch)} records...")
+
+                # Déterminer le mode d'écriture pour ce lot spécifique
+                if batch_count == 1:
+                    batch_write_disposition = write_disposition
+                else:
+                    # Pour les lots suivants:
+                    # - "replace" → "append" (déjà tronqué au lot 1)
+                    # - "merge" → "merge" (continuer l'upsert)
+                    # - "append" → "append" (continuer l'ajout)
+                    batch_write_disposition = "append" if write_disposition == "replace" else write_disposition
+
+                context.log.info(f"💾 Batch {batch_count}: Chargement de {len(batch)} records (mode: {batch_write_disposition})...")
 
                 load_start = time.time()
                 postgres_bulk_destination.load_batch(
                     table_name=table_name,
                     data=batch,
-                    write_disposition=write_disposition if batch_count == 1 else "append",  # Premier batch: disposition config, suivants: append
+                    write_disposition=batch_write_disposition,
                     primary_keys=primary_keys if primary_keys else None,
                     column_mappings=column_mappings
                 )
@@ -448,13 +459,20 @@ def ingest_dlt(context: AssetExecutionContext, config_path: str, stations_data: 
         # Charger le dernier batch (reste)
         if batch:
             batch_count += 1
-            context.log.info(f"💾 Batch {batch_count} (final): Chargement de {len(batch)} records...")
+
+            # Déterminer le mode d'écriture pour le lot final
+            if batch_count == 1:
+                batch_write_disposition = write_disposition
+            else:
+                batch_write_disposition = "append" if write_disposition == "replace" else write_disposition
+
+            context.log.info(f"💾 Batch {batch_count} (final): Chargement de {len(batch)} records (mode: {batch_write_disposition})...")
 
             load_start = time.time()
             postgres_bulk_destination.load_batch(
                 table_name=table_name,
                 data=batch,
-                write_disposition=write_disposition if batch_count == 1 else "append",
+                write_disposition=batch_write_disposition,
                 primary_keys=primary_keys if primary_keys else None,
                 column_mappings=column_mappings
             )
