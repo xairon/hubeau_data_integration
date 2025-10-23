@@ -70,7 +70,7 @@ resource:
       data_type: text
       nullable: true
     nappe_accompagnement:
-      data_type: text
+      data_type: boolean
       nullable: true
     uri_bss_point_eau:
       data_type: text
@@ -82,7 +82,7 @@ resource:
       data_type: text
       nullable: true
     uri_bdlisa:
-      data_type: text
+      data_type: json
       nullable: true
     date_exploitation_debut:
       data_type: date

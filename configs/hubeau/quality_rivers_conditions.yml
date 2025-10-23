@@ -42,13 +42,13 @@ resource:
       data_type: text
       nullable: true
     code_groupe_parametre:
-      data_type: text
+      data_type: json
       nullable: true
     libelle_groupe_parametre:
-      data_type: text
+      data_type: json
       nullable: true
     uri_groupe_parametre:
-      data_type: text
+      data_type: json
       nullable: true
     resultat:
       data_type: double

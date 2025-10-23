@@ -21,7 +21,7 @@ resource:
       data_type: text
       nullable: true
     annee:
-      data_type: bigint
+      data_type: integer
       nullable: false
     code_usage:
       data_type: text

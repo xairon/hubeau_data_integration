@@ -30,7 +30,7 @@ resource:
       data_type: double
       nullable: true
     code_projection:
-      data_type: text
+      data_type: integer
       nullable: true
     longitude_station:
       data_type: double
@@ -40,6 +40,9 @@ resource:
       nullable: true
     altitude_ref_alti_station:
       data_type: double
+      nullable: true
+    code_systeme_alti_site:
+      data_type: integer
       nullable: true
 
     # Administratif (10 attributs)
@@ -78,7 +81,7 @@ resource:
       data_type: text
       nullable: true
     influence_locale_station:
-      data_type: text
+      data_type: integer
       nullable: true
     commentaire_influence_locale_station:
       data_type: text
@@ -106,10 +109,10 @@ resource:
 
     # Qualité (5 attributs)
     code_regime_station:
-      data_type: text
+      data_type: integer
       nullable: true
     qualification_donnees_station:
-      data_type: text
+      data_type: integer
       nullable: true
     code_finalite_station:
       data_type: text
@@ -121,7 +124,7 @@ resource:
       data_type: text
       nullable: true
     code_sandre_reseau_station:
-      data_type: text
+      data_type: json
       nullable: true
 
     # Altimétrie (3 attributs)

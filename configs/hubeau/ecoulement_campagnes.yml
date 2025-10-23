@@ -10,26 +10,44 @@ resource:
   - date_campagne
   write_disposition: merge
   columns:
-    code_departement:
-      data_type: text
-      nullable: false
+    # Identifiants
+    code_campagne:
+      data_type: integer
+      nullable: true
     date_campagne:
       data_type: date
       nullable: false
-    code_campagne:
+
+    # Classification
+    code_type_campagne:
+      data_type: integer
+      nullable: true
+    libelle_type_campagne:
       data_type: text
       nullable: true
-    libelle_campagne:
+
+    # Métriques
+    nombre_modalite_ecoulement:
+      data_type: integer
+      nullable: true
+
+    # Réseau
+    code_reseau:
       data_type: text
       nullable: true
-    commentaire:
+    libelle_reseau:
       data_type: text
       nullable: true
-    nb_stations:
-      data_type: bigint
+    uri_reseau:
+      data_type: text
       nullable: true
-    nb_observations:
-      data_type: bigint
+
+    # Administratif
+    code_departement:
+      data_type: text
+      nullable: false
+    libelle_departement:
+      data_type: text
       nullable: true
 extraction:
   slicing_mode: dept

@@ -86,13 +86,13 @@ resource:
       data_type: text
       nullable: true
     code_groupe_parametre:
-      data_type: text
+      data_type: json
       nullable: true
     libelle_groupe_parametre:
-      data_type: text
+      data_type: json
       nullable: true
     uri_groupe_parametre:
-      data_type: text
+      data_type: json
       nullable: true
     resultat:
       data_type: double
@@ -194,13 +194,13 @@ resource:
       data_type: text
       nullable: true
     code_reseau:
-      data_type: text
+      data_type: json
       nullable: true
     nom_reseau:
-      data_type: text
+      data_type: json
       nullable: true
     uri_reseau:
-      data_type: text
+      data_type: json
       nullable: true
     code_producteur_analyse:
       data_type: text

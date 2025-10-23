@@ -44,19 +44,19 @@ resource:
 
     # Qualification (6 attributs)
     code_statut:
-      data_type: text
+      data_type: integer
       nullable: true
     libelle_statut:
       data_type: text
       nullable: true
     code_qualification:
-      data_type: text
+      data_type: integer
       nullable: true
     libelle_qualification:
       data_type: text
       nullable: true
     code_methode:
-      data_type: text
+      data_type: integer
       nullable: true
     libelle_methode:
       data_type: text
