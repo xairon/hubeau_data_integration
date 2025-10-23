@@ -46,15 +46,16 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
     Factory pour creer un asset DLT CSV multi-mode
 
     Args:
-        resource_name: Nom de la ressource
+        resource_name: Nom de la ressource (sans suffixe _csv)
         supports_date_filter: True si l'endpoint supporte les filtres date
         use_station_slicing: True pour slicing par station (piezometry_chroniques)
     """
 
     group_name = resource_name.split('_')[0]
+    asset_name = f"{resource_name}_csv"  # Add _csv suffix to asset name
 
     @asset(
-        name=resource_name,
+        name=asset_name,
         group_name=group_name,
         compute_kind="dlt",
         op_tags={"format": "csv", "source": "hubeau"}
