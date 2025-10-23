@@ -2,26 +2,26 @@
 Jobs incrementaux et schedules pour ingestion CSV Hub'Eau
 """
 
-from dagster import define_asset_job, schedule, RunRequest, AssetSelection
+from dagster import define_asset_job, schedule, RunRequest, AssetSelection, AssetKey
 
 
 # Job incremental pour chroniques (donnees temporelles)
 incremental_chroniques_job = define_asset_job(
     name="incremental_chroniques_csv",
     description="Ingestion incrementale chroniques (derniers 2 jours)",
-    selection=AssetSelection.assets([
-        "piezometry_chroniques_csv",
-        "quality_groundwater_analyses_csv",
-        "quality_rivers_analyses_csv",
-        "quality_rivers_conditions_csv",
-        "quality_rivers_operations_csv",
-        "temperature_chroniques_csv",
-        "hydrometry_obs_elab_csv",
-        "hydrobio_indices_csv",
-        "hydrobio_taxons_csv",
-        "ecoulement_observations_csv",
-        "prelevements_chroniques_csv"
-    ]),
+    selection=AssetSelection.keys(
+        AssetKey("piezometry_chroniques_csv"),
+        AssetKey("quality_groundwater_analyses_csv"),
+        AssetKey("quality_rivers_analyses_csv"),
+        AssetKey("quality_rivers_conditions_csv"),
+        AssetKey("quality_rivers_operations_csv"),
+        AssetKey("temperature_chroniques_csv"),
+        AssetKey("hydrometry_obs_elab_csv"),
+        AssetKey("hydrobio_indices_csv"),
+        AssetKey("hydrobio_taxons_csv"),
+        AssetKey("ecoulement_observations_csv"),
+        AssetKey("prelevements_chroniques_csv")
+    ),
     config={
         "ops": {
             "**": {
@@ -39,19 +39,19 @@ incremental_chroniques_job = define_asset_job(
 incremental_references_job = define_asset_job(
     name="incremental_references_csv",
     description="Refresh hebdomadaire referentiels (stations)",
-    selection=AssetSelection.assets([
-        "piezometry_stations_csv",
-        "quality_groundwater_stations_csv",
-        "quality_rivers_stations_csv",
-        "temperature_stations_csv",
-        "hydrometry_sites_csv",
-        "hydrometry_stations_csv",
-        "hydrobio_stations_csv",
-        "ecoulement_stations_csv",
-        "ecoulement_campagnes_csv",
-        "prelevements_points_csv",
-        "prelevements_ouvrages_csv"
-    ]),
+    selection=AssetSelection.keys(
+        AssetKey("piezometry_stations_csv"),
+        AssetKey("quality_groundwater_stations_csv"),
+        AssetKey("quality_rivers_stations_csv"),
+        AssetKey("temperature_stations_csv"),
+        AssetKey("hydrometry_sites_csv"),
+        AssetKey("hydrometry_stations_csv"),
+        AssetKey("hydrobio_stations_csv"),
+        AssetKey("ecoulement_stations_csv"),
+        AssetKey("ecoulement_campagnes_csv"),
+        AssetKey("prelevements_points_csv"),
+        AssetKey("prelevements_ouvrages_csv")
+    ),
     config={
         "ops": {
             "**": {
