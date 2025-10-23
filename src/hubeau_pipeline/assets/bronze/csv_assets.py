@@ -7,16 +7,18 @@ Factory pattern pour generer automatiquement 22 assets avec support multi-mode :
 - INCREMENTAL : Derniers N jours
 """
 
+import os
 import dlt
 import yaml
 import time
-import os
+import tempfile
 from pathlib import Path
 from dagster import asset, AssetExecutionContext, Output, MetadataValue, Config
 from pydantic import Field
 from typing import Optional, Literal, Dict, Any
 
 from hubeau_pipeline.sources.hubeau_csv_source import hubeau_csv_source, IngestionMode
+from src.dlt_pipeline.destinations import get_postgres_destination
 
 
 class IngestionConfig(Config):
@@ -94,26 +96,23 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         elif config.mode == "incremental":
             context.log.info(f"   Derniers {config.incremental_days} jours")
 
-        # PostgreSQL credentials from PG_* environment variables
-        # Pass explicitly to avoid DLT searching with pipeline-specific prefixes
-        import dlt.destinations.postgres
+        # Use EXACT same PostgreSQL destination as old JSON system
+        postgres_config = {
+            "dataset_name": os.getenv("HUBEAU_SCHEMA", "hubeau")
+        }
+        destination = get_postgres_destination(postgres_config)
 
-        pg_destination = dlt.destinations.postgres(
-            credentials={
-                "database": os.getenv("PG_DB", "postgres"),
-                "username": os.getenv("PG_USER", "postgres"),
-                "password": os.getenv("PG_PASSWORD", ""),
-                "host": os.getenv("PG_HOST", "postgres"),
-                "port": int(os.getenv("PG_PORT", "5432"))
-            }
-        )
+        # Use temp directory for pipelines like old system
+        pipelines_dir = os.path.join(tempfile.gettempdir(), "dlt_pipelines")
+        os.makedirs(pipelines_dir, exist_ok=True)
 
-        # Pipeline DLT with explicit credentials
+        # Pipeline DLT using same method as JSON assets
         pipeline = dlt.pipeline(
             pipeline_name=f"hubeau_{resource_name}_csv_{config.mode}",
-            destination=pg_destination,
-            dataset_name="hubeau",
-            pipelines_dir=os.path.join(os.getenv("DAGSTER_HOME", "/tmp"), "dlt_pipelines")
+            destination=destination,
+            dataset_name=postgres_config["dataset_name"],
+            pipelines_dir=pipelines_dir,
+            full_refresh=False
         )
 
         # Source avec mode
