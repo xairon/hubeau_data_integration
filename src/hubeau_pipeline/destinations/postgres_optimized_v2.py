@@ -119,6 +119,8 @@ class PostgresBulkDestinationV2:
         Nettoie le DataFrame EN PLACE pour économiser la mémoire
         Évite les copies inutiles
         """
+        import json
+
         for col in df.columns:
             if df[col].dtype == 'object':
                 # Utiliser vectorisation quand possible
@@ -131,12 +133,46 @@ class PostgresBulkDestinationV2:
                     if isinstance(val, (list, tuple)):
                         return str(val[0]) if val else None
                     if isinstance(val, dict):
-                        import json
                         return json.dumps(val)
                     return str(val) if val != '' else None
 
                 # Appliquer seulement sur les non-null pour performance
                 df.loc[~mask_none, col] = df.loc[~mask_none, col].apply(extract_first)
+
+                # Fix: French comma format for numeric fields (e.g., "994,4" -> "994.4")
+                # Check if column contains numeric-like strings with commas
+                if not mask_none.all():
+                    sample = df.loc[~mask_none, col].iloc[0] if len(df.loc[~mask_none, col]) > 0 else None
+                    if sample and isinstance(sample, str) and ',' in sample:
+                        # Try to detect if it's a French decimal format
+                        try:
+                            test_val = sample.replace(',', '.')
+                            float(test_val)
+                            # If conversion works, apply to all
+                            df.loc[~mask_none, col] = df.loc[~mask_none, col].str.replace(',', '.', regex=False)
+                            logger.debug(f"Converted French comma format to decimal in column {col}")
+                        except (ValueError, AttributeError):
+                            pass  # Not a numeric field
+
+        # Fix: Convert millisecond timestamps to ISO format
+        for col in df.columns:
+            # Check if column looks like it contains millisecond timestamps
+            if df[col].dtype in ['int64', 'float64', 'object']:
+                try:
+                    # Sample first non-null value
+                    sample_mask = df[col].notna()
+                    if sample_mask.any():
+                        sample = df.loc[sample_mask, col].iloc[0]
+                        # Check if value is a large integer (likely milliseconds since epoch)
+                        if isinstance(sample, (int, float, str)):
+                            sample_int = int(float(sample)) if sample else 0
+                            # Milliseconds since epoch are typically 13 digits (1970-2100)
+                            if 1000000000000 <= sample_int <= 9999999999999:
+                                # Convert milliseconds to datetime
+                                df[col] = pd.to_datetime(df[col], unit='ms', errors='coerce')
+                                logger.debug(f"Converted millisecond timestamps to datetime in column {col}")
+                except (ValueError, TypeError, AttributeError):
+                    pass  # Not a timestamp column
 
         return df
 
@@ -224,6 +260,15 @@ class PostgresBulkDestinationV2:
                 if len(common_columns) < len(df_columns):
                     df = df[common_columns]
                 df = self._clean_dataframe_inplace(df)
+
+                # Fix: Deduplicate rows to avoid "ON CONFLICT DO UPDATE command cannot affect row a second time"
+                # This error occurs when the same primary key appears multiple times in a single batch
+                original_len = len(df)
+                df = df.drop_duplicates(subset=primary_keys, keep='last')
+                if len(df) < original_len:
+                    logger.warning(f"⚠️ Deduplication: removed {original_len - len(df)} duplicate rows from {table_name}")
+                else:
+                    logger.debug(f"✓ No duplicates found in batch for {table_name}")
 
                 # Créer staging table (simplifiée avec gestion des NULL)
                 cursor.execute(f"""

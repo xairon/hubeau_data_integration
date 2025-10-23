@@ -7,34 +7,21 @@ resource:
   base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
   primary_key:
   - code_bss
-  - date_prelevement
-  - code_parametre
-  - code_support
+  - date_debut_prelevement  # Fix: API uses date_debut_prelevement, not date_prelevement
+  - code_param  # Fix: API uses code_param, not code_parametre
   - code_fraction
   write_disposition: merge
+  # Note: API doesn't have code_support field - removed from primary key
+  # Fix: Column names updated to match API v1 response
+  # API returns: code_param, code_fraction, date_debut_prelevement, etc.
   columns:
     code_bss:
       data_type: text
       nullable: false
-    code_analyse:
+    bss_id:
       data_type: text
       nullable: true
-    code_prelevement:
-      data_type: text
-      nullable: true
-    code_operation:
-      data_type: text
-      nullable: true
-    code_point_eau_surface:
-      data_type: text
-      nullable: true
-    code_banque_reference:
-      data_type: text
-      nullable: true
-    libelle_station:
-      data_type: text
-      nullable: true
-    uri_station:
+    urn_bss:
       data_type: text
       nullable: true
     longitude:
@@ -43,61 +30,43 @@ resource:
     latitude:
       data_type: double
       nullable: true
-    geometry:
-      data_type: json
-      nullable: true
-    date_prelevement:
+    date_debut_prelevement:
       data_type: date
       nullable: false
-    heure_prelevement:
-      data_type: time
-      nullable: true
-    date_maj_analyse:
-      data_type: timestamp
-      nullable: true
-    heure_analyse:
-      data_type: time
-      nullable: true
-    code_support:
-      data_type: text
+    code_param:  # API field, not code_parametre
+      data_type: bigint
       nullable: false
-    libelle_support:
+    nom_param:
       data_type: text
       nullable: true
-    uri_support:
+    uri_param:
       data_type: text
       nullable: true
     code_fraction:
-      data_type: text
+      data_type: bigint
       nullable: false
-    libelle_fraction:
+    nom_fraction:
       data_type: text
       nullable: true
     uri_fraction:
       data_type: text
       nullable: true
-    code_parametre:
-      data_type: text
-      nullable: false
-    libelle_parametre:
-      data_type: text
-      nullable: true
-    uri_parametre:
-      data_type: text
-      nullable: true
-    code_groupe_parametre:
-      data_type: text
-      nullable: true
-    libelle_groupe_parametre:
-      data_type: text
-      nullable: true
-    uri_groupe_parametre:
-      data_type: text
-      nullable: true
     resultat:
       data_type: double
       nullable: true
+    code_remarque_analyse:
+      data_type: bigint
+      nullable: true
+    nom_remarque_analyse:
+      data_type: text
+      nullable: true
+    uri_remarque_analyse:
+      data_type: text
+      nullable: true
     code_unite:
+      data_type: text
+      nullable: true
+    nom_unite:
       data_type: text
       nullable: true
     symbole_unite:
@@ -106,133 +75,76 @@ resource:
     uri_unite:
       data_type: text
       nullable: true
-    limite_detection:
-      data_type: double
+    code_statut_analyse:
+      data_type: text
+      nullable: true
+    nom_statut_analyse:
+      data_type: text
+      nullable: true
+    uri_statut_analyse:
+      data_type: text
+      nullable: true
+    code_qualification:
+      data_type: text
+      nullable: true
+    nom_qualification:
+      data_type: text
+      nullable: true
+    uri_qualification:
+      data_type: text
       nullable: true
     limite_quantification:
       data_type: double
       nullable: true
-    limite_saturation:
+    limite_detection:
+      data_type: double
+      nullable: true
+    seuil_saturation:
       data_type: double
       nullable: true
     incertitude_analytique:
       data_type: double
       nullable: true
-    code_qualification:
+    codes_groupe_parametre:
+      data_type: json
+      nullable: true
+    noms_groupe_parametre:
+      data_type: json
+      nullable: true
+    uris_groupe_parametre:
+      data_type: json
+      nullable: true
+    code_producteur:
       data_type: text
       nullable: true
-    libelle_qualification:
+    nom_producteur:
       data_type: text
       nullable: true
-    code_statut:
+    uri_producteur:
       data_type: text
       nullable: true
-    mnemo_statut:
+    code_lieu_analyse:
+      data_type: bigint
+      nullable: true
+    nom_lieu_analyse:
       data_type: text
       nullable: true
-    code_remarque:
+    uri_lieu_analyse:
       data_type: text
       nullable: true
-    mnemo_remarque:
+    code_methode:
+      data_type: bigint
+      nullable: true
+    nom_methode:
       data_type: text
       nullable: true
-    code_insitu:
-      data_type: text
-      nullable: true
-    libelle_insitu:
-      data_type: text
-      nullable: true
-    code_difficulte_analyse:
-      data_type: text
-      nullable: true
-    mnemo_difficulte_analyse:
-      data_type: text
-      nullable: true
-    code_methode_analyse:
-      data_type: text
-      nullable: true
-    nom_methode_analyse:
-      data_type: text
-      nullable: true
-    uri_methode_analyse:
-      data_type: text
-      nullable: true
-    code_methode_fractionnement:
-      data_type: text
-      nullable: true
-    nom_methode_fractionnement:
-      data_type: text
-      nullable: true
-    uri_methode_fractionnement:
-      data_type: text
-      nullable: true
-    code_methode_extraction:
-      data_type: text
-      nullable: true
-    nom_methode_extraction:
-      data_type: text
-      nullable: true
-    uri_methode_extraction:
-      data_type: text
-      nullable: true
-    rendement_extraction:
-      data_type: double
-      nullable: true
-    code_accreditation:
-      data_type: text
-      nullable: true
-    mnemo_accreditation:
-      data_type: text
-      nullable: true
-    agrement:
-      data_type: text
-      nullable: true
-    commentaires_analyse:
-      data_type: text
-      nullable: true
-    commentaires_resultat_analyse:
-      data_type: text
-      nullable: true
-    code_reseau:
-      data_type: text
-      nullable: true
-    nom_reseau:
-      data_type: text
-      nullable: true
-    uri_reseau:
-      data_type: text
-      nullable: true
-    code_producteur_analyse:
-      data_type: text
-      nullable: true
-    nom_producteur_analyse:
-      data_type: text
-      nullable: true
-    uri_producteur_prelevement:
-      data_type: text
-      nullable: true
-    code_preleveur:
-      data_type: text
-      nullable: true
-    nom_preleveur:
-      data_type: text
-      nullable: true
-    uri_preleveur:
-      data_type: text
-      nullable: true
-    code_laboratoire:
-      data_type: text
-      nullable: true
-    nom_laboratoire:
-      data_type: text
-      nullable: true
-    uri_laboratoire:
+    uri_methode:
       data_type: text
       nullable: true
 extraction:
   slicing_mode: station_month_chunked
   slicing_params:
-    date_field: date_prelevement
+    date_field: date_debut_prelevement  # Fix: API uses date_debut_prelevement
     station_field: code_bss
     stations_per_chunk: 20
   pagination:
@@ -248,11 +160,15 @@ transformers:
 - validate_primary_keys
 - normalize_dates:
     fields:
-    - date_prelevement
-    - date_maj_analyse
+    - date_debut_prelevement  # Fix: Updated field name
 - validate_coordinates:
     lat_field: latitude
     lon_field: longitude
+- handle_jsonb_arrays:
+    fields:
+    - codes_groupe_parametre
+    - noms_groupe_parametre
+    - uris_groupe_parametre
 destinations:
   postgres:
     dataset_name: hubeau

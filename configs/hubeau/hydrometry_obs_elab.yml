@@ -7,6 +7,10 @@ resource:
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
   primary_key: [code_station, date_obs_elab, grandeur_hydro_elab]
   write_disposition: append
+  # Fix: Table needs to be created with these exact column names matching API v2 response
+  # API returns: code_site, code_station, date_obs_elab, resultat_obs_elab, date_prod,
+  #              code_statut, libelle_statut, code_methode, libelle_methode,
+  #              code_qualification, libelle_qualification, longitude, latitude, grandeur_hydro_elab
   columns:
     # Identifiants (3 attributs)
     code_site:

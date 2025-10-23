@@ -91,6 +91,11 @@ extraction:
   pagination:
     type: page_based
   default_params: {}
+# Fix: Disable incremental loading - this endpoint doesn't have date_mesure field
+# Data is sliced by year (annee) and uses merge disposition instead
+temporal_filter:
+  date_field: annee  # Use year field instead of default date_mesure
+  start_date: '2012'  # Not actually used with year slicing
 performance:
   parallelism: 5
   chunk_size: 10000

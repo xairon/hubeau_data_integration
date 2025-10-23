@@ -18,6 +18,8 @@ resource:
     libelle_indice:
       data_type: text
       nullable: true
+      # Fix: Increased from VARCHAR(100) to handle long labels like
+      # "Groupe Faunistique Indicateur de l'indice dit "équivalent" (Phases A+B)..."
     resultat_indice:
       data_type: double
       nullable: true
