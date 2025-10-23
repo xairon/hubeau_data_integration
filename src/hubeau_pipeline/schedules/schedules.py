@@ -1,117 +1,34 @@
 """
-Schedules Dagster - Planification automatique des jobs
+Schedules Dagster - Planification automatique des jobs CSV
 """
 
-from dagster import ScheduleDefinition
-
-from ..jobs import (
-    sync_all_stations,
-    sync_all_yearly_data,
-    piezometry_job,
-    hydrometry_job,
-    quality_rivers_job,
-    quality_groundwater_job,
-    ecoulement_job,
-    hydrobio_job,
-    prelevements_job,
-    temperature_job,
+from ..jobs.csv_incremental_jobs import (
+    daily_chroniques_schedule,
+    weekly_references_schedule,
 )
 
 # ====================================
-# SCHEDULES RÉFÉRENTIELS (STATIONS)
+# SCHEDULES CSV (NOUVELLE ARCHITECTURE)
 # ====================================
 
-# Mise à jour hebdomadaire des stations/sites de référence
-# Les référentiels Hub'Eau changent peu, une mise à jour hebdomadaire suffit
-sync_stations_weekly = ScheduleDefinition(
-    job=sync_all_stations,
-    cron_schedule="0 2 * * 0",  # Chaque dimanche à 2h du matin
-    name="sync_stations_weekly",
-    description="Mise à jour hebdomadaire de tous les référentiels de stations (8 APIs)",
-)
-
-# ====================================
-# SCHEDULES DONNÉES TEMPORELLES
-# ====================================
-
-# Mise à jour mensuelle de l'année courante
-# Pour capturer les nouvelles données du mois écoulé
-sync_current_year_monthly = ScheduleDefinition(
-    job=sync_all_yearly_data,
-    cron_schedule="0 3 1 * *",  # 1er de chaque mois à 3h du matin
-    name="sync_current_year_monthly",
-    description="Mise à jour mensuelle des données de l'année courante (toutes APIs)",
-)
-
-# Backfill annuel complet (toutes les années depuis 2020)
-# Pour assurer la complétude historique
-sync_all_years_annually = ScheduleDefinition(
-    job=sync_all_yearly_data,
-    cron_schedule="0 4 15 1 *",  # 15 janvier à 4h (après le mensuel)
-    name="sync_all_years_annually",
-    description="Backfill annuel complet de toutes les années depuis 2020 (toutes APIs)",
-)
-
-# ====================================
-# SCHEDULES PAR API (OPTIONNELS)
-# ====================================
-# Pour exécutions ciblées si besoin de fréquence différente
-
-# Piézométrie - Données critiques, mise à jour bimensuelle
-sync_piezometry_biweekly = ScheduleDefinition(
-    job=piezometry_job,
-    cron_schedule="0 3 1,15 * *",  # 1er et 15 de chaque mois à 3h
-    name="sync_piezometry_biweekly",
-    description="Mise à jour bimensuelle piézométrie (stations + chroniques année courante)",
-)
-
-# Qualité cours d'eau - Données analytiques, mise à jour mensuelle
-sync_quality_rivers_monthly = ScheduleDefinition(
-    job=quality_rivers_job,
-    cron_schedule="0 3 5 * *",  # 5 de chaque mois à 3h
-    name="sync_quality_rivers_monthly",
-    description="Mise à jour mensuelle qualité cours d'eau (stations + analyses année courante)",
-)
-
-# Hydrométrie - Données volumineuses, mise à jour mensuelle
-sync_hydrometry_monthly = ScheduleDefinition(
-    job=hydrometry_job,
-    cron_schedule="0 3 10 * *",  # 10 de chaque mois à 3h
-    name="sync_hydrometry_monthly",
-    description="Mise à jour mensuelle hydrométrie (stations + sites + observations année courante)",
-)
+# Les schedules sont définis dans csv_incremental_jobs.py:
+# - daily_chroniques_schedule: Tous les jours à 02h00 (derniers 2 jours)
+# - weekly_references_schedule: Tous les dimanches à 03h00 (full refresh)
 
 # ====================================
 # SCHEDULES ACTIFS
 # ====================================
 
-# Schedules de production activés par défaut
+# Schedules CSV de production
 all_schedules = [
-    # Référentiels (hebdomadaire)
-    sync_stations_weekly,
-
-    # Données temporelles (mensuel + annuel)
-    sync_current_year_monthly,
-    sync_all_years_annually,
-
-    # APIs critiques (optionnel - décommenter si besoin)
-    # sync_piezometry_biweekly,
-    # sync_quality_rivers_monthly,
-    # sync_hydrometry_monthly,
+    daily_chroniques_schedule,      # Quotidien: chroniques/analyses
+    weekly_references_schedule,     # Hebdomadaire: stations/référentiels
 ]
 
 __all__ = [
-    # Schedules référentiels
-    "sync_stations_weekly",
-
-    # Schedules données temporelles
-    "sync_current_year_monthly",
-    "sync_all_years_annually",
-
-    # Schedules par API (optionnels)
-    "sync_piezometry_biweekly",
-    "sync_quality_rivers_monthly",
-    "sync_hydrometry_monthly",
+    # Schedules CSV
+    "daily_chroniques_schedule",
+    "weekly_references_schedule",
 
     # Tous les schedules
     "all_schedules"
