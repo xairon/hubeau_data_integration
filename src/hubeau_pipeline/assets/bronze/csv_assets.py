@@ -23,9 +23,14 @@ from dagster import (
     DynamicPartitionsDefinition,
     StaticPartitionsDefinition,
     AssetKey,
-    FreshnessPolicy
 )
 from pydantic import Field
+
+# Dagster 1.11.0+ renamed FreshnessPolicy to LegacyFreshnessPolicy
+try:
+    from dagster import FreshnessPolicy
+except ImportError:
+    from dagster import LegacyFreshnessPolicy as FreshnessPolicy
 from typing import Optional, Literal, Dict, Any
 
 from hubeau_pipeline.sources.hubeau_csv_source import hubeau_csv_source, IngestionMode

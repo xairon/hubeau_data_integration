@@ -5,7 +5,13 @@ import io
 import logging
 
 import dlt
-from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition, FreshnessPolicy
+from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
+
+# Dagster 1.11.0+ renamed FreshnessPolicy to LegacyFreshnessPolicy
+try:
+    from dagster import FreshnessPolicy
+except ImportError:
+    from dagster import LegacyFreshnessPolicy as FreshnessPolicy
 
 from src.dlt_pipeline.hubeau_source import hubeau_rest_source, load_hubeau_config
 
