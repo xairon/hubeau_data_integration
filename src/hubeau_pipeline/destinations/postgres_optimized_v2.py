@@ -39,10 +39,14 @@ class PostgresBulkDestinationV2:
         return cls._instance
 
     def __init__(self):
-        """Initialisation une seule fois"""
+        """
+        Initialisation lazy - PAS de connexion créée ici!
+        Le pool sera créé au premier appel à _get_connection()
+        """
         if self._initialized:
             return
 
+        # Configuration (lu depuis ENV - pas de connexion créée)
         self.conn_params = {
             "host": os.getenv("PG_HOST", "postgres"),
             "port": int(os.getenv("PG_PORT", "5432")),
@@ -52,10 +56,8 @@ class PostgresBulkDestinationV2:
         }
         self.schema_name = "hubeau"
 
-        # Pool de connexions (min=2, max=10)
-        self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
-            2, 10, **self.conn_params
-        )
+        # Pool créé en lazy (None au démarrage)
+        self.connection_pool = None
 
         # Cache pour métadonnées de tables (colonnes)
         self._table_columns_cache = {}
@@ -63,10 +65,23 @@ class PostgresBulkDestinationV2:
         self._cache_timestamps = {}
 
         self._initialized = True
-        logger.info("✅ PostgresBulkDestinationV2 initialisé avec pool de connexions")
+        logger.debug("✅ PostgresBulkDestinationV2 config loaded (lazy pool)")
+
+    def _ensure_pool_initialized(self):
+        """Initialise le pool de connexions de manière lazy (thread-safe)"""
+        if self.connection_pool is None:
+            with self._lock:
+                # Double-check locking pattern
+                if self.connection_pool is None:
+                    logger.info("🔌 Initializing PostgreSQL connection pool (lazy)...")
+                    self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
+                        2, 10, **self.conn_params
+                    )
+                    logger.info("✅ PostgreSQL connection pool initialized")
 
     def _get_connection(self):
-        """Obtenir une connexion depuis le pool"""
+        """Obtenir une connexion depuis le pool (initialisation lazy)"""
+        self._ensure_pool_initialized()
         return self.connection_pool.getconn()
 
     def _release_connection(self, conn):
@@ -668,5 +683,31 @@ class PostgresBulkDestinationV2:
             logger.info("🔌 Pool de connexions fermé")
 
 
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
 # Instance singleton thread-safe
 postgres_bulk_destination_v2 = PostgresBulkDestinationV2()
+
+
+def get_postgres_destination(config: Dict[str, Any]):
+    """
+    DLT-compatible wrapper pour notre custom destination PostgreSQL.
+
+    Cette fonction est requise pour compatibilité DLT pipeline,
+    mais en réalité on utilise notre destination customisée directement.
+
+    Args:
+        config: Configuration PostgreSQL (eg. {"dataset_name": "hubeau"})
+
+    Returns:
+        dlt.destinations.postgres: DLT PostgreSQL destination standard
+    """
+    import dlt
+
+    # Retourner destination DLT standard
+    # NOTE: Nos assets n'utilisent plus pipeline.run() avec cette destination
+    # Ils utilisent directement postgres_bulk_destination_v2.load_batch()
+    # Mais DLT pipeline requiert qu'on passe UNE destination lors de l'init
+    return dlt.destinations.postgres()

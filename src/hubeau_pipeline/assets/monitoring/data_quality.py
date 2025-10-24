@@ -4,20 +4,9 @@ Contrôles de qualité de base pour Hub'Eau
 
 from typing import Dict, Any
 import pandas as pd
-import os
 from dagster import AssetExecutionContext, asset, Output, MetadataValue
 
-
-def _get_pg_connection():
-    """Connexion PostgreSQL pour les requêtes de qualité"""
-    import psycopg2
-    return psycopg2.connect(
-        host=os.getenv("PG_HOST", "postgres"),
-        port=os.getenv("PG_PORT", "5432"),
-        database=os.getenv("PG_DB", "postgres"),
-        user=os.getenv("PG_USER", "postgres"),
-        password=os.getenv("PG_PASSWORD")
-    )
+from hubeau_pipeline.resources import PostgreSQLResource
 
 
 # ====================================
@@ -28,45 +17,44 @@ def _get_pg_connection():
     group_name="data_quality",
     description="Vérification basique de la base de données",
 )
-def basic_database_check(context: AssetExecutionContext) -> Output[Dict[str, Any]]:
+def basic_database_check(context: AssetExecutionContext, pg: PostgreSQLResource) -> Output[Dict[str, Any]]:
     """
     Vérification basique de la base de données:
     - Tables créées
     - Données présentes
     - Pas d'erreurs évidentes
     """
-    conn = _get_pg_connection()
-
     report = {}
 
-    # 1. Vérifier les tables existantes
-    df_tables = pd.read_sql("""
-        SELECT
-            schemaname,
-            tablename,
-            pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size,
-            n_live_tup AS row_count
-        FROM pg_stat_user_tables
-        WHERE schemaname = 'hubeau'
-        ORDER BY n_live_tup DESC
-    """, conn)
+    with pg.get_connection() as conn:
+        # 1. Vérifier les tables existantes
+        df_tables = pd.read_sql("""
+            SELECT
+                schemaname,
+                tablename,
+                pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size,
+                n_live_tup AS row_count
+            FROM pg_stat_user_tables
+            WHERE schemaname = 'hubeau'
+            ORDER BY n_live_tup DESC
+        """, conn)
 
-    report["tables"] = df_tables.to_dict('records')
+        report["tables"] = df_tables.to_dict('records')
 
-    # 2. Vérifier les index géospatiaux
-    df_indexes = pd.read_sql("""
-        SELECT
-            schemaname,
-            tablename,
-            indexname,
-            indexdef
-        FROM pg_indexes
-        WHERE schemaname = 'hubeau'
-        AND indexdef LIKE '%GIST%'
-        ORDER BY tablename
-    """, conn)
+        # 2. Vérifier les index géospatiaux
+        df_indexes = pd.read_sql("""
+            SELECT
+                schemaname,
+                tablename,
+                indexname,
+                indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'hubeau'
+            AND indexdef LIKE '%GIST%'
+            ORDER BY tablename
+        """, conn)
 
-    report["spatial_indexes"] = df_indexes.to_dict('records')
+        report["spatial_indexes"] = df_indexes.to_dict('records')
 
     # 3. Statistiques globales
     total_tables = len(report["tables"])
@@ -79,8 +67,6 @@ def basic_database_check(context: AssetExecutionContext) -> Output[Dict[str, Any
         "total_spatial_indexes": total_spatial_indexes,
         "status": "OK" if total_tables > 0 and total_spatial_indexes > 0 else "PROBLÈME"
     }
-
-    conn.close()
 
     # Métadonnées pour Dagster UI
     metadata = {

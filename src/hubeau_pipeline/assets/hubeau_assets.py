@@ -35,6 +35,7 @@ from typing import Optional, Literal, Dict, Any
 
 from hubeau_pipeline.sources.hubeau_csv_source import hubeau_csv_source, IngestionMode
 from hubeau_pipeline.destinations.postgres_optimized_v2 import get_postgres_destination
+from hubeau_pipeline.resources import PostgreSQLResource
 
 
 # ============================================================================
@@ -124,7 +125,7 @@ def load_yaml_config(resource_name: str) -> Dict:
         return yaml.safe_load(f)
 
 
-def count_rows_in_postgres(table_name: str, schema: str = "hubeau") -> int:
+def count_rows_in_postgres(table_name: str, pg: PostgreSQLResource, schema: str = "hubeau") -> int:
     """
     Compte les lignes dans une table PostgreSQL.
 
@@ -133,28 +134,18 @@ def count_rows_in_postgres(table_name: str, schema: str = "hubeau") -> int:
 
     Args:
         table_name: Nom de la table
+        pg: PostgreSQL resource (injected by Dagster)
         schema: Schéma PostgreSQL (défaut: hubeau)
 
     Returns:
         Nombre de lignes dans la table, ou 0 si erreur/table inexistante
     """
-    import psycopg2
-
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("PG_HOST", "postgres"),
-            port=os.getenv("PG_PORT", "5432"),
-            database=os.getenv("PG_DB", "postgres"),
-            user=os.getenv("PG_USER", "postgres"),
-            password=os.getenv("PG_PASSWORD")
-        )
-
-        with conn.cursor() as cur:
-            cur.execute(f"SELECT COUNT(*) FROM {schema}.{table_name}")
-            count = cur.fetchone()[0]
-
-        conn.close()
-        return count
+        with pg.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {schema}.{table_name}")
+                count = cur.fetchone()[0]
+            return count
 
     except Exception as e:
         # Si erreur (table n'existe pas encore, connexion échouée, etc.)
