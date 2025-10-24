@@ -212,25 +212,134 @@ Voir [.gitlab-ci.yml](../.gitlab-ci.yml)
 - Réseau Docker interne
 - `.dlt/*.toml` gitignored
 
+## Création Automatique de Tables
+
+### PostgresBulkDestinationV2
+
+DLT créera automatiquement les tables lors du premier run :
+
+1. **Pandas infère les types** depuis les CSV Hub'Eau
+2. **Table créée** avec colonnes TEXT (ultra-safe)
+3. **COPY bulk** des données (100k records en 1-2s)
+4. **Auto-fix** si erreur de type (ALTER COLUMN → TEXT)
+
+**Localisation** : `src/hubeau_pipeline/destinations/postgres_optimized_v2.py:282`
+
+**Stratégie ULTRA-SAFE** :
+- Tout est créé en TEXT sauf datetime évident
+- Zéro erreur COPY (text accepte tout)
+- Pas de retries multiples
+- Performance optimale
+
+**Documentation détaillée** : Voir [AUTO_SCHEMA_CREATION.md](AUTO_SCHEMA_CREATION.md)
+
+### Gestion Base Existante
+
+✅ **Message PostgreSQL normal** : "_Database directory appears to contain a database; Skipping initialization_"
+
+**Explication** :
+- PostgreSQL détecte que `/var/lib/postgresql/data` existe déjà
+- Les scripts d'init (`01_init_minimal.sql`) sont skip
+- **Ce n'est PAS une erreur !** C'est le comportement standard.
+
+✅ **Comportement attendu** :
+- Si schéma `hubeau` existe → On l'utilise directement
+- Si tables existent → MERGE/UPSERT des nouvelles données
+- Si tables n'existent pas → Création automatique au premier run
+
+❌ **Seul cas problématique** :
+- Schéma `hubeau` n'existe pas → Erreur DLT
+- **Solution** : Exécuter manuellement `01_init_minimal.sql` ou reset PostgreSQL
+
+**Vérification santé base** :
+```bash
+# Accéder PostgreSQL
+docker exec -it brgm-postgres psql -U postgres -d postgres
+
+# Vérifier schéma hubeau
+\dn hubeau
+
+# Lister tables (si données déjà chargées)
+\dt hubeau.*
+
+# Si aucune table: NORMAL! Tables créées au premier run d'asset
+```
+
 ## Troubleshooting
+
+### "Database directory appears to contain a database"
+
+✅ **Ce n'est PAS une erreur !**
+
+Ce message PostgreSQL est **normal** et signifie que la base existe déjà. PostgreSQL skip l'init, c'est attendu.
+
+**Actions** :
+- Si les conteneurs démarrent → Tout va bien, ignorer le message
+- Si le worker `brgm-dlt-worker` est unhealthy → Vérifier les logs
+
+### Container `brgm-dlt-worker` unhealthy
+
+**Causes possibles** :
+1. Port 4000 déjà utilisé
+2. Erreur Python au démarrage
+3. PostgreSQL pas accessible
+4. Dagster module non trouvé
+
+**Diagnostic** :
+```bash
+docker compose logs dlt_worker
+docker compose ps
+```
+
+**Solution** :
+```bash
+docker compose down
+docker compose up -d
+```
 
 ### Erreur : "could not translate host name postgres"
 → Vérifier service `postgres` dans docker-compose
 
 ### Erreur : DLT connection failed
-→ Vérifier variables `PG_HOST`, `PG_PASSWORD`
+→ Vérifier variables `PG_HOST`, `PG_PASSWORD` dans `.env`
 
 ### Erreur : Dagster UI inaccessible
 → Vérifier `dagster_webserver` container status
 
+### Reset complet de la base
+
+```bash
+# Supprimer volumes Docker (ATTENTION: perte données)
+docker compose down -v
+
+# Recréation complète
+docker compose up -d
+```
+
 ### Logs
 ```bash
 # Daemon Dagster
-docker logs -f brgm-dagster-daemon
+docker compose logs -f dagster_daemon
 
-# Worker
-docker logs -f brgm-worker
+# Worker DLT
+docker compose logs -f dlt_worker
 
-# PostgreSQL
-docker logs -f brgm-postgres
+# PostgreSQL Hub'Eau
+docker compose logs -f postgres
+
+# PostgreSQL Dagster
+docker compose logs -f dagster_postgres
+
+# Tous les services
+docker compose logs -f
+```
+
+### Vérification santé services
+
+```bash
+# Script automatique
+./scripts/check_services.sh
+
+# Manuel
+docker compose ps
 ```

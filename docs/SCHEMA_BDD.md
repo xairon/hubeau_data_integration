@@ -1,690 +1,477 @@
-# Schéma de Données Hub'Eau
+# Schéma Base de Données Hub'Eau
 
-> **Architecture Actuelle : Bronze Layer (MinIO) → Silver/Gold Layers (PostgreSQL + PostGIS)**
-> **Date** : 2025-10-16
-> **Version** : 3.0 - Architecture Simplifiée
+> **Architecture** : Hub'Eau APIs → DLT → PostgreSQL
+> **Version** : 4.0 - Ingestion directe PostgreSQL
+> **Date** : 2025-10-24
 
 ## Table des Matières
 
-1. [Architecture Données](#architecture-données)
-2. [Bronze Layer - MinIO](#bronze-layer---minio)
-3. [Silver/Gold Layers - PostgreSQL](#silvergold-layers---postgresql)
-4. [Schéma Relationnel](#schéma-relationnel)
+1. [Architecture](#architecture)
+2. [Configuration PostgreSQL](#configuration-postgresql)
+3. [Organisation des Tables](#organisation-des-tables)
+4. [Schéma des Tables](#schéma-des-tables)
 5. [Conventions et Standards](#conventions-et-standards)
 
 ---
 
-## Architecture Données
+## Architecture
 
-### Medallion Architecture
+### Pipeline Simple
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  BRONZE LAYER - Raw Data (Immuable)                        │
-│                                                              │
-│  MinIO (S3-compatible)                                      │
-│  Format: Parquet (colonnaire, compressé)                   │
-│                                                              │
-│  Structure:                                                  │
-│  bronze/                                                     │
-│    └─ hubeau/                                               │
-│        ├─ hydrometrie/                                      │
-│        │   ├─ stations/                                     │
-│        │   │   └─ YYYY-MM-DD/*.parquet                     │
-│        │   └─ observations/                                 │
-│        │       └─ YYYY-MM-DD/*.parquet                     │
-│        ├─ piezometrie/                                      │
-│        ├─ qualite_rivieres/                                │
-│        ├─ qualite_nappes/                                  │
-│        ├─ temperature/                                      │
-│        ├─ ecoulement/                                       │
-│        ├─ hydrobiologie/                                    │
-│        └─ prelevements/                                     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            │ dbt transform
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│  SILVER LAYER - Cleaned & Validated                        │
-│                                                              │
-│  PostgreSQL 16 + PostGIS 3.4                               │
-│                                                              │
-│  Tables:                                                     │
-│  - Référentiels SANDRE (normalisés)                        │
-│  - Référentiels BDLISA (géologie)                          │
-│  - Entités géographiques (cours d'eau, bassins, etc.)     │
-│  - Stations (toutes APIs)                                   │
-│  - Chroniques/Observations (données nettoyées)             │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            │ dbt aggregate
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│  GOLD LAYER - Analytics Ready                               │
-│                                                              │
-│  PostgreSQL 16 + PostGIS 3.4                               │
-│                                                              │
-│  Tables/Views:                                               │
-│  - Agrégations temporelles (moyennes mensuelles, etc.)     │
-│  - Indicateurs par bassin/département                       │
-│  - Métriques qualité eau                                    │
-│  - Données géospatiales optimisées                         │
-└─────────────────────────────────────────────────────────────┘
+Hub'Eau APIs (CSV) → DLT → PostgreSQL
+                              └─ Schema: hubeau
+                                 └─ 22 tables de données
+                                 └─ 3 tables DLT (métadonnées)
 ```
+
+**Caractéristiques** :
+- ✅ **Ingestion directe** : CSV depuis Hub'Eau → PostgreSQL sans transformation
+- ✅ **Déduplication automatique** : MERGE/UPSERT sur clés primaires
+- ✅ **3 modes d'ingestion** : FULL (historique complet), YEAR (année spécifique), INCREMENTAL (derniers N jours)
+- ✅ **Schema unique** : Toutes les données dans `hubeau`
+- ✅ **PostGIS activé** : Support des géométries spatiales
 
 ### Pourquoi cette architecture ?
 
-**Bronze (MinIO + Parquet)**
-- ✅ Immuabilité : Données brutes jamais modifiées
-- ✅ Compression : 10x moins d'espace que JSON
-- ✅ Performance : Format colonnaire pour analytics
-- ✅ Standard : Compatible avec tous les outils (Spark, Pandas, DuckDB)
-- ✅ Coût : Self-hosted, pas de coûts cloud
+**Simplicité** :
+- Un seul schéma PostgreSQL, pas de layers multiples
+- Pas de stockage intermédiaire (MinIO, Parquet, etc.)
+- Ingestion directe = zéro transformation
 
-**Silver/Gold (PostgreSQL + PostGIS)**
-- ✅ SQL standard : Requêtes familières
-- ✅ ACID : Transactions, contraintes, intégrité
-- ✅ PostGIS : Fonctions géospatiales (ST_Distance, ST_Contains, etc.)
-- ✅ Performance : Index B-tree, GIST pour géométries
-- ✅ Maturité : Base de données éprouvée depuis 30 ans
+**Performance** :
+- DLT gère l'optimisation (batch loading, COPY PostgreSQL natif)
+- Déduplication automatique via clés primaires
+- Index créés automatiquement par DLT
 
----
-
-## Bronze Layer - MinIO
-
-### Structure Parquet
-
-Chaque endpoint d'API Hub'Eau génère des fichiers Parquet dans MinIO.
-
-**Exemple Hydrométrie Stations** :
-```
-bronze/hubeau/hydrometrie/stations/2025-10-16/run_xyz.parquet
-```
-
-**Schéma Parquet** (exemple `hydrometrie_stations`) :
-```python
-{
-    "code_station": "string",
-    "code_site": "string",
-    "libelle_station": "string",
-    "longitude_station": "double",
-    "latitude_station": "double",
-    "type_station": "string",
-    "code_cours_eau": "string",
-    "code_commune_station": "string",
-    "code_departement": "string",
-    "en_service": "boolean",
-    "date_ouverture_station": "date",
-    "date_maj_station": "timestamp",
-    # ... 85 colonnes au total
-}
-```
-
-### Organisation par API
-
-```
-bronze/hubeau/
-├─ hydrometrie/
-│   ├─ sites/                    # Endpoint /hydrometrie/sites
-│   ├─ stations/                 # Endpoint /hydrometrie/stations
-│   └─ observations_tr/          # Endpoint /hydrometrie/observations_tr
-│
-├─ piezometrie/
-│   ├─ stations/                 # Endpoint /niveaux_nappes/stations
-│   ├─ chroniques/               # Endpoint /niveaux_nappes/chroniques
-│   └─ chroniques_tr/            # Endpoint /niveaux_nappes/chroniques_tr
-│
-├─ qualite_rivieres/
-│   ├─ stations/                 # Endpoint /qualite_rivieres/station_pc
-│   ├─ operations/               # Endpoint /qualite_rivieres/operation_pc
-│   ├─ analyses/                 # Endpoint /qualite_rivieres/analyse_pc
-│   └─ conditions/               # Endpoint /qualite_rivieres/condition_environnementale_pc
-│
-├─ qualite_nappes/
-│   ├─ stations/                 # Endpoint /qualite_nappes_superficielles/stations
-│   └─ analyses/                 # Endpoint /qualite_nappes_superficielles/analyses
-│
-├─ temperature/
-│   ├─ stations/                 # Endpoint /temperature/station
-│   └─ chroniques/               # Endpoint /temperature/chronique
-│
-├─ ecoulement/
-│   ├─ stations/                 # Endpoint /ecoulement/stations
-│   ├─ campagnes/                # Endpoint /ecoulement/campagnes
-│   └─ observations/             # Endpoint /ecoulement/observations
-│
-├─ hydrobiologie/
-│   ├─ stations/                 # Endpoint /hydrobiologie/stations_hydrobio
-│   ├─ indices/                  # Endpoint /hydrobiologie/indices_hydrobio
-│   └─ taxons/                   # Endpoint /hydrobiologie/taxons_hydrobio
-│
-└─ prelevements/
-    ├─ ouvrages/                 # Endpoint /prelevements/ouvrages
-    ├─ points/                   # Endpoint /prelevements/points_prelevement
-    └─ chroniques/               # Endpoint /prelevements/chroniques
-```
-
-**Total** : 8 APIs × 3 endpoints = 24 dossiers Bronze
-
-### Lecture Parquet
-
-**Depuis Python (DuckDB)** :
-```python
-import duckdb
-
-# Query direct sur MinIO
-result = duckdb.sql("""
-    SELECT code_station, AVG(resultat) as debit_moyen
-    FROM read_parquet('s3://bronze/hubeau/hydrometrie/observations/**/*.parquet')
-    WHERE date_obs >= '2024-01-01'
-    GROUP BY code_station
-""").df()
-```
-
-**Depuis PostgreSQL (parquet_fdw)** :
-```sql
--- Extension (future)
-CREATE EXTENSION parquet_fdw;
-
-CREATE FOREIGN TABLE hydrometrie_stations_bronze (
-    code_station TEXT,
-    libelle_station TEXT,
-    -- ... autres colonnes
-)
-SERVER parquet_server
-OPTIONS (filename 's3://bronze/hubeau/hydrometrie/stations/**/*.parquet');
-```
+**Maintenance** :
+- DLT crée les tables automatiquement au premier run
+- Pandas infère les types depuis les CSV
+- Zéro définition manuelle de schéma
 
 ---
 
-## Silver/Gold Layers - PostgreSQL
+## Configuration PostgreSQL
 
-### Configuration PostgreSQL
+### Version et Extensions
 
-**Version** : PostgreSQL 16
-**Extensions** :
-- `postgis` 3.4 - Fonctions géospatiales
-- `pg_stat_statements` - Monitoring performance
-- `uuid-ossp` - Génération UUID
+**PostgreSQL** : 16
+**Extensions installées** :
+- `postgis` - Fonctions géospatiales (Points, coordonnées)
 
-**Schemas** :
+### Initialisation
+
+Le script `docker/init-scripts/postgres/01_init_minimal.sql` crée :
+
 ```sql
--- Bronze (optionnel - foreign tables vers Parquet)
-CREATE SCHEMA bronze;
+-- Schéma unique pour toutes les données Hub'Eau
+CREATE SCHEMA IF NOT EXISTS hubeau;
 
--- Silver (données nettoyées)
-CREATE SCHEMA silver;
+-- Extension PostGIS pour géométries
+CREATE EXTENSION IF NOT EXISTS postgis;
 
--- Gold (agrégations)
-CREATE SCHEMA gold;
+-- Permissions complètes
+GRANT ALL PRIVILEGES ON SCHEMA hubeau TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA hubeau TO postgres;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA hubeau TO postgres;
 
--- Référentiels
-CREATE SCHEMA ref;
+-- Permissions futures (tables créées par DLT)
+ALTER DEFAULT PRIVILEGES IN SCHEMA hubeau
+GRANT ALL PRIVILEGES ON TABLES TO postgres;
 ```
 
-### PostGIS - Fonctions Géospatiales
-
-**Index spatiaux** :
-```sql
--- Index GIST pour requêtes spatiales
-CREATE INDEX idx_stations_geom
-ON silver.hydrometrie_stations
-USING GIST (geometry);
-
--- Index sur département (souvent utilisé)
-CREATE INDEX idx_stations_dept
-ON silver.hydrometrie_stations (code_departement);
-```
-
-**Requêtes spatiales courantes** :
-```sql
--- Stations dans un rayon de 5km
-SELECT code_station, libelle_station,
-       ST_Distance(geometry::geography,
-                   ST_SetSRID(ST_MakePoint(2.3488, 48.8534), 4326)::geography) AS distance_m
-FROM silver.hydrometrie_stations
-WHERE ST_DWithin(geometry::geography,
-                 ST_SetSRID(ST_MakePoint(2.3488, 48.8534), 4326)::geography,
-                 5000)
-ORDER BY distance_m;
-
--- Stations dans un polygone (département)
-SELECT s.code_station
-FROM silver.hydrometrie_stations s
-JOIN ref.departements d ON s.code_departement = d.code_departement
-WHERE ST_Contains(d.geometry, s.geometry);
-```
+**Important** : DLT crée automatiquement les tables au premier run. Pas de définition manuelle de schéma.
 
 ---
 
-## Schéma Relationnel
+## Organisation des Tables
 
-### Notation
+### 22 Tables de Données
 
-- **PK** : Clé Primaire
-- **FK** : Clé Étrangère
-- **→** : Relation FK vers PK
-- **1:N** : Un à plusieurs
-- **N:N** : Plusieurs à plusieurs (table de liaison)
+**11 Stations/Référentiels** (sans filtres date, mode FULL uniquement) :
+1. `piezometry_stations` - Stations piézométriques (BSS)
+2. `quality_groundwater_stations` - Stations qualité nappes
+3. `quality_rivers_stations` - Stations qualité cours d'eau
+4. `temperature_stations` - Stations température
+5. `hydrometry_sites` - Sites hydrométrie
+6. `hydrometry_stations` - Stations hydrométrie
+7. `hydrobio_stations` - Stations hydrobiologie
+8. `ecoulement_stations` - Stations écoulement
+9. `ecoulement_campagnes` - Campagnes écoulement
+10. `prelevements_points` - Points de prélèvement
+11. `prelevements_ouvrages` - Ouvrages de prélèvement
 
-### Référentiels SANDRE
+**11 Chroniques/Observations** (avec filtres date, 3 modes : FULL/YEAR/INCREMENTAL) :
+1. `piezometry_chroniques` - Mesures piézométriques
+2. `quality_groundwater_analyses` - Analyses qualité nappes
+3. `quality_rivers_analyses` - Analyses qualité cours d'eau
+4. `quality_rivers_conditions` - Conditions environnementales prélèvement
+5. `quality_rivers_operations` - Opérations de prélèvement
+6. `temperature_chroniques` - Mesures température
+7. `hydrometry_obs_elab` - Observations hydrométrie élaborées
+8. `hydrobio_indices` - Indices hydrobiologiques
+9. `hydrobio_taxons` - Taxons hydrobiologiques
+10. `ecoulement_observations` - Observations écoulement
+11. `prelevements_chroniques` - Chroniques prélèvements
 
-Les référentiels SANDRE normalisent TOUTES les APIs Hub'Eau.
+### 3 Tables DLT (métadonnées)
+
+DLT crée automatiquement 3 tables techniques dans le schéma `hubeau` :
+
+- `_dlt_loads` - Historique des chargements (timestamps, statuts, erreurs)
+- `_dlt_version` - Version du schéma DLT
+- `_dlt_pipeline_state` - État du pipeline (cursors, états incrémentaux)
+
+---
+
+## Schéma des Tables
+
+### Exemple 1 : piezometry_chroniques
+
+Table volumineuse : mesures piézométriques horaires depuis 1960.
+
+**Clé primaire** : `[code_bss, timestamp_mesure]` (station + timestamp)
+**Mode ingestion** : FULL / YEAR / INCREMENTAL
+**Volume typique** : ~50M+ records
 
 ```sql
--- Paramètres mesurés (température, pH, débit, etc.)
-CREATE TABLE ref.sandre_parametres (
-    code_parametre TEXT PRIMARY KEY,
-    libelle_parametre TEXT NOT NULL,
-    nature TEXT,  -- 'physico-chimie', 'biologie', 'hydrologie'
-    uri_parametre TEXT
-);
+CREATE TABLE hubeau.piezometry_chroniques (
+    -- Identifiants (3 colonnes)
+    code_bss TEXT NOT NULL,               -- Code BSS (Banque du Sous-Sol)
+    bss_id TEXT,                          -- Identifiant interne BSS
+    urn_bss TEXT,                         -- URN unique BSS
 
--- Unités de mesure
-CREATE TABLE ref.sandre_unites (
-    code_unite TEXT PRIMARY KEY,
-    symbole_unite TEXT NOT NULL,  -- 'mg/L', '°C', 'm³/s'
-    libelle_unite TEXT,
-    uri_unite TEXT
-);
+    -- Temporel (3 colonnes)
+    date_mesure DATE,                     -- Date mesure (YYYY-MM-DD)
+    timestamp_mesure TIMESTAMP NOT NULL,  -- Timestamp complet (clé primaire)
+    date_maj TIMESTAMP,                   -- Date dernière mise à jour
 
--- Qualifications (qualité de la donnée)
-CREATE TABLE ref.sandre_qualifications (
-    code_qualification TEXT PRIMARY KEY,
-    libelle_qualification TEXT NOT NULL,
-    niveau_confiance INTEGER  -- 1=correcte, 2=incertaine, 3=douteuse, 4=mauvaise
-);
+    -- Localisation (2 colonnes)
+    longitude DOUBLE PRECISION,           -- Longitude WGS84
+    latitude DOUBLE PRECISION,            -- Latitude WGS84
 
--- Supports de prélèvement
-CREATE TABLE ref.sandre_supports (
-    code_support TEXT PRIMARY KEY,
-    libelle_support TEXT NOT NULL,  -- 'Eau', 'Sédiment', 'Biote'
-    uri_support TEXT
-);
+    -- Niveaux piézométriques (4 colonnes)
+    altitude_station DOUBLE PRECISION,    -- Altitude station (m NGF)
+    altitude_repere DOUBLE PRECISION,     -- Altitude repère mesure (m NGF)
+    niveau_eau_ngf DOUBLE PRECISION,      -- Niveau nappe NGF (m)
+    profondeur_nappe DOUBLE PRECISION,    -- Profondeur nappe/surface (m)
 
--- Méthodes d'analyse
-CREATE TABLE ref.sandre_methodes (
-    code_methode TEXT PRIMARY KEY,
-    nom_methode TEXT NOT NULL,
-    type_methode TEXT,  -- 'analyse', 'prelevement', 'extraction'
-    uri_methode TEXT
-);
-
--- Taxons (espèces biologiques)
-CREATE TABLE ref.sandre_taxons (
-    code_appel_taxon TEXT PRIMARY KEY,
-    libelle_appel_taxon TEXT NOT NULL,  -- Nom scientifique
-    codes_taxons_parents TEXT[],  -- Hiérarchie taxonomique
-    rang_taxonomique TEXT  -- 'Espèce', 'Genre', 'Famille', 'Ordre'
-);
-
--- Statuts
-CREATE TABLE ref.sandre_statuts (
-    code_statut TEXT PRIMARY KEY,
-    mnemo_statut TEXT,
-    libelle_statut TEXT
+    PRIMARY KEY (code_bss, timestamp_mesure)
 );
 ```
 
-### Référentiels BDLISA (Géologie)
+**Index automatiques DLT** :
+- Primary key : `(code_bss, timestamp_mesure)`
+- Performance : Index B-tree sur clés primaires
+
+### Exemple 2 : quality_rivers_analyses
+
+Table volumineuse : analyses physico-chimiques des cours d'eau.
+
+**Clé primaire** : `[code_analyse]` (identifiant unique analyse)
+**Mode ingestion** : FULL / YEAR / INCREMENTAL
+**Volume typique** : ~20M+ records
 
 ```sql
--- Formations géologiques / aquifères
-CREATE TABLE ref.bdlisa_formations (
-    code_bdlisa TEXT PRIMARY KEY,
-    nom_formation TEXT NOT NULL,
-    urn_bdlisa TEXT,
-    nature_lithologique TEXT,  -- 'Calcaire', 'Sable', 'Grès'
-    productivite TEXT,  -- 'Très productive', 'Productive', 'Peu productive'
-    type_porosite TEXT,  -- 'Primaire', 'Secondaire (fissures, karst)'
-    type_entite TEXT  -- 'Aquifère', 'Aquitard'
+CREATE TABLE hubeau.quality_rivers_analyses (
+    -- Identifiants
+    code_analyse TEXT PRIMARY KEY,        -- Identifiant unique analyse
+    code_station TEXT,                    -- Code station prélèvement
+    code_operation TEXT,                  -- Code opération prélèvement
+
+    -- Temporel
+    date_prelevement DATE,                -- Date prélèvement
+    heure_prelevement TIME,               -- Heure prélèvement
+
+    -- Paramètre mesuré
+    code_parametre TEXT,                  -- Code SANDRE paramètre (ex: "1340" = Nitrates)
+    libelle_parametre TEXT,               -- Libellé paramètre
+    code_unite TEXT,                      -- Code unité (ex: "mg/L")
+    symbole_unite TEXT,                   -- Symbole unité
+
+    -- Résultat
+    resultat DOUBLE PRECISION,            -- Valeur mesurée
+    limite_detection DOUBLE PRECISION,    -- Limite détection
+    limite_quantification DOUBLE PRECISION, -- Limite quantification
+    code_qualification TEXT,              -- Qualité donnée (1=correcte, 2=incertaine, etc.)
+
+    -- Méthodes
+    code_support TEXT,                    -- Support prélèvement (Eau, Sédiment, etc.)
+    code_methode_analyse TEXT,            -- Méthode analytique utilisée
+
+    -- Métadonnées
+    date_maj_information TIMESTAMP        -- Date mise à jour
 );
 ```
 
-### Entités Géographiques
+**Index automatiques DLT** :
+- Primary key : `code_analyse`
+
+### Exemple 3 : piezometry_stations
+
+Table référentiel : liste des stations piézométriques.
+
+**Clé primaire** : `[code_bss]`
+**Mode ingestion** : FULL uniquement (pas de filtre date)
+**Volume typique** : ~23k records
 
 ```sql
--- Cours d'eau
-CREATE TABLE ref.cours_eau (
-    code_cours_eau TEXT PRIMARY KEY,
-    libelle_cours_eau TEXT NOT NULL,
-    uri_cours_eau TEXT
-);
+CREATE TABLE hubeau.piezometry_stations (
+    -- Identifiants
+    code_bss TEXT PRIMARY KEY,            -- Code BSS unique
+    bss_id TEXT UNIQUE,                   -- Identifiant interne
+    urn_bss TEXT,                         -- URN unique
 
--- Masses d'eau (DCE)
-CREATE TABLE ref.masses_eau (
-    code_masse_deau TEXT PRIMARY KEY,
-    nom_masse_deau TEXT NOT NULL,
-    type_masse_deau TEXT,  -- 'Cours d'eau', 'Plan d'eau', 'Souterraine'
-    code_bassin TEXT,
-    FOREIGN KEY (code_bassin) REFERENCES ref.bassins(code_bassin)
-);
+    -- Localisation
+    longitude DOUBLE PRECISION,           -- Longitude WGS84
+    latitude DOUBLE PRECISION,            -- Latitude WGS84
+    code_commune_insee TEXT,              -- Code INSEE commune
+    code_departement TEXT,                -- Code département
+    altitude_station DOUBLE PRECISION,    -- Altitude (m NGF)
 
--- Bassins hydrographiques
-CREATE TABLE ref.bassins (
-    code_bassin TEXT PRIMARY KEY,
-    libelle_bassin TEXT NOT NULL,
-    code_eu_bassin TEXT,
-    geometry GEOMETRY(MultiPolygon, 4326)
-);
-
--- Départements
-CREATE TABLE ref.departements (
-    code_departement TEXT PRIMARY KEY,
-    libelle_departement TEXT NOT NULL,
-    code_region TEXT,
-    geometry GEOMETRY(MultiPolygon, 4326),
-    FOREIGN KEY (code_region) REFERENCES ref.regions(code_region)
-);
-
--- Communes
-CREATE TABLE ref.communes (
-    code_commune_insee TEXT PRIMARY KEY,
-    libelle_commune TEXT NOT NULL,
-    code_departement TEXT,
-    geometry GEOMETRY(MultiPolygon, 4326),
-    FOREIGN KEY (code_departement) REFERENCES ref.departements(code_departement)
-);
-
--- Régions
-CREATE TABLE ref.regions (
-    code_region TEXT PRIMARY KEY,
-    libelle_region TEXT NOT NULL,
-    geometry GEOMETRY(MultiPolygon, 4326)
+    -- Caractéristiques station
+    profondeur_investigation DOUBLE PRECISION, -- Profondeur max (m)
+    libelle_pe TEXT,                      -- Libellé point d'eau
+    date_debut_mesure DATE,               -- Première mesure
+    date_fin_mesure DATE,                 -- Dernière mesure
+    date_maj TIMESTAMP                    -- Dernière mise à jour
 );
 ```
 
-### Hydrométrie (Débits)
+### Exemple 4 : hydrometry_obs_elab
+
+Table volumineuse : observations hydrométrie élaborées (débits).
+
+**Clé primaire** : `[code_station, date_obs_elab, grandeur_hydro_elab]`
+**Mode ingestion** : FULL / YEAR / INCREMENTAL
+**Volume typique** : ~15M+ records
 
 ```sql
--- Sites hydrométrie
-CREATE TABLE silver.hydrometrie_sites (
-    code_site TEXT PRIMARY KEY,
-    libelle_site TEXT NOT NULL,
-    longitude_site DOUBLE PRECISION,
-    latitude_site DOUBLE PRECISION,
-    geometry GEOMETRY(Point, 4326),
-    code_cours_eau TEXT,
-    code_departement TEXT,
-    surface_bv DOUBLE PRECISION,  -- Surface bassin versant (km²)
-    date_maj_site TIMESTAMP,
-    FOREIGN KEY (code_cours_eau) REFERENCES ref.cours_eau(code_cours_eau),
-    FOREIGN KEY (code_departement) REFERENCES ref.departements(code_departement)
-);
+CREATE TABLE hubeau.hydrometry_obs_elab (
+    -- Identifiants
+    code_station TEXT NOT NULL,           -- Code station hydrométrie
+    code_site TEXT,                       -- Code site (parent station)
 
--- Stations hydrométrie
-CREATE TABLE silver.hydrometrie_stations (
-    code_station TEXT PRIMARY KEY,
-    code_site TEXT,
-    libelle_station TEXT NOT NULL,
-    longitude_station DOUBLE PRECISION,
-    latitude_station DOUBLE PRECISION,
-    geometry GEOMETRY(Point, 4326),
-    type_station TEXT,
-    code_cours_eau TEXT,
-    code_departement TEXT,
-    en_service BOOLEAN,
-    date_ouverture_station DATE,
-    date_fermeture_station DATE,
-    date_maj_station TIMESTAMP,
-    FOREIGN KEY (code_site) REFERENCES silver.hydrometrie_sites(code_site),
-    FOREIGN KEY (code_cours_eau) REFERENCES ref.cours_eau(code_cours_eau),
-    FOREIGN KEY (code_departement) REFERENCES ref.departements(code_departement)
-);
+    -- Temporel
+    date_obs_elab TIMESTAMP NOT NULL,     -- Date/heure observation
 
--- Observations élaborées (débits temps réel)
-CREATE TABLE silver.hydrometrie_obs_elab (
-    code_station TEXT NOT NULL,
-    date_obs_elab TIMESTAMP NOT NULL,
-    grandeur_hydro_elab TEXT NOT NULL,  -- 'QmJ', 'H', etc.
-    resultat_obs_elab DOUBLE PRECISION,
-    code_qualification TEXT,
-    code_methode TEXT,
-    PRIMARY KEY (code_station, date_obs_elab, grandeur_hydro_elab),
-    FOREIGN KEY (code_station) REFERENCES silver.hydrometrie_stations(code_station),
-    FOREIGN KEY (code_qualification) REFERENCES ref.sandre_qualifications(code_qualification),
-    FOREIGN KEY (code_methode) REFERENCES ref.sandre_methodes(code_methode)
-);
+    -- Mesure
+    grandeur_hydro_elab TEXT NOT NULL,    -- Type mesure (QmJ=débit journalier, H=hauteur)
+    resultat_obs_elab DOUBLE PRECISION,   -- Valeur mesurée
+    code_qualification TEXT,              -- Qualité donnée
+    code_methode TEXT,                    -- Méthode mesure
 
--- Index pour requêtes temporelles
-CREATE INDEX idx_hydro_obs_date ON silver.hydrometrie_obs_elab (date_obs_elab);
-CREATE INDEX idx_hydro_obs_station_date ON silver.hydrometrie_obs_elab (code_station, date_obs_elab);
+    PRIMARY KEY (code_station, date_obs_elab, grandeur_hydro_elab)
+);
 ```
 
-### Piézométrie (Nappes)
+### Exemple 5 : prelevements_points
+
+Table référentiel volumineuse : points de prélèvement.
+
+**Clé primaire** : `[code_prelevement]`
+**Mode ingestion** : FULL uniquement
+**Volume typique** : ~186k records
 
 ```sql
--- Stations piézométriques (BSS)
-CREATE TABLE silver.piezometrie_stations (
-    code_bss TEXT PRIMARY KEY,
-    bss_id TEXT UNIQUE,
-    urn_bss TEXT,
-    longitude DOUBLE PRECISION,
-    latitude DOUBLE PRECISION,
-    geometry GEOMETRY(Point, 4326),
-    code_commune_insee TEXT,
-    code_departement TEXT,
-    altitude_station DOUBLE PRECISION,
-    profondeur_investigation DOUBLE PRECISION,  -- Profondeur max (m)
-    libelle_pe TEXT,  -- Point d'eau
-    date_debut_mesure DATE,
-    date_fin_mesure DATE,
-    date_maj TIMESTAMP,
-    FOREIGN KEY (code_commune_insee) REFERENCES ref.communes(code_commune_insee),
-    FOREIGN KEY (code_departement) REFERENCES ref.departements(code_departement)
+CREATE TABLE hubeau.prelevements_points (
+    -- Identifiants
+    code_prelevement TEXT PRIMARY KEY,    -- Code unique point prélèvement
+    urn_prelevement TEXT,                 -- URN unique
+    code_ouvrage TEXT,                    -- Code ouvrage parent
+
+    -- Localisation
+    longitude DOUBLE PRECISION,           -- Longitude WGS84
+    latitude DOUBLE PRECISION,            -- Latitude WGS84
+    code_commune_insee TEXT,              -- Code INSEE commune
+    code_departement TEXT,                -- Code département
+
+    -- Caractéristiques
+    libelle_point TEXT,                   -- Libellé point
+    type_point TEXT,                      -- Type (Puits, Forage, etc.)
+    usage TEXT,                           -- Usage (AEP, Irrigation, etc.)
+    date_ouverture DATE,                  -- Date ouverture
+    date_fermeture DATE,                  -- Date fermeture
+    date_maj TIMESTAMP                    -- Dernière mise à jour
 );
-
--- Chroniques piézométriques
-CREATE TABLE silver.piezometrie_chroniques (
-    code_bss TEXT NOT NULL,
-    timestamp_mesure TIMESTAMP NOT NULL,
-    niveau_eau_ngf DOUBLE PRECISION,  -- Niveau NGF (m)
-    profondeur_nappe DOUBLE PRECISION,  -- Profondeur depuis surface (m)
-    code_qualification TEXT,
-    mode_obtention TEXT,  -- 'Temps réel', 'Manuel'
-    PRIMARY KEY (code_bss, timestamp_mesure),
-    FOREIGN KEY (code_bss) REFERENCES silver.piezometrie_stations(code_bss),
-    FOREIGN KEY (code_qualification) REFERENCES ref.sandre_qualifications(code_qualification)
-);
-
--- Liaison stations ↔ formations géologiques (N:N)
-CREATE TABLE silver.piezometrie_stations_bdlisa (
-    code_bss TEXT,
-    code_bdlisa TEXT,
-    PRIMARY KEY (code_bss, code_bdlisa),
-    FOREIGN KEY (code_bss) REFERENCES silver.piezometrie_stations(code_bss),
-    FOREIGN KEY (code_bdlisa) REFERENCES ref.bdlisa_formations(code_bdlisa)
-);
-
--- Index temporels
-CREATE INDEX idx_piezo_chron_date ON silver.piezometrie_chroniques (timestamp_mesure);
-```
-
-### Qualité Cours d'Eau
-
-```sql
--- Stations qualité cours d'eau
-CREATE TABLE silver.qualite_rivieres_stations (
-    code_station TEXT PRIMARY KEY,
-    libelle_station TEXT NOT NULL,
-    longitude DOUBLE PRECISION,
-    latitude DOUBLE PRECISION,
-    geometry GEOMETRY(Point, 4326),
-    code_cours_eau TEXT,
-    code_masse_deau TEXT,
-    code_departement TEXT,
-    date_maj_information TIMESTAMP,
-    FOREIGN KEY (code_cours_eau) REFERENCES ref.cours_eau(code_cours_eau),
-    FOREIGN KEY (code_masse_deau) REFERENCES ref.masses_eau(code_masse_deau),
-    FOREIGN KEY (code_departement) REFERENCES ref.departements(code_departement)
-);
-
--- Opérations (campagnes prélèvement)
-CREATE TABLE silver.qualite_rivieres_operations (
-    code_station TEXT NOT NULL,
-    date_prelevement DATE NOT NULL,
-    code_operation TEXT NOT NULL,
-    heure_prelevement TIME,
-    code_support TEXT,
-    code_methode TEXT,
-    PRIMARY KEY (code_station, date_prelevement, code_operation),
-    FOREIGN KEY (code_station) REFERENCES silver.qualite_rivieres_stations(code_station),
-    FOREIGN KEY (code_support) REFERENCES ref.sandre_supports(code_support),
-    FOREIGN KEY (code_methode) REFERENCES ref.sandre_methodes(code_methode)
-);
-
--- Analyses physico-chimiques
-CREATE TABLE silver.qualite_rivieres_analyses (
-    code_analyse TEXT PRIMARY KEY,
-    code_station TEXT NOT NULL,
-    date_prelevement DATE NOT NULL,
-    code_parametre TEXT NOT NULL,
-    resultat DOUBLE PRECISION,
-    code_unite TEXT,
-    limite_detection DOUBLE PRECISION,
-    limite_quantification DOUBLE PRECISION,
-    code_qualification TEXT,
-    code_support TEXT,
-    code_methode_analyse TEXT,
-    FOREIGN KEY (code_station, date_prelevement) REFERENCES silver.qualite_rivieres_operations(code_station, date_prelevement),
-    FOREIGN KEY (code_parametre) REFERENCES ref.sandre_parametres(code_parametre),
-    FOREIGN KEY (code_unite) REFERENCES ref.sandre_unites(code_unite),
-    FOREIGN KEY (code_qualification) REFERENCES ref.sandre_qualifications(code_qualification),
-    FOREIGN KEY (code_support) REFERENCES ref.sandre_supports(code_support)
-);
-
--- Index pour requêtes fréquentes
-CREATE INDEX idx_qual_riv_analyses_param ON silver.qualite_rivieres_analyses (code_parametre);
-CREATE INDEX idx_qual_riv_analyses_date ON silver.qualite_rivieres_analyses (date_prelevement);
-```
-
-### Gold Layer - Agrégations
-
-```sql
--- Débits moyens mensuels par station
-CREATE MATERIALIZED VIEW gold.hydrometrie_debits_mensuels AS
-SELECT
-    code_station,
-    DATE_TRUNC('month', date_obs_elab) AS mois,
-    grandeur_hydro_elab,
-    AVG(resultat_obs_elab) AS debit_moyen,
-    MIN(resultat_obs_elab) AS debit_min,
-    MAX(resultat_obs_elab) AS debit_max,
-    COUNT(*) AS nb_mesures
-FROM silver.hydrometrie_obs_elab
-WHERE code_qualification = '1'  -- Données correctes uniquement
-GROUP BY code_station, DATE_TRUNC('month', date_obs_elab), grandeur_hydro_elab;
-
--- Index pour requêtes
-CREATE INDEX idx_debits_mensuels_station_mois ON gold.hydrometrie_debits_mensuels (code_station, mois);
-
--- Refresh automatique (cron ou trigger)
--- Ou manuel: REFRESH MATERIALIZED VIEW gold.hydrometrie_debits_mensuels;
 ```
 
 ---
 
 ## Conventions et Standards
 
-### Nommage
+### Nommage Tables
 
-**Tables** :
-- `{layer}.{api}_{entity}` (ex: `silver.hydrometrie_stations`)
-- Pluriel pour collections
-- Snake_case
+- **Format** : `{api}_{entity}` (ex: `piezometry_chroniques`, `quality_rivers_stations`)
+- **Pluriel** : Pour collections (`stations`, `chroniques`, `analyses`)
+- **Snake_case** : Toujours en minuscules avec underscores
 
-**Colonnes** :
-- Snake_case
-- Préfixe `code_` pour clés étrangères
-- Préfixe `libelle_` pour labels
-- Suffixe `_date` pour dates
-- Suffixe `_timestamp` pour timestamps
+### Nommage Colonnes
 
-**Index** :
-- `idx_{table}_{colonne(s)}` (ex: `idx_stations_geom`)
+- **Snake_case** : `code_station`, `date_mesure`, `niveau_eau_ngf`
+- **Préfixe `code_`** : Pour identifiants et clés étrangères (`code_bss`, `code_parametre`)
+- **Préfixe `libelle_`** : Pour labels textuels (`libelle_station`, `libelle_parametre`)
+- **Suffixe `_date`** : Pour dates (`date_mesure`, `date_prelevement`)
+- **Suffixe `_timestamp`** : Pour timestamps (`timestamp_mesure`, `date_maj`)
 
 ### Types de Données
 
-| Donnée | Type PostgreSQL | Notes |
-|--------|----------------|-------|
-| Codes (PK/FK) | `TEXT` | Plus flexible que VARCHAR |
-| Libellés | `TEXT` | |
-| Nombres décimaux | `DOUBLE PRECISION` | Mesures scientifiques |
-| Dates | `DATE` | Format YYYY-MM-DD |
-| Timestamps | `TIMESTAMP` | Avec timezone si nécessaire |
-| Booléens | `BOOLEAN` | `TRUE`/`FALSE` |
-| Géométries | `GEOMETRY(type, 4326)` | PostGIS, SRID 4326 (WGS84) |
-| Arrays | `TEXT[]` | Pour listes (ex: codes_taxons_parents) |
+| Donnée | Type PostgreSQL | Exemple |
+|--------|----------------|---------|
+| Codes identifiants | `TEXT` | `code_bss`, `code_station` |
+| Libellés/descriptions | `TEXT` | `libelle_station` |
+| Nombres décimaux | `DOUBLE PRECISION` | `niveau_eau_ngf`, `resultat` |
+| Dates | `DATE` | `date_mesure` (YYYY-MM-DD) |
+| Timestamps | `TIMESTAMP` | `timestamp_mesure`, `date_maj` |
+| Heures | `TIME` | `heure_prelevement` |
+| Booléens | `BOOLEAN` | `en_service` |
+| Coordonnées | `DOUBLE PRECISION` | `longitude`, `latitude` |
 
-### Contraintes
+**Note** : PostGIS est activé mais les géométries ne sont pas créées automatiquement. Les coordonnées sont stockées comme `DOUBLE PRECISION` (`longitude`, `latitude`).
 
+### Clés Primaires
+
+**Stations/Référentiels** : Identifiant unique simple
 ```sql
--- Clés primaires
-ALTER TABLE silver.hydrometrie_stations
-ADD CONSTRAINT pk_hydro_stations PRIMARY KEY (code_station);
-
--- Clés étrangères
-ALTER TABLE silver.hydrometrie_obs_elab
-ADD CONSTRAINT fk_hydro_obs_station
-FOREIGN KEY (code_station) REFERENCES silver.hydrometrie_stations(code_station);
-
--- Check constraints
-ALTER TABLE silver.hydrometrie_stations
-ADD CONSTRAINT check_longitude CHECK (longitude_station BETWEEN -180 AND 180);
-
-ALTER TABLE silver.hydrometrie_stations
-ADD CONSTRAINT check_latitude CHECK (latitude_station BETWEEN -90 AND 90);
-
--- NOT NULL
-ALTER TABLE silver.hydrometrie_stations
-ALTER COLUMN libelle_station SET NOT NULL;
+PRIMARY KEY (code_bss)              -- piezometry_stations
+PRIMARY KEY (code_station)          -- quality_rivers_stations
+PRIMARY KEY (code_prelevement)      -- prelevements_points
+PRIMARY KEY (code_analyse)          -- quality_rivers_analyses
 ```
+
+**Chroniques/Observations** : Clés composites (station + timestamp/date + optionnel)
+```sql
+PRIMARY KEY (code_bss, timestamp_mesure)
+-- piezometry_chroniques
+
+PRIMARY KEY (code_station, date_obs_elab, grandeur_hydro_elab)
+-- hydrometry_obs_elab
+
+PRIMARY KEY (code_station, date_prelevement, code_operation)
+-- quality_rivers_operations
+```
+
+### Déduplication (MERGE/UPSERT)
+
+DLT gère automatiquement la déduplication via `write_disposition` :
+
+**Mode FULL** : `write_disposition=replace`
+- Tronque la table puis charge toutes les données
+- Utilisation : refresh complet référentiels
+
+**Modes YEAR/INCREMENTAL** : `write_disposition=append`
+- MERGE/UPSERT sur clés primaires
+- Si record existe (PK match) → UPDATE
+- Si record nouveau → INSERT
+- Utilisation : chargements incrémentaux sans doublons
 
 ### Performance
 
-**Index standards** :
+**Index automatiques DLT** :
+- DLT crée automatiquement des index B-tree sur les clés primaires
+- Pas besoin de créer manuellement les index standards
+
+**Index personnalisés** (si requis pour analytics) :
 ```sql
--- Géométries (GIST)
-CREATE INDEX idx_{table}_geom ON {schema}.{table} USING GIST (geometry);
+-- Index sur dates pour requêtes temporelles
+CREATE INDEX idx_piezo_chron_date
+ON hubeau.piezometry_chroniques (timestamp_mesure);
 
--- Dates/Timestamps (B-tree)
-CREATE INDEX idx_{table}_date ON {schema}.{table} (date_column);
+-- Index sur codes stations pour JOINs
+CREATE INDEX idx_qual_analyses_station
+ON hubeau.quality_rivers_analyses (code_station);
 
--- Clés étrangères (B-tree)
-CREATE INDEX idx_{table}_fk ON {schema}.{table} (fk_column);
+-- Index sur paramètres pour filtres
+CREATE INDEX idx_qual_analyses_param
+ON hubeau.quality_rivers_analyses (code_parametre);
 
--- Recherche texte (GIN)
-CREATE INDEX idx_{table}_search ON {schema}.{table} USING GIN (to_tsvector('french', libelle_column));
-```
-
-**Partitionnement temporel** (si > 100M lignes) :
-```sql
--- Exemple pour chroniques volumineuses
-CREATE TABLE silver.hydrometrie_obs_elab (
-    -- colonnes...
-) PARTITION BY RANGE (date_obs_elab);
-
--- Créer partitions par année
-CREATE TABLE silver.hydrometrie_obs_elab_2024
-    PARTITION OF silver.hydrometrie_obs_elab
-    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
-
-CREATE TABLE silver.hydrometrie_obs_elab_2025
-    PARTITION OF silver.hydrometrie_obs_elab
-    FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+-- Index spatiaux PostGIS (si géométries créées)
+CREATE INDEX idx_stations_location
+ON hubeau.piezometry_stations
+USING GIST (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326));
 ```
 
 ### Maintenance
 
+**Vacuum automatique** : PostgreSQL le gère automatiquement
+
+**Vacuum manuel** (si nécessaire après gros chargements) :
 ```sql
--- Vacuum régulier
-VACUUM ANALYZE silver.hydrometrie_obs_elab;
+VACUUM ANALYZE hubeau.piezometry_chroniques;
+VACUUM ANALYZE hubeau.quality_rivers_analyses;
+```
 
--- Reindex si nécessaire
-REINDEX INDEX CONCURRENTLY idx_hydro_obs_station_date;
+**Stats optimizer** :
+```sql
+ANALYZE hubeau.piezometry_stations;
+```
 
--- Stats pour optimizer
-ANALYZE silver.hydrometrie_stations;
+---
+
+## Requêtes Courantes
+
+### Compter records par table
+
+```sql
+SELECT
+    schemaname,
+    tablename,
+    n_live_tup AS row_count
+FROM pg_stat_user_tables
+WHERE schemaname = 'hubeau'
+ORDER BY n_live_tup DESC;
+```
+
+### Lister toutes les tables Hub'Eau
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'hubeau'
+  AND table_name NOT LIKE '_dlt%'
+ORDER BY table_name;
+```
+
+### Vérifier dernière mise à jour
+
+```sql
+-- Dernière mesure piézométrique
+SELECT MAX(timestamp_mesure) AS derniere_mesure
+FROM hubeau.piezometry_chroniques;
+
+-- Dernière analyse qualité
+SELECT MAX(date_prelevement) AS dernier_prelevement
+FROM hubeau.quality_rivers_analyses;
+```
+
+### Statistiques qualité données
+
+```sql
+-- Distribution qualifications piézométrie
+SELECT
+    code_qualification,
+    COUNT(*) AS nb_mesures,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct
+FROM hubeau.piezometry_chroniques
+GROUP BY code_qualification
+ORDER BY nb_mesures DESC;
+```
+
+### Stations avec données récentes
+
+```sql
+-- Stations piézo actives (mesures < 30 jours)
+SELECT
+    s.code_bss,
+    s.libelle_pe,
+    MAX(c.timestamp_mesure) AS derniere_mesure,
+    COUNT(*) AS nb_mesures_30j
+FROM hubeau.piezometry_stations s
+JOIN hubeau.piezometry_chroniques c USING (code_bss)
+WHERE c.timestamp_mesure >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY s.code_bss, s.libelle_pe
+HAVING COUNT(*) > 0
+ORDER BY derniere_mesure DESC;
 ```
 
 ---
@@ -692,12 +479,11 @@ ANALYZE silver.hydrometrie_stations;
 ## Ressources
 
 - **PostgreSQL 16** : https://www.postgresql.org/docs/16/
-- **PostGIS 3.4** : https://postgis.net/docs/
-- **Apache Parquet** : https://parquet.apache.org/docs/
-- **MinIO** : https://min.io/docs/minio/linux/index.html
-- **DuckDB** : https://duckdb.org/docs/
+- **PostGIS** : https://postgis.net/docs/
+- **DLT** : https://dlthub.com/docs
+- **Hub'Eau APIs** : https://hubeau.eaufrance.fr/
 
 ---
 
-**Architecture Actuelle** : Bronze (MinIO Parquet) → Silver/Gold (PostgreSQL + PostGIS)
-**Simple, Éprouvée, Performante** 🌊
+**Architecture Simple** : Hub'Eau APIs → DLT → PostgreSQL
+**Un schéma, 22 tables, zéro transformation** 🌊

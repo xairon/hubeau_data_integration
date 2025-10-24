@@ -175,7 +175,99 @@ docker exec brgm-postgres psql -U postgres -c "SELECT version();"
 docker logs brgm-dlt-worker --tail 50
 ```
 
+## Gestion Base de Données Existante
+
+### Message PostgreSQL Normal
+
+Lors du démarrage Docker Compose, PostgreSQL affiche :
+
+```
+PostgreSQL Database directory appears to contain a database; Skipping initialization
+```
+
+### ✅ Ce Message est NORMAL et ATTENDU
+
+**Explication** :
+- PostgreSQL détecte que `/var/lib/postgresql/data` contient déjà une base
+- Les scripts d'init (`01_init_minimal.sql`, `99-verify-initialization.sql`) sont **skip**
+- PostgreSQL démarre directement avec la base existante
+- **Ce n'est PAS une erreur !** C'est le comportement standard de PostgreSQL.
+
+### Comportement selon État Base
+
+| État Base | Comportement Pipeline | Action |
+|-----------|----------------------|--------|
+| **Nouvelle** (vide) | Scripts init exécutés → Schéma `hubeau` créé → PostGIS activé | Aucune |
+| **Existe, schéma OK** | Scripts skip → Schéma `hubeau` utilisé directement | Aucune |
+| **Existe, tables OK** | MERGE/UPSERT des données | Aucune |
+| **Existe, tables manquantes** | Création automatique des tables manquantes par DLT | Aucune |
+| **Existe, schéma manquant** | ❌ Erreur DLT (schema not found) | Exécuter `01_init_minimal.sql` manuellement |
+
+### Vérification Santé Base
+
+```bash
+# Accéder au conteneur PostgreSQL
+docker exec -it brgm-postgres psql -U postgres -d postgres
+
+# Vérifier schéma hubeau
+\dn hubeau
+# Résultat attendu:
+#   List of schemas
+#   Name   |  Owner
+# ---------+----------
+#  hubeau  | postgres
+
+# Lister tables Hub'Eau
+\dt hubeau.*
+# Si aucune table: NORMAL! Tables créées au premier run d'asset DLT
+```
+
+### Reset Base (Dev Local)
+
+**Supprimer la base complètement** :
+```bash
+# ATTENTION: Supprime toutes les données!
+docker compose down -v
+docker compose up -d
+```
+
+**Garder la base, reset seulement les tables Hub'Eau** :
+```bash
+./scripts/reset_postgres_schema.sh
+```
+
+### Migration Production
+
+**Attention** : Ne JAMAIS utiliser `docker compose down -v` en production !
+
+**Backup avant migration** :
+```bash
+# Backup complet base Hub'Eau
+docker exec brgm-postgres pg_dump -U postgres -d postgres > backup_hubeau_$(date +%Y%m%d).sql
+
+# Backup seulement schéma hubeau
+docker exec brgm-postgres pg_dump -U postgres -d postgres -n hubeau > backup_hubeau_schema_$(date +%Y%m%d).sql
+
+# Restauration si besoin
+docker exec -i brgm-postgres psql -U postgres -d postgres < backup_hubeau_20241024.sql
+```
+
 ## Troubleshooting
+
+### "Database directory appears to contain a database"
+
+✅ **Ce n'est PAS une erreur !**
+
+Ce message est **normal** et signifie que la base existe déjà. Ignorez-le si les conteneurs démarrent correctement.
+
+**Vérifier que tout fonctionne** :
+```bash
+# Tous les conteneurs sont healthy?
+docker compose ps
+
+# Worker DLT démarre bien?
+docker compose logs dlt_worker | tail -20
+```
 
 ### Erreur : "PG_PASSWORD not set"
 
@@ -189,7 +281,11 @@ docker logs brgm-dlt-worker --tail 50
 
 **Solution** :
 1. Vérifier le password dans `.env` ou GitLab Variables
-2. Si changé, supprimer le volume PostgreSQL et recréer
+2. Si changé, supprimer le volume PostgreSQL et recréer :
+   ```bash
+   docker compose down -v
+   docker compose up -d
+   ```
 
 ## Migration depuis ancienne configuration
 

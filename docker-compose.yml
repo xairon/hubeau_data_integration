@@ -1,27 +1,164 @@
-version: '3.8'
+# Docker Compose pour développement local
+# Usage: docker compose up -d
 
 services:
-  postgres:
-    image: postgres:15
-    container_name: brgm-postgres-1
+  # Base de données métadonnées Dagster
+  dagster_postgres:
+    image: postgres:16-alpine
+    container_name: brgm-dagster-postgres
     environment:
-      POSTGRES_USER: hubeau_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hubeau_password}
-      POSTGRES_DB: hubeau_db
+      POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD:-BrgmDagster2024!}
+      POSTGRES_DB: dagster
+    volumes:
+      - dagster_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres -d dagster"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Base de données Hub'Eau avec PostGIS
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: brgm-postgres
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-BrgmPostgres2024!}
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d
-      - ./docker/postgres.conf:/etc/postgresql/postgresql.conf:ro
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+      - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hubeau_user -d hubeau_db"]
+      test: ["CMD-SHELL","pg_isready -U postgres -d postgres"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # Worker DLT - Exécution des pipelines
+  dlt_worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    image: hubeau-worker:latest
+    container_name: brgm-dlt-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      PYTHONPATH: /app/src:/app
+      # Database credentials
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-postgres}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-BrgmPostgres2024!}
+      POSTGIS_HOST: ${POSTGIS_HOST:-postgres}
+      POSTGIS_PORT: ${POSTGIS_PORT:-5432}
+      POSTGIS_DB: ${POSTGIS_DB:-postgres}
+      POSTGIS_USER: ${POSTGIS_USER:-postgres}
+      POSTGIS_PASSWORD: ${PG_PASSWORD:-BrgmPostgres2024!}
+      # Hub'Eau schema
+      HUBEAU_SCHEMA: ${HUBEAU_SCHEMA:-hubeau}
+      # DLT PostgreSQL destination credentials
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: ${PG_DB:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: ${PG_USER:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD:-BrgmPostgres2024!}
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT:-5432}
+    volumes:
+      - ./src:/app/src
+      - ./configs:/app/configs:ro
+      - ./scripts:/app/scripts:ro
+      - ./dagster_home:/app/dagster_home:ro
+    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline"]
+    expose:
+      - "4000"  # GRPC API (internal)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 4000)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    restart: unless-stopped
+
+  # Dagster Webserver - Interface UI
+  dagster_webserver:
+    build:
+      context: .
+      dockerfile: docker/orchestrator/Dockerfile
+    image: hubeau-orchestrator:latest
+    container_name: brgm-dagster-webserver
+    depends_on:
+      dagster_postgres:
+        condition: service_healthy
+      dlt_worker:
+        condition: service_healthy
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-BrgmDagster2024!}
+      PYTHONPATH: /app
+      # Application database credentials (needed for resources.py module import)
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-BrgmPostgres2024!}
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./configs:/app/configs:ro
+    command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
+    ports:
+      - "8080:3000"
+    restart: unless-stopped
+
+  # Dagster Daemon - Orchestration (schedules, sensors)
+  dagster_daemon:
+    image: hubeau-orchestrator:latest
+    container_name: brgm-dagster-daemon
+    depends_on:
+      dagster_postgres:
+        condition: service_healthy
+      dlt_worker:
+        condition: service_healthy
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-BrgmDagster2024!}
+      PYTHONPATH: /app
+      # Application database credentials (needed for resources.py module import)
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-BrgmPostgres2024!}
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./configs:/app/configs:ro
+    command: ["dagster-daemon","run"]
+    restart: unless-stopped
+
+  # Adminer - Interface web PostgreSQL
+  adminer:
+    image: adminer:latest
+    container_name: brgm-adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
 
 volumes:
   postgres_data:
+    driver: local
+  dagster_pg_data:
     driver: local

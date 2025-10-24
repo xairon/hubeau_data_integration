@@ -120,7 +120,7 @@ Ce projet d'intégration Hub'Eau s'inscrit dans **l'axe EAU** du programme JUNON
 
 ## 🏗️ Architecture de Données - L'Entrepôt comme Fondation
 
-JUNON adopte une architecture **Medallion** (Bronze/Silver/Gold, pattern Databricks) avec une **couche ontologique supplémentaire** (extension custom pour le raisonnement sémantique).
+JUNON adopte une architecture **simple et pragmatique** avec une **couche ontologique** (extension pour le raisonnement sémantique).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -129,67 +129,60 @@ JUNON adopte une architecture **Medallion** (Bronze/Silver/Gold, pattern Databri
 │    🧠 Abstraction sémantique unifiée pour ML/BI/Simulation │
 └─────────────────────────────────────────────────────────────┘
                             ▲
-                            │ Mapping
+                            │ Mapping (Phase 2+)
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│                      COUCHE GOLD                            │
-│              (Agrégations métier, KPIs)                     │
+│                   TRANSFORMATIONS (futures)                 │
+│         (Analytics, agrégations, features ML)               │
 │    📊 Métriques DCE, Bilans bassins, Tendances qualité     │
+│         🔧 Technologies: dbt, SQL, Python                   │
 └─────────────────────────────────────────────────────────────┘
                             ▲
-                            │ Transformation
+                            │ Phase 2 (3-6 mois)
                             │
 ┌─────────────────────────────────────────────────────────────┐
-│                     COUCHE SILVER                           │
-│       (Nettoyage, harmonisation, enrichissement)           │
-│    🧹 Normalisation schémas, géocodage, calculs dérivés    │
-└─────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ Ingestion
-                            │
-┌─────────────────────────────────────────────────────────────┐
-│                     COUCHE BRONZE                           │
-│              (Données brutes Hub'Eau APIs)                  │
-│    📥 DLT pipelines, déduplication, partitionnement annuel  │
+│              POSTGRESQL - Entrepôt Unique                   │
+│              (Données Hub'Eau consolidées)                  │
+│    📥 Ingestion directe: Hub'Eau APIs → DLT → PostgreSQL   │
+│    ✅ 22 tables, 1 schéma (hubeau), déduplication auto     │
+│    🌊 3 modes: FULL / YEAR / INCREMENTAL                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Couche Bronze (Actuelle - ✅ Implémentée)
+### Phase 1 : Ingestion PostgreSQL (Actuelle - ✅ Implémentée)
 
-- **Objectif** : Ingestion brute fidèle aux APIs source
-- **Technologies** : DLT (Data Load Tool), Dagster, MinIO/S3
+- **Objectif** : Consolider toutes les données Hub'Eau dans PostgreSQL
+- **Technologies** : DLT (Data Load Tool), Dagster, PostgreSQL 16
 - **Fonctionnalités** :
-  - ✅ Pagination intelligente (gestion limites 20K/10K)
-  - ✅ Slicing par département/station/temps
-  - ✅ Déduplication automatique (mode merge)
-  - ✅ Chargement incrémental avec lookback
-  - ✅ Partitionnement annuel (2020-2025)
-  - ✅ Format Parquet optimisé
+  - ✅ Ingestion directe CSV → PostgreSQL (pas de stockage intermédiaire)
+  - ✅ 22 tables dans schéma unique `hubeau`
+  - ✅ Déduplication automatique (MERGE/UPSERT sur clés primaires)
+  - ✅ 3 modes d'ingestion : FULL (historique complet), YEAR (année spécifique), INCREMENTAL (derniers N jours)
+  - ✅ Orchestration Dagster avec jobs par API
+  - ✅ Monitoring et sensors d'erreurs
+  - ✅ PostGIS activé pour géométries
 
-### Couche Silver (🚧 Prochaine étape)
+### Phase 2 : Transformations Analytics (🚧 Prochaine étape - 3-6 mois)
 
-- **Objectif** : Harmoniser les schémas hétérogènes
+- **Objectif** : Créer des vues/tables analytics pour BI et ML
+- **Technologies envisagées** : dbt (data build tool), SQL, Python
 - **Transformations prévues** :
-  - Normalisation des noms de colonnes (snake_case unifié)
-  - Enrichissement géographique (bassins, masses d'eau)
-  - Calcul de métriques dérivées (indices qualité, statistiques)
-  - Résolution des référentiels (codes → libellés)
-  - Détection et marquage des anomalies
-
-### Couche Gold (📋 Planifiée)
-
-- **Objectif** : Agrégations orientées métier
-- **Contenus prévus** :
+  - Vues matérialisées pour agrégations temporelles (moyennes mensuelles, annuelles)
   - Métriques DCE (Directive Cadre sur l'Eau)
-  - Bilans par bassin versant
-  - Tendances long terme (évolution qualité, niveaux)
-  - Tableaux de bord pré-calculés
+  - Features ML (indicateurs qualité, tendances, anomalies)
+  - Enrichissement géographique (jointures avec référentiels SANDRE)
+  - Calculs dérivés (indices qualité, statistiques descriptives)
 
-### Couche Ontologique (🎯 Vision)
+**Note** : Cette phase sera lancée quand des besoins analytics concrets émergeront. Pour l'instant, Phase 1 = consolider l'ingestion.
 
-- **Objectif** : Abstraction sémantique unifiée
-- **Rôle** : Connecter toutes les dimensions via ontologie SOSA
-- **Usage** : Base pour ML, BI, simulation
+### Phase 3 : Couche Ontologique (🎯 Vision long-terme)
+
+- **Objectif** : Abstraction sémantique unifiée via graphe de connaissances
+- **Rôle** : Connecter toutes les dimensions via ontologie SOSA/SANDRE
+- **Usage** : Base pour raisonnement sémantique, ML explicable, simulation
+- **Technologies** : RDF, SPARQL, GraphDB ou Virtuoso
+
+**Note** : Cette phase permettra le raisonnement sémantique et l'interopérabilité avec d'autres systèmes environnementaux.
 
 ---
 

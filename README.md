@@ -91,9 +91,63 @@ Voir [Documentation complète](docs/MODES_INGESTION.md)
 - [Modes d'ingestion](docs/MODES_INGESTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Schéma base de données](docs/SCHEMA_BDD.md)
+- [Création automatique de schéma](docs/AUTO_SCHEMA_CREATION.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [APIs Hub'Eau](docs/APIS_HUBEAU.md)
 - [Projet JUNON](docs/PROJET_JUNON_VISION.md)
+
+## Troubleshooting
+
+### "Database directory appears to contain a database"
+
+✅ **Ce n'est PAS une erreur !**
+
+Ce message PostgreSQL est **normal** et signifie que la base existe déjà. PostgreSQL skip l'init, c'est attendu.
+
+**Actions** :
+- Si les conteneurs démarrent → Tout va bien, ignorer le message
+- Si le worker `brgm-dlt-worker` est unhealthy → Vérifier les logs : `docker compose logs dlt_worker`
+
+### Container `dlt_worker` unhealthy
+
+**Causes possibles** :
+1. Port 4000 déjà utilisé
+2. Erreur Python au démarrage
+3. PostgreSQL pas accessible
+
+**Diagnostic** :
+```bash
+docker compose logs dlt_worker
+docker compose ps
+```
+
+**Solution** :
+```bash
+docker compose down
+docker compose up -d
+```
+
+### Reset complet de la base
+
+**ATTENTION** : Supprime toutes les données !
+
+```bash
+docker compose down -v  # Supprime volumes Docker
+docker compose up -d    # Recréation complète
+```
+
+### Vérification santé services
+
+```bash
+# Script automatique
+./scripts/check_services.sh
+
+# Manuel
+docker compose ps
+
+# Logs d'un service
+docker compose logs -f dlt_worker
+```
 
 ## License
 
