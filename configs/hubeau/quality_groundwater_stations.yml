@@ -9,7 +9,7 @@ extraction:
 performance:
   parallelism: 5
   chunk_size: 10000
-  batch_size: 1000
+  batch_size: 10000  # Optimisé avec micro-batching (10x augmentation - safe)
   retry_times: 3
   retry_delay: 2.0
   rate_limit: 2.0

@@ -152,6 +152,58 @@ def count_rows_in_postgres(table_name: str, pg: PostgreSQLResource, schema: str 
         return 0
 
 
+def log_memory_usage(context: AssetExecutionContext, label: str):
+    """
+    Log la consommation mémoire actuelle du process
+
+    Nécessite: pip install psutil (déjà dans requirements.txt normalement)
+
+    Args:
+        context: Contexte Dagster pour logging
+        label: Label descriptif pour le log
+    """
+    try:
+        import psutil
+        import os
+
+        process = psutil.Process(os.getpid())
+        mem_mb = process.memory_info().rss / 1024 / 1024
+        context.log.info(f"[MEM] {label}: {mem_mb:.1f} MB")
+    except ImportError:
+        # psutil pas installé, skip silencieusement
+        pass
+    except Exception as e:
+        # Autre erreur, log warning mais ne crash pas
+        context.log.warning(f"[MEM] Erreur monitoring mémoire: {e}")
+
+
+def batch_iterator_with_flush(source, batch_size: int, micro_batch_size: int):
+    """
+    Generator qui yield des micro-batches au lieu d'accumuler en RAM
+
+    Args:
+        source: Iterator de records (dict)
+        batch_size: Taille batch cible pour métrique (info only)
+        micro_batch_size: Taille réelle des micro-batches yield
+
+    Yields:
+        List[Dict] de taille micro_batch_size (sauf dernier)
+    """
+    micro_batch = []
+
+    for record in source:
+        micro_batch.append(record)
+
+        # Yield quand micro-batch plein
+        if len(micro_batch) >= micro_batch_size:
+            yield micro_batch
+            micro_batch = []  # Reset immédiat
+
+    # Yield reste (< micro_batch_size)
+    if micro_batch:
+        yield micro_batch
+
+
 def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_station_slicing: bool = False):
     """
     Factory pour creer un asset DLT CSV multi-mode
@@ -291,8 +343,8 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             use_station_slicing=use_station_slicing
         )
 
-        # ✅ OPTIMISATION MÉMOIRE: Streaming par batch au lieu de pipeline.run()
-        # Évite d'accumuler tous les records en RAM avant écriture PostgreSQL
+        # ✅ OPTIMISATION MÉMOIRE V2: Micro-batching + Chunking + Generator pattern
+        # Évite accumulation RAM en flushant toutes les 1000 records
         start_time = time.time()
 
         try:
@@ -307,100 +359,91 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             # Déterminer write_disposition: replace pour mode full, append sinon
             write_disposition = "replace" if config.mode == "full" else "append"
 
-            # ✅ BATCH_SIZE depuis YAML config (évite OOM sur VPS 3GB RAM)
-            # Batch sizes optimisés par essai-erreur après crashes SIGKILL
-            # Voir configs/hubeau/*.yml → performance.batch_size
+            # ✅ BATCH_SIZE depuis YAML config - désormais AUGMENTÉ car mémoire sécurisée par micro-batching
+            # Voir configs/hubeau/*.yml → performance.batch_size (augmenté de 3-10x vs anciennes valeurs)
             BATCH_SIZE = yaml_config['performance'].get('batch_size', 50000)
 
+            # ✅ MICRO_BATCH_SIZE: Flush PostgreSQL toutes les N records pour économiser RAM
+            # RAM peak = micro_batch_size × ~1KB/record = 1000 × 1KB = ~1 MB (au lieu de 50 MB avant)
+            MICRO_BATCH_SIZE = 1000
+
             # Log niveau selon batch size
-            if BATCH_SIZE <= 1000:
-                context.log.warning(f"Dataset ultra-critique OOM: {resource_name} → BATCH_SIZE={BATCH_SIZE:,}")
-            elif BATCH_SIZE <= 5000:
-                context.log.warning(f"Dataset tres volumineux: {resource_name} → BATCH_SIZE={BATCH_SIZE:,}")
-            elif BATCH_SIZE <= 8000:
-                context.log.info(f"Dataset volumineux: {resource_name} → BATCH_SIZE={BATCH_SIZE:,}")
+            if BATCH_SIZE <= 5000:
+                context.log.info(f"Dataset: {resource_name} → BATCH_SIZE={BATCH_SIZE:,} (micro-batch={MICRO_BATCH_SIZE})")
+            elif BATCH_SIZE <= 20000:
+                context.log.info(f"Dataset moyen: {resource_name} → BATCH_SIZE={BATCH_SIZE:,} (micro-batch={MICRO_BATCH_SIZE})")
             else:
-                context.log.info(f"BATCH_SIZE={BATCH_SIZE:,}")
+                context.log.info(f"Dataset large (optimisé): {resource_name} → BATCH_SIZE={BATCH_SIZE:,} (micro-batch={MICRO_BATCH_SIZE})")
 
-            context.log.info(f"📥 Streaming par batch (BATCH_SIZE={BATCH_SIZE:,}, disposition={write_disposition})...")
-            batch = []
+            context.log.info(f"📥 Streaming par micro-batch (BATCH={BATCH_SIZE:,}, MICRO={MICRO_BATCH_SIZE}, disposition={write_disposition})...")
+
+            # Log mémoire initiale
+            log_memory_usage(context, "Avant ingestion")
+
             total_records = 0
-            batch_count = 0
+            micro_batch_count = 0
+            is_first_write = True  # Track first write for TRUNCATE (si replace)
 
-            for record in source:
-                batch.append(record)
+            # ✅ GENERATOR PATTERN: Pas d'accumulation, yield au fur et à mesure
+            for micro_batch in batch_iterator_with_flush(source, BATCH_SIZE, MICRO_BATCH_SIZE):
+                micro_batch_count += 1
 
-                # Charger quand le batch est plein
-                if len(batch) >= BATCH_SIZE:
-                    batch_count += 1
+                # Premier micro-batch: utiliser write_disposition original (TRUNCATE si replace)
+                # Micro-batchs suivants: toujours append
+                batch_write_disposition = write_disposition if is_first_write else "append"
+                is_first_write = False
 
-                    # Premier batch: utiliser write_disposition original
-                    # Batchs suivants: toujours append (si replace, déjà tronqué au batch 1)
-                    batch_write_disposition = write_disposition if batch_count == 1 else "append"
-
-                    context.log.info(f"💾 Batch {batch_count}: Chargement de {len(batch):,} records (mode: {batch_write_disposition})...")
-
-                    load_start = time.time()
-                    postgres_bulk_destination.load_batch(
-                        table_name=table_name,
-                        data=batch,
-                        write_disposition=batch_write_disposition,
-                        primary_keys=primary_keys if primary_keys else None,
-                        column_mappings=None
-                    )
-                    load_duration = time.time() - load_start
-
-                    total_records += len(batch)
-                    throughput = len(batch) / load_duration if load_duration > 0 else 0
-                    context.log.info(f"✅ Batch {batch_count}: {len(batch):,} records chargés en {load_duration:.2f}s ({throughput:.0f} rec/s)")
-
-                    # Vider le batch
-                    batch = []
-
-                    # GARBAGE COLLECTION AGRESSIF pour libérer RAM immédiatement
-                    import gc
-                    gc.collect()
-
-            # Charger le dernier batch (reste)
-            if batch:
-                batch_count += 1
-                batch_write_disposition = write_disposition if batch_count == 1 else "append"
-
-                context.log.info(f"💾 Batch {batch_count} (final): Chargement de {len(batch):,} records (mode: {batch_write_disposition})...")
+                # Log tous les 10 micro-batches (évite spam)
+                if micro_batch_count % 10 == 0:
+                    context.log.info(f"💾 Micro-batch {micro_batch_count}: {len(micro_batch):,} records (cumul: {total_records:,})")
 
                 load_start = time.time()
                 postgres_bulk_destination.load_batch(
                     table_name=table_name,
-                    data=batch,
+                    data=micro_batch,
                     write_disposition=batch_write_disposition,
                     primary_keys=primary_keys if primary_keys else None,
                     column_mappings=None
                 )
                 load_duration = time.time() - load_start
 
-                total_records += len(batch)
-                throughput = len(batch) / load_duration if load_duration > 0 else 0
-                context.log.info(f"✅ Batch {batch_count}: {len(batch):,} records chargés en {load_duration:.2f}s ({throughput:.0f} rec/s)")
+                total_records += len(micro_batch)
+
+                # Log verbose pour premiers/derniers micro-batches
+                if micro_batch_count <= 3 or micro_batch_count % 50 == 0:
+                    throughput = len(micro_batch) / load_duration if load_duration > 0 else 0
+                    context.log.info(f"✅ Micro-batch {micro_batch_count}: {len(micro_batch):,} records en {load_duration:.2f}s ({throughput:.0f} rec/s)")
+
+                # GARBAGE COLLECTION AGRESSIF après chaque micro-batch
+                import gc
+                gc.collect()
+
+                # Log mémoire tous les 50 micro-batches
+                if micro_batch_count % 50 == 0:
+                    log_memory_usage(context, f"Après {micro_batch_count} micro-batches")
 
             elapsed = time.time() - start_time
+
+            # Log mémoire finale
+            log_memory_usage(context, "Après ingestion complète")
 
             # Log résultats finaux
             if total_records > 0:
                 global_throughput = total_records / elapsed if elapsed > 0 else 0
                 context.log.info(f"✅ Extraction et chargement terminés en {elapsed:.2f}s")
-                context.log.info(f"📊 Total: {total_records:,} records en {batch_count} batch(s)")
+                context.log.info(f"📊 Total: {total_records:,} records en {micro_batch_count} micro-batch(s)")
                 context.log.info(f"⚡ Performance globale: {global_throughput:.0f} records/seconde")
             else:
                 context.log.warning(f"⚠️  Table {table_name} vide après ingestion ! Vérifier: API Hub'Eau, filtres date, ou réseau.")
 
             return Output(
-                value={"records": total_records, "batches": batch_count},
+                value={"records": total_records, "batches": micro_batch_count},
                 metadata={
                     "mode": MetadataValue.text(config.mode),
                     "year": MetadataValue.int(config.year) if config.year else None,
                     "incremental_days": MetadataValue.int(config.incremental_days) if config.mode == "incremental" else None,
                     "rows_loaded": MetadataValue.int(total_records),
-                    "batch_count": MetadataValue.int(batch_count),
+                    "batch_count": MetadataValue.int(micro_batch_count),
                     "duration_seconds": MetadataValue.float(round(elapsed, 2)),
                     "throughput_rows_per_sec": MetadataValue.float(round(total_records/elapsed, 2)) if elapsed > 0 else None
                 }

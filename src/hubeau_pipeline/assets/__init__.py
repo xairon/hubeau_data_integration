@@ -34,7 +34,33 @@ from .hubeau_assets import (
     prelevements_ouvrages_csv,
 )
 from .monitoring import all_monitoring_assets
-from .schema_optimization import optimize_hubeau_schema, analyze_table_schema
+from .schema_optimization import (
+    optimize_hubeau_schema,
+    analyze_table_schema,
+    # Assets d'optimisation automatique par table
+    piezometry_chroniques_schema_optimized,
+    quality_groundwater_analyses_schema_optimized,
+    quality_rivers_analyses_schema_optimized,
+    quality_rivers_conditions_schema_optimized,
+    quality_rivers_operations_schema_optimized,
+    temperature_chroniques_schema_optimized,
+    hydrometry_obs_elab_schema_optimized,
+    hydrobio_indices_schema_optimized,
+    hydrobio_taxons_schema_optimized,
+    ecoulement_observations_schema_optimized,
+    prelevements_chroniques_schema_optimized,
+    piezometry_stations_schema_optimized,
+    quality_groundwater_stations_schema_optimized,
+    quality_rivers_stations_schema_optimized,
+    temperature_stations_schema_optimized,
+    hydrometry_sites_schema_optimized,
+    hydrometry_stations_schema_optimized,
+    hydrobio_stations_schema_optimized,
+    ecoulement_stations_schema_optimized,
+    ecoulement_campagnes_schema_optimized,
+    prelevements_points_schema_optimized,
+    prelevements_ouvrages_schema_optimized,
+)
 
 # Tous les assets Hub'Eau
 all_hubeau_assets = [
@@ -68,6 +94,29 @@ all_hubeau_assets = [
 all_schema_assets = [
     optimize_hubeau_schema,
     analyze_table_schema,
+    # Assets d'optimisation automatique par table (22 assets)
+    piezometry_chroniques_schema_optimized,
+    quality_groundwater_analyses_schema_optimized,
+    quality_rivers_analyses_schema_optimized,
+    quality_rivers_conditions_schema_optimized,
+    quality_rivers_operations_schema_optimized,
+    temperature_chroniques_schema_optimized,
+    hydrometry_obs_elab_schema_optimized,
+    hydrobio_indices_schema_optimized,
+    hydrobio_taxons_schema_optimized,
+    ecoulement_observations_schema_optimized,
+    prelevements_chroniques_schema_optimized,
+    piezometry_stations_schema_optimized,
+    quality_groundwater_stations_schema_optimized,
+    quality_rivers_stations_schema_optimized,
+    temperature_stations_schema_optimized,
+    hydrometry_sites_schema_optimized,
+    hydrometry_stations_schema_optimized,
+    hydrobio_stations_schema_optimized,
+    ecoulement_stations_schema_optimized,
+    ecoulement_campagnes_schema_optimized,
+    prelevements_points_schema_optimized,
+    prelevements_ouvrages_schema_optimized,
 ]
 
 # Tous les assets du pipeline

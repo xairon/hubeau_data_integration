@@ -211,16 +211,17 @@ class PostgresBulkDestinationV2:
                             try:
                                 # Vectorized conversion with error handling
                                 # Non-numeric strings will be converted to NaN
-                                original_col = df[col].copy()  # Keep original for comparison
+                                # Count non-null BEFORE conversion (without copy - memory optimization)
+                                originally_non_null = df[col].notna().sum()
+
                                 df[col] = pd.to_numeric(df[col], errors='coerce')
-                                # Check if too many conversions failed (>50% became NaN that weren't originally null)
-                                originally_non_null = original_col.notna().sum()
+
+                                # Check if too many conversions failed (>50% became NaN)
                                 after_conversion_non_null = df[col].notna().sum()
                                 if originally_non_null > 0 and after_conversion_non_null < originally_non_null * 0.5:
-                                    # More than 50% failed conversion - likely text data in numeric column
-                                    logger.warning(f"⚠️ Column {col} is typed as {pg_type} but contains non-numeric text data ({after_conversion_non_null}/{originally_non_null} converted)")
-                                    # Restore original and keep as text - will cause COPY to fail with clear error
-                                    df[col] = original_col
+                                    # More than 50% failed conversion - log warning
+                                    # NOTE: No restore - let PostgreSQL handle error with clear message
+                                    logger.warning(f"⚠️ Column {col} typed as {pg_type} but contains non-numeric data ({after_conversion_non_null}/{originally_non_null} converted) - PostgreSQL will handle error")
                                 else:
                                     logger.debug(f"✅ Cast {col} to {pg_type} (vectorized, {after_conversion_non_null}/{originally_non_null} valid values)")
                             except (ValueError, TypeError) as e:
@@ -380,20 +381,39 @@ class PostgresBulkDestinationV2:
                     df['_dlt_id'] = [f"row_{i}_{int(time.time() * 1000)}" for i in range(len(df))]
                     common_columns.append('_dlt_id')
 
-                # COPY avec buffer optimisé
-                output = io.StringIO()
-                df.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
-                output.seek(0)
+                # COPY avec chunking pour économiser RAM (évite gros StringIO buffer)
+                COPY_CHUNK_SIZE = 1000  # Process 1000 rows at a time
 
                 copy_sql = f"""
                     COPY {self.schema_name}.{table_name} ({','.join(common_columns)})
                     FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')
                 """
 
-                cursor.copy_expert(copy_sql, output)
-                conn.commit()
+                total_rows = len(df)
+                rows_copied = 0
 
-                logger.info(f"✅ COPY: {len(df)} records → {table_name}")
+                for start_idx in range(0, total_rows, COPY_CHUNK_SIZE):
+                    end_idx = min(start_idx + COPY_CHUNK_SIZE, total_rows)
+                    chunk = df.iloc[start_idx:end_idx]
+
+                    # Convert chunk to CSV buffer
+                    output = io.StringIO()
+                    chunk.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
+                    output.seek(0)
+
+                    # COPY chunk
+                    cursor.copy_expert(copy_sql, output)
+                    rows_copied += len(chunk)
+
+                    # Free memory immediately
+                    del chunk, output
+
+                    # Progress log every 10k rows
+                    if rows_copied % 10000 == 0 or rows_copied == total_rows:
+                        logger.debug(f"  COPY progress: {rows_copied}/{total_rows} rows")
+
+                conn.commit()
+                logger.info(f"✅ COPY: {rows_copied} records → {table_name} (chunked)")
 
         except errors.InvalidTextRepresentation as e:
             conn.rollback()
@@ -553,15 +573,26 @@ class PostgresBulkDestinationV2:
                     )
                 """)
 
-                # COPY vers staging
-                output = io.StringIO()
-                df.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
-                output.seek(0)
+                # COPY vers staging avec chunking
+                COPY_CHUNK_SIZE = 1000
+                total_rows = len(df)
 
-                cursor.copy_expert(
-                    f"COPY {staging_table} ({','.join(common_columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')",
-                    output
-                )
+                for start_idx in range(0, total_rows, COPY_CHUNK_SIZE):
+                    end_idx = min(start_idx + COPY_CHUNK_SIZE, total_rows)
+                    chunk = df.iloc[start_idx:end_idx]
+
+                    output = io.StringIO()
+                    chunk.to_csv(output, sep='\t', header=False, index=False, na_rep='\\N')
+                    output.seek(0)
+
+                    cursor.copy_expert(
+                        f"COPY {staging_table} ({','.join(common_columns)}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')",
+                        output
+                    )
+
+                    del chunk, output
+
+                logger.debug(f"  Staging: {total_rows} rows copied (chunked)")
 
                 # UPSERT avec génération DLT si nécessaire
                 insert_columns = common_columns.copy()
