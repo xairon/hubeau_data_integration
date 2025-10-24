@@ -178,13 +178,14 @@ class PostgresBulkDestinationV2:
                     # Cast integer types (integer, bigint, smallint)
                     if pg_type in ['integer', 'bigint', 'smallint']:
                         # Convert float strings like "1.0" to integers
-                        if df[col].dtype in ['object', 'float64']:
+                        if df[col].dtype in ['object', 'float64', 'float32']:
                             try:
-                                # Replace NaN/None with None, convert others to int
-                                df[col] = df[col].apply(
-                                    lambda x: None if pd.isna(x) or x == '' else int(float(x))
-                                )
-                                logger.debug(f"✅ Cast {col} to {pg_type}")
+                                # Vectorized conversion: empty string → NaN, float string → int
+                                # Use pd.to_numeric for vectorized conversion
+                                df[col] = pd.to_numeric(df[col], errors='coerce')  # Convert to float, invalid → NaN
+                                df[col] = df[col].fillna(pd.NA)  # NaN → pandas NA
+                                df[col] = df[col].astype('Int64')  # Convert to nullable integer (handles NA)
+                                logger.debug(f"✅ Cast {col} to {pg_type} (vectorized)")
                             except (ValueError, TypeError) as e:
                                 logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
 
@@ -192,10 +193,20 @@ class PostgresBulkDestinationV2:
                     elif pg_type in ['double precision', 'real', 'numeric']:
                         if df[col].dtype == 'object':
                             try:
-                                df[col] = df[col].apply(
-                                    lambda x: None if pd.isna(x) or x == '' else float(x)
-                                )
-                                logger.debug(f"✅ Cast {col} to {pg_type}")
+                                # Vectorized conversion with error handling
+                                # Non-numeric strings will be converted to NaN
+                                original_col = df[col].copy()  # Keep original for comparison
+                                df[col] = pd.to_numeric(df[col], errors='coerce')
+                                # Check if too many conversions failed (>50% became NaN that weren't originally null)
+                                originally_non_null = original_col.notna().sum()
+                                after_conversion_non_null = df[col].notna().sum()
+                                if originally_non_null > 0 and after_conversion_non_null < originally_non_null * 0.5:
+                                    # More than 50% failed conversion - likely text data in numeric column
+                                    logger.warning(f"⚠️ Column {col} is typed as {pg_type} but contains non-numeric text data ({after_conversion_non_null}/{originally_non_null} converted)")
+                                    # Restore original and keep as text - will cause COPY to fail with clear error
+                                    df[col] = original_col
+                                else:
+                                    logger.debug(f"✅ Cast {col} to {pg_type} (vectorized, {after_conversion_non_null}/{originally_non_null} valid values)")
                             except (ValueError, TypeError) as e:
                                 logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
 
@@ -464,13 +475,27 @@ class PostgresBulkDestinationV2:
             self._release_connection(conn)
 
     def _truncate_cascade(self, table_name: str):
-        """TRUNCATE avec connexion du pool"""
+        """TRUNCATE avec connexion du pool - check if table exists first"""
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(f"TRUNCATE TABLE {self.schema_name}.{table_name} CASCADE")
-                conn.commit()
-                logger.info(f"✅ TRUNCATE CASCADE: {table_name}")
+                # Check if table exists before TRUNCATE
+                cursor.execute(f"""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = %s AND table_name = %s
+                    )
+                """, (self.schema_name, table_name))
+
+                table_exists = cursor.fetchone()[0]
+
+                if table_exists:
+                    cursor.execute(f"TRUNCATE TABLE {self.schema_name}.{table_name} CASCADE")
+                    conn.commit()
+                    logger.info(f"✅ TRUNCATE CASCADE: {table_name}")
+                else:
+                    logger.warning(f"⚠️ Table {self.schema_name}.{table_name} n'existe pas - skip TRUNCATE")
+                    # Table will be created by first COPY operation
         finally:
             self._release_connection(conn)
 
