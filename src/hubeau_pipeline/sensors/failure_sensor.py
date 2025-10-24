@@ -43,11 +43,12 @@ def pipeline_failure_alert_sensor(context: SensorEvaluationContext):
     for run in failed_runs:
         job_name = run.job_name
         run_id = run.run_id
-        created_at = run.created_at
+        # Note: created_at deprecated in Dagster 1.11, use create_timestamp instead
+        created_timestamp = run.create_timestamp if hasattr(run, 'create_timestamp') else run.start_time
 
         context.log.error(
             f"❌ ÉCHEC DÉTECTÉ - Job: {job_name}, Run ID: {run_id}, "
-            f"Créé le: {created_at}"
+            f"Créé le: {datetime.fromtimestamp(created_timestamp) if created_timestamp else 'unknown'}"
         )
 
         # TODO: Envoyer notification Slack
