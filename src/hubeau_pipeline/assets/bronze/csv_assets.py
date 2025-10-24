@@ -303,23 +303,36 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             write_disposition = "replace" if config.mode == "full" else "append"
 
             # ✅ BATCH_SIZE dynamique selon la ressource pour éviter OOM
-            # Datasets volumineux/problématiques → batch plus petit (10k)
-            # Autres datasets → batch standard (50k)
-            PROBLEMATIC_RESOURCES = [
-                "hydrobio_stations",
+            # CRITICAL: VPS 3GB RAM limit - batch size must prevent accumulation > 2GB
+            # Python dict overhead: ~1KB per record → 5000 records = ~5MB
+
+            # Très volumineux (>50k records) → 5k batch
+            VERY_LARGE_RESOURCES = [
+                "quality_groundwater_stations",  # 81k records
+                "prelevements_points",            # 186k records
+                "prelevements_ouvrages",          # 168k records
+            ]
+
+            # Volumineux (>20k records) → 8k batch
+            LARGE_RESOURCES = [
+                "piezometry_stations",            # 23k records
+                "quality_rivers_stations",        # 24k records
+                "hydrobio_stations",              # 20k records
                 "hydrobio_indices",
                 "hydrobio_taxons",
                 "quality_rivers_analyses",
-                "prelevements_ouvrages",
                 "prelevements_chroniques",
                 "hydrometry_obs_elab"
             ]
 
-            if resource_name in PROBLEMATIC_RESOURCES:
-                BATCH_SIZE = 10000  # Batch réduit pour éviter OOM sur datasets volumineux
-                context.log.info(f"⚠️  Dataset volumineux détecté: {resource_name} → BATCH_SIZE réduit à 10,000")
+            if resource_name in VERY_LARGE_RESOURCES:
+                BATCH_SIZE = 5000  # Batch très réduit pour datasets >50k
+                context.log.info(f"⚠️  Dataset très volumineux: {resource_name} → BATCH_SIZE=5,000")
+            elif resource_name in LARGE_RESOURCES:
+                BATCH_SIZE = 8000  # Batch réduit pour datasets >20k
+                context.log.info(f"⚠️  Dataset volumineux: {resource_name} → BATCH_SIZE=8,000")
             else:
-                BATCH_SIZE = 50000  # Batch standard pour datasets plus petits
+                BATCH_SIZE = 50000  # Batch standard pour datasets <10k
 
             context.log.info(f"📥 Streaming par batch (BATCH_SIZE={BATCH_SIZE:,}, disposition={write_disposition})...")
             batch = []
