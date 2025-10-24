@@ -286,48 +286,102 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             use_station_slicing=use_station_slicing
         )
 
-        # Execution
+        # ✅ OPTIMISATION MÉMOIRE: Streaming par batch au lieu de pipeline.run()
+        # Évite d'accumuler tous les records en RAM avant écriture PostgreSQL
         start_time = time.time()
 
         try:
-            # Exécuter le pipeline DLT
-            # DLT va :
-            # 1. Recevoir les données depuis la source (Pandas a déjà inféré les types)
-            # 2. Créer les tables PostgreSQL automatiquement si elles n'existent pas
-            # 3. Insérer les données avec UPSERT (merge) basé sur primary_key
-            load_info = pipeline.run(source)
+            # Import de notre custom destination optimisée avec COPY PostgreSQL natif
+            from hubeau_pipeline.destinations.postgres_optimized_v2 import postgres_bulk_destination_v2 as postgres_bulk_destination
+
+            table_name = yaml_config['resource']['name']
+            primary_keys = yaml_config['resource'].get('primary_key', [])
+            if isinstance(primary_keys, str):
+                primary_keys = [primary_keys]
+
+            # Déterminer write_disposition: replace pour mode full, append sinon
+            write_disposition = "replace" if config.mode == "full" else "append"
+
+            context.log.info(f"📥 Streaming par batch (BATCH_SIZE=50000, disposition={write_disposition})...")
+
+            # Streaming par batch de 50k records (comme dlt_assets.py)
+            BATCH_SIZE = 50000
+            batch = []
+            total_records = 0
+            batch_count = 0
+
+            for record in source:
+                batch.append(record)
+
+                # Charger quand le batch est plein
+                if len(batch) >= BATCH_SIZE:
+                    batch_count += 1
+
+                    # Premier batch: utiliser write_disposition original
+                    # Batchs suivants: toujours append (si replace, déjà tronqué au batch 1)
+                    batch_write_disposition = write_disposition if batch_count == 1 else "append"
+
+                    context.log.info(f"💾 Batch {batch_count}: Chargement de {len(batch):,} records (mode: {batch_write_disposition})...")
+
+                    load_start = time.time()
+                    postgres_bulk_destination.load_batch(
+                        table_name=table_name,
+                        data=batch,
+                        write_disposition=batch_write_disposition,
+                        primary_keys=primary_keys if primary_keys else None,
+                        column_mappings=None
+                    )
+                    load_duration = time.time() - load_start
+
+                    total_records += len(batch)
+                    throughput = len(batch) / load_duration if load_duration > 0 else 0
+                    context.log.info(f"✅ Batch {batch_count}: {len(batch):,} records chargés en {load_duration:.2f}s ({throughput:.0f} rec/s)")
+
+                    # Vider le batch
+                    batch = []
+
+            # Charger le dernier batch (reste)
+            if batch:
+                batch_count += 1
+                batch_write_disposition = write_disposition if batch_count == 1 else "append"
+
+                context.log.info(f"💾 Batch {batch_count} (final): Chargement de {len(batch):,} records (mode: {batch_write_disposition})...")
+
+                load_start = time.time()
+                postgres_bulk_destination.load_batch(
+                    table_name=table_name,
+                    data=batch,
+                    write_disposition=batch_write_disposition,
+                    primary_keys=primary_keys if primary_keys else None,
+                    column_mappings=None
+                )
+                load_duration = time.time() - load_start
+
+                total_records += len(batch)
+                throughput = len(batch) / load_duration if load_duration > 0 else 0
+                context.log.info(f"✅ Batch {batch_count}: {len(batch):,} records chargés en {load_duration:.2f}s ({throughput:.0f} rec/s)")
+
             elapsed = time.time() - start_time
 
-            # ✅ FIX: Compter les lignes directement dans PostgreSQL
-            # car DLT load_info ne retourne pas toujours les métriques correctement
-            table_name = yaml_config['resource']['name']
-            context.log.info(f"🔍 Vérification des lignes chargées dans PostgreSQL...")
-
-            rows_loaded = count_rows_in_postgres(table_name)
-
-            # Log détaillé des résultats
-            throughput = rows_loaded / elapsed if elapsed > 0 else 0
-            context.log.info(
-                f"✅ Terminé: {rows_loaded:,} lignes en base PostgreSQL "
-                f"(durée: {elapsed:.2f}s, débit: {throughput:.1f} lignes/sec)"
-            )
-
-            # Alerter si table vide après ingestion
-            if rows_loaded == 0:
-                context.log.warning(
-                    f"⚠️  Table {table_name} vide après ingestion ! "
-                    f"Vérifier: API Hub'Eau, filtres date, ou réseau."
-                )
+            # Log résultats finaux
+            if total_records > 0:
+                global_throughput = total_records / elapsed if elapsed > 0 else 0
+                context.log.info(f"✅ Extraction et chargement terminés en {elapsed:.2f}s")
+                context.log.info(f"📊 Total: {total_records:,} records en {batch_count} batch(s)")
+                context.log.info(f"⚡ Performance globale: {global_throughput:.0f} records/seconde")
+            else:
+                context.log.warning(f"⚠️  Table {table_name} vide après ingestion ! Vérifier: API Hub'Eau, filtres date, ou réseau.")
 
             return Output(
-                value=load_info,
+                value={"records": total_records, "batches": batch_count},
                 metadata={
                     "mode": MetadataValue.text(config.mode),
                     "year": MetadataValue.int(config.year) if config.year else None,
                     "incremental_days": MetadataValue.int(config.incremental_days) if config.mode == "incremental" else None,
-                    "rows_loaded": MetadataValue.int(rows_loaded),
+                    "rows_loaded": MetadataValue.int(total_records),
+                    "batch_count": MetadataValue.int(batch_count),
                     "duration_seconds": MetadataValue.float(round(elapsed, 2)),
-                    "throughput_rows_per_sec": MetadataValue.float(round(rows_loaded/elapsed, 2)) if elapsed > 0 else None
+                    "throughput_rows_per_sec": MetadataValue.float(round(total_records/elapsed, 2)) if elapsed > 0 else None
                 }
             )
 
