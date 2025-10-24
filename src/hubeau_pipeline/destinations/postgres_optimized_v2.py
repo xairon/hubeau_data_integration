@@ -6,9 +6,10 @@ Performance: 100k records en 1-2 secondes (vs 2-3s avant, vs 5-10min DLT)
 import os
 import io
 import time
+import re
 import pandas as pd
 import psycopg2
-from psycopg2 import pool
+from psycopg2 import pool, errors
 from typing import Iterator, Any, Dict, List, Optional
 import logging
 from threading import Lock
@@ -374,6 +375,50 @@ class PostgresBulkDestinationV2:
                 conn.commit()
 
                 logger.info(f"✅ COPY: {len(df)} records → {table_name}")
+
+        except errors.InvalidTextRepresentation as e:
+            conn.rollback()
+
+            # Check if error is due to text in numeric column
+            error_msg = str(e)
+            if 'invalid input syntax for type' in error_msg and ('double precision' in error_msg or 'bigint' in error_msg or 'integer' in error_msg):
+                # Extract column name from error message
+                # Example: COPY table, line 854, column code_entite_hydro_cours_eau: "O07-0400"
+                match = re.search(r'column (\w+):', error_msg)
+                if match:
+                    problematic_column = match.group(1)
+                    logger.warning(f"🔧 Colonne {problematic_column} contient du texte mais est typée comme numérique - AUTO-FIX en TEXT")
+
+                    try:
+                        # ALTER column to TEXT
+                        with conn.cursor() as alter_cursor:
+                            alter_cursor.execute(f"""
+                                ALTER TABLE {self.schema_name}.{table_name}
+                                ALTER COLUMN {problematic_column} TYPE TEXT
+                            """)
+                            conn.commit()
+                            logger.info(f"✅ Colonne {problematic_column} convertie en TEXT")
+
+                            # Invalider le cache
+                            cache_key = f"{self.schema_name}.{table_name}_types"
+                            if cache_key in self._table_columns_cache:
+                                del self._table_columns_cache[cache_key]
+
+                            # RETRY COPY
+                            logger.info(f"🔄 Retry COPY après correction de schéma...")
+                            output.seek(0)  # Reset buffer
+                            cursor.copy_expert(copy_sql, output)
+                            conn.commit()
+                            logger.info(f"✅ COPY réussi: {len(df)} records → {table_name}")
+                            return  # Success après retry
+
+                    except Exception as alter_error:
+                        logger.error(f"❌ Erreur lors de l'ALTER: {alter_error}")
+                        raise e  # Re-raise original error
+
+            # Si pas une erreur de type connue, re-raise
+            logger.error(f"❌ Erreur COPY: {e}")
+            raise
 
         except Exception as e:
             conn.rollback()

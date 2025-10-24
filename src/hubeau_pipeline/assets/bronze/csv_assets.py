@@ -313,11 +313,16 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 "prelevements_ouvrages",          # 168k records
             ]
 
+            # Datasets critiques OOM (killed by SIGKILL) → 2k batch
+            CRITICAL_OOM_RESOURCES = [
+                "hydrobio_stations",              # 20k records - SIGKILL @ 8k batch
+                "quality_groundwater_stations",   # 81k records - SIGKILL @ 5k batch (beaucoup de colonnes)
+            ]
+
             # Volumineux (>20k records) → 8k batch
             LARGE_RESOURCES = [
                 "piezometry_stations",            # 23k records
                 "quality_rivers_stations",        # 24k records
-                "hydrobio_stations",              # 20k records
                 "hydrobio_indices",
                 "hydrobio_taxons",
                 "quality_rivers_analyses",
@@ -325,7 +330,10 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 "hydrometry_obs_elab"
             ]
 
-            if resource_name in VERY_LARGE_RESOURCES:
+            if resource_name in CRITICAL_OOM_RESOURCES:
+                BATCH_SIZE = 2000  # Batch ultra-réduit pour éviter OOM / SIGKILL
+                context.log.info(f"🚨 Dataset critique OOM: {resource_name} → BATCH_SIZE=2,000")
+            elif resource_name in VERY_LARGE_RESOURCES:
                 BATCH_SIZE = 5000  # Batch très réduit pour datasets >50k
                 context.log.info(f"⚠️  Dataset très volumineux: {resource_name} → BATCH_SIZE=5,000")
             elif resource_name in LARGE_RESOURCES:
