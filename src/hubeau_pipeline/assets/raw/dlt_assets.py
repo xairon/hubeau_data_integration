@@ -5,7 +5,7 @@ import io
 import logging
 
 import dlt
-from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition
+from dagster import AssetExecutionContext, asset, DailyPartitionsDefinition, StaticPartitionsDefinition, FreshnessPolicy
 
 from src.dlt_pipeline.hubeau_source import hubeau_rest_source, load_hubeau_config
 
@@ -35,6 +35,13 @@ from src.hubeau_pipeline.utils.station_postgres import (
 # La partition "all" permet de récupérer TOUTES les données sans filtre temporel
 YEARLY_PARTITIONS = StaticPartitionsDefinition(
     ["all"] + [str(year) for year in range(2020, 2026)]  # "all", 2020-2025
+)
+
+# Freshness policy pour assets historiques avec partitions
+# Alerte si données pas mises à jour depuis > 48h
+DLT_FRESHNESS_POLICY = FreshnessPolicy(
+    maximum_lag_minutes=60 * 48,  # 48 heures
+    cron_schedule="0 2 * * *",    # Vérifié quotidiennement à 02h00
 )
 
 # ====================================
@@ -676,28 +683,48 @@ def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, 
 # NOUVEAUX ASSETS POUR ENDPOINTS MANQUANTS
 # ====================================
 
-@asset(group_name="hubeau_hydrometry", partitions_def=YEARLY_PARTITIONS, deps=[hydrometry_stations_reference])
+@asset(
+    group_name="hubeau_hydrometry",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[hydrometry_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def hydrometry_obs_elab(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry elaborated observations (historical data)."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "hydrometry", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrometry_obs_elab.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
+@asset(
+    group_name="hubeau_quality_rivers",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[quality_rivers_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def quality_rivers_operations(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers sampling operations."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "quality_rivers", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_rivers_operations.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
+@asset(
+    group_name="hubeau_quality_rivers",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[quality_rivers_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def quality_rivers_conditions(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers environmental conditions."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "quality_rivers", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_rivers_conditions.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_piezometry", partitions_def=YEARLY_PARTITIONS, deps=[piezometry_stations_reference])
+@asset(
+    group_name="hubeau_piezometry",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[piezometry_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def piezometry_chroniques_historical(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry historical chroniques (complete historical data)."""
     partition_date = _get_partition_date_yearly(context)
@@ -708,49 +735,84 @@ def piezometry_chroniques_historical(context: AssetExecutionContext) -> Dict[str
 # ASSETS D'OBSERVATIONS/ANALYSES (dépendent des stations)
 # ====================================
 
-@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS, deps=[hydrobio_stations_reference])
+@asset(
+    group_name="hubeau_hydrobiology",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[hydrobio_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology taxons data using dlt."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "hydrobio", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrobio_taxons.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_hydrobiology", partitions_def=YEARLY_PARTITIONS, deps=[hydrobio_stations_reference])
+@asset(
+    group_name="hubeau_hydrobiology",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[hydrobio_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology indices data using dlt."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "hydrobio", partition_date)
     return ingest_dlt(context, "configs/hubeau/hydrobio_indices.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_piezometry", partitions_def=YEARLY_PARTITIONS, deps=[piezometry_stations_reference])
+@asset(
+    group_name="hubeau_piezometry",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[piezometry_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry chroniques data using dlt."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "piezometry", partition_date)
     return ingest_dlt(context, "configs/hubeau/piezometry_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_quality_rivers", partitions_def=YEARLY_PARTITIONS, deps=[quality_rivers_stations_reference])
+@asset(
+    group_name="hubeau_quality_rivers",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[quality_rivers_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests superficial waterbodies quality analyses data using dlt."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "quality_rivers", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_rivers_analyses.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_quality_groundwater", partitions_def=YEARLY_PARTITIONS, deps=[quality_groundwater_stations_reference])
+@asset(
+    group_name="hubeau_quality_groundwater",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[quality_groundwater_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests groundwater quality analyses data using dlt."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "quality_groundwater", partition_date)
     return ingest_dlt(context, "configs/hubeau/quality_groundwater_analyses.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_ecoulement", partitions_def=YEARLY_PARTITIONS, deps=[ecoulement_stations_reference, ecoulement_campagnes_reference])
+@asset(
+    group_name="hubeau_ecoulement",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[ecoulement_stations_reference, ecoulement_campagnes_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement observations data using dlt (données annuelles)."""
     partition_date = _get_partition_date_yearly(context)
     stations_data, _ = _setup_observation_asset(context, "ecoulement", partition_date)
     return ingest_dlt(context, "configs/hubeau/ecoulement_observations.yml", stations_data=stations_data, partition_date=partition_date)
 
-@asset(group_name="hubeau_prelevements", partitions_def=YEARLY_PARTITIONS, deps=[prelevements_ouvrages_reference])
+@asset(
+    group_name="hubeau_prelevements",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[prelevements_ouvrages_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests prelevements chroniques data using dlt."""
     partition_date = _get_partition_date_yearly(context)
@@ -758,7 +820,12 @@ def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     return ingest_dlt(context, "configs/hubeau/prelevements_chroniques.yml", stations_data=stations_data, partition_date=partition_date)
 
 
-@asset(group_name="hubeau_temperature", partitions_def=YEARLY_PARTITIONS, deps=[temperature_stations_reference])
+@asset(
+    group_name="hubeau_temperature",
+    partitions_def=YEARLY_PARTITIONS,
+    deps=[temperature_stations_reference],
+    freshness_policy=DLT_FRESHNESS_POLICY
+)
 def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature chroniques data using dlt with yearly partitions and automatic fallback."""
     partition_date = _get_partition_date_yearly(context)

@@ -21,7 +21,9 @@ from dagster import (
     MetadataValue,
     Config,
     DynamicPartitionsDefinition,
-    StaticPartitionsDefinition
+    StaticPartitionsDefinition,
+    AssetKey,
+    FreshnessPolicy
 )
 from pydantic import Field
 from typing import Optional, Literal, Dict, Any
@@ -50,6 +52,50 @@ MODE_PARTITIONS = StaticPartitionsDefinition([
 ])
 
 
+# ============================================================================
+# ASSET DEPENDENCIES
+# ============================================================================
+# Mapping resource_name → assets stations dont il dépend
+ASSET_DEPENDENCIES = {
+    # Piezometry
+    "piezometry_chroniques": ["piezometry_stations_csv"],
+
+    # Quality Rivers
+    "quality_rivers_analyses": ["quality_rivers_stations_csv"],
+    "quality_rivers_conditions": ["quality_rivers_stations_csv"],
+    "quality_rivers_operations": ["quality_rivers_stations_csv"],
+
+    # Quality Groundwater
+    "quality_groundwater_analyses": ["quality_groundwater_stations_csv"],
+
+    # Hydrometry (dépend de sites ET stations)
+    "hydrometry_obs_elab": ["hydrometry_sites_csv", "hydrometry_stations_csv"],
+
+    # Temperature
+    "temperature_chroniques": ["temperature_stations_csv"],
+
+    # Hydrobio
+    "hydrobio_indices": ["hydrobio_stations_csv"],
+    "hydrobio_taxons": ["hydrobio_stations_csv"],
+
+    # Ecoulement (dépend de stations ET campagnes)
+    "ecoulement_observations": ["ecoulement_stations_csv", "ecoulement_campagnes_csv"],
+
+    # Prelevements (dépend de ouvrages ET points)
+    "prelevements_chroniques": ["prelevements_ouvrages_csv", "prelevements_points_csv"],
+}
+
+
+# ============================================================================
+# FRESHNESS POLICIES
+# ============================================================================
+# Alerte si chroniques/analyses pas mises à jour depuis > 48h
+CHRONIQUES_FRESHNESS_POLICY = FreshnessPolicy(
+    maximum_lag_minutes=60 * 48,  # 48 heures
+    cron_schedule="0 2 * * *",    # Vérifié quotidiennement à 02h00
+)
+
+
 class IngestionConfig(Config):
     """Configuration pour les assets avec mode selectionnable"""
     mode: Literal["full", "year", "incremental"] = Field(
@@ -73,6 +119,43 @@ def load_yaml_config(resource_name: str) -> Dict:
         return yaml.safe_load(f)
 
 
+def count_rows_in_postgres(table_name: str, schema: str = "hubeau") -> int:
+    """
+    Compte les lignes dans une table PostgreSQL.
+
+    Utilisé pour obtenir le vrai nombre de lignes chargées,
+    car DLT load_info ne retourne pas toujours les métriques correctement.
+
+    Args:
+        table_name: Nom de la table
+        schema: Schéma PostgreSQL (défaut: hubeau)
+
+    Returns:
+        Nombre de lignes dans la table, ou 0 si erreur/table inexistante
+    """
+    import psycopg2
+
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("PG_HOST", "postgres"),
+            port=os.getenv("PG_PORT", "5432"),
+            database=os.getenv("PG_DB", "postgres"),
+            user=os.getenv("PG_USER", "postgres"),
+            password=os.getenv("PG_PASSWORD")
+        )
+
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM {schema}.{table_name}")
+            count = cur.fetchone()[0]
+
+        conn.close()
+        return count
+
+    except Exception as e:
+        # Si erreur (table n'existe pas encore, connexion échouée, etc.)
+        return 0
+
+
 def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_station_slicing: bool = False):
     """
     Factory pour creer un asset DLT CSV multi-mode
@@ -86,16 +169,25 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
     group_name = resource_name.split('_')[0]
     asset_name = f"{resource_name}_csv"  # Add _csv suffix to asset name
 
+    # ✅ Détecter les dépendances pour cet asset
+    asset_deps = []
+    if resource_name in ASSET_DEPENDENCIES:
+        asset_deps = [AssetKey(dep_name) for dep_name in ASSET_DEPENDENCIES[resource_name]]
+
     @asset(
         name=asset_name,
         group_name=group_name,
         compute_kind="dlt",
         op_tags={"format": "csv", "source": "hubeau"},
         partitions_def=MODE_PARTITIONS if supports_date_filter else None,  # Partitions seulement si filtre date supporté
+        deps=asset_deps,  # ← Dépendances vers assets stations
+        freshness_policy=CHRONIQUES_FRESHNESS_POLICY if supports_date_filter else None,  # ← Freshness 48h
         metadata={
             "partition_type": "time_based" if supports_date_filter else "none",
             "supports_incremental": supports_date_filter,
-            "description": f"Ingestion Hub'Eau pour {resource_name}"
+            "description": f"Ingestion Hub'Eau pour {resource_name}",
+            "depends_on": ASSET_DEPENDENCIES.get(resource_name, []),  # ← Metadata dependencies
+            "freshness_check": "48h" if supports_date_filter else "none"  # ← Metadata freshness
         }
     )
     def csv_asset(
@@ -200,55 +292,26 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             load_info = pipeline.run(source)
             elapsed = time.time() - start_time
 
-            # Extraire metriques de load_info
-            rows_loaded = 0
+            # ✅ FIX: Compter les lignes directement dans PostgreSQL
+            # car DLT load_info ne retourne pas toujours les métriques correctement
+            table_name = yaml_config['resource']['name']
+            context.log.info(f"🔍 Vérification des lignes chargées dans PostgreSQL...")
 
-            # Methode 1: Via load_packages
-            if hasattr(load_info, 'load_packages') and load_info.load_packages:
-                for package in load_info.load_packages:
-                    if hasattr(package, 'jobs') and package.jobs:
-                        for job in package.jobs:
-                            if hasattr(job, '_rows_count'):
-                                rows_loaded += job._rows_count
-                            elif hasattr(job, 'job_file_info'):
-                                # Compter les lignes dans le fichier
-                                job_info = job.job_file_info
-                                if hasattr(job_info, 'rows_count'):
-                                    rows_loaded += job_info.rows_count
-
-            # Methode 2: Via metrics si disponible
-            if rows_loaded == 0 and hasattr(load_info, 'metrics'):
-                metrics = load_info.metrics
-                if hasattr(metrics, 'rows_count'):
-                    rows_loaded = metrics.rows_count
-
-            # Methode 3: Via first_run si disponible
-            if rows_loaded == 0 and hasattr(load_info, 'first_run') and load_info.first_run:
-                try:
-                    rows_loaded = sum(
-                        job._rows_count if hasattr(job, '_rows_count') else 0
-                        for package in load_info.first_run.load_packages
-                        for job in (package.jobs if hasattr(package, 'jobs') else [])
-                    )
-                except:
-                    pass
+            rows_loaded = count_rows_in_postgres(table_name)
 
             # Log détaillé des résultats
             throughput = rows_loaded / elapsed if elapsed > 0 else 0
             context.log.info(
-                f"✅ Termine: {rows_loaded:,} lignes en {elapsed:.2f}s "
-                f"({throughput:.1f} lignes/sec)"
+                f"✅ Terminé: {rows_loaded:,} lignes en base PostgreSQL "
+                f"(durée: {elapsed:.2f}s, débit: {throughput:.1f} lignes/sec)"
             )
 
-            # Debug: afficher structure load_info si rows_loaded == 0
+            # Alerter si table vide après ingestion
             if rows_loaded == 0:
-                context.log.warning(f"⚠️  Aucune ligne detectee dans load_info")
-                context.log.debug(f"load_info type: {type(load_info)}")
-                context.log.debug(f"load_info attributes: {dir(load_info)}")
-
-                # Afficher les packages disponibles pour debug
-                if hasattr(load_info, 'load_packages'):
-                    context.log.debug(f"Nombre de load_packages: {len(load_info.load_packages)}")
+                context.log.warning(
+                    f"⚠️  Table {table_name} vide après ingestion ! "
+                    f"Vérifier: API Hub'Eau, filtres date, ou réseau."
+                )
 
             return Output(
                 value=load_info,
