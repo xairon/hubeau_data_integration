@@ -234,19 +234,47 @@ deploy:production:
         fi
       done
       echo "✅ Tous les scripts d'initialisation ont été exécutés"
-    - echo "✅ Vérification rapide de l'initialisation PostgreSQL Hub'Eau..."
+    - echo "✅ Vérification de l'initialisation PostgreSQL Hub'Eau..."
     - |
-      # Vérification simple puisque les scripts viennent d'être exécutés
-      table_count=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hubeau'" 2>/dev/null | tr -d ' ')
+      # ⚠️ NOTE: Les tables Hub'Eau sont créées AUTOMATIQUEMENT par DLT au premier run
+      # Ce script vérifie seulement que le schéma et PostGIS sont prêts
+      # Les tables seront créées par Dagster/DLT lors du premier asset run
 
-      if [ -z "$table_count" ] || [ "$table_count" -lt 15 ]; then
-        echo "❌ ERREUR: Seulement $table_count tables créées (minimum 15 requis)"
-        echo "📊 Logs PostgreSQL Hub'Eau:"
+      # Vérifier que le schéma existe
+      schema_exists=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='hubeau'" 2>/dev/null | tr -d ' ')
+
+      if [ -z "$schema_exists" ] || [ "$schema_exists" -eq 0 ]; then
+        echo "❌ ERREUR: Schéma hubeau n'existe pas"
         docker logs brgm-postgres --tail 100
         exit 1
       fi
 
-      echo "✅ Initialisation Hub'Eau complète ! ($table_count tables créées)"
+      # Vérifier que PostGIS est installé
+      postgis_exists=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM pg_extension WHERE extname='postgis'" 2>/dev/null | tr -d ' ')
+
+      if [ -z "$postgis_exists" ] || [ "$postgis_exists" -eq 0 ]; then
+        echo "❌ ERREUR: Extension PostGIS non installée"
+        docker logs brgm-postgres --tail 100
+        exit 1
+      fi
+
+      # Compter les tables (peut être 0 si première installation)
+      table_count=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hubeau'" 2>/dev/null | tr -d ' ')
+
+      echo "✅ Initialisation Hub'Eau réussie !"
+      echo "   - Schéma hubeau: ✅ créé"
+      echo "   - Extension PostGIS: ✅ installée"
+
+      if [ -z "$table_count" ] || [ "$table_count" -eq 0 ]; then
+        echo "   - Tables: 0 (DLT les créera au premier run)"
+        echo ""
+        echo "💡 Pour créer les tables Hub'Eau:"
+        echo "   1. Accédez à Dagster UI (http://srv991054.hstgr.cloud:8080)"
+        echo "   2. Lancez un asset CSV (ex: temperature_stations_csv)"
+        echo "   3. DLT analysera le CSV et créera la table automatiquement"
+      else
+        echo "   - Tables: $table_count (déjà créées)"
+      fi
     - echo "✅ Vérification des conteneurs..."
     - docker compose -f docker-compose.production.yml ps
     - echo "🔍 Test de connexion PostgreSQL Dagster..."
@@ -266,13 +294,17 @@ deploy:production:
       table_count=$(docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hubeau'" | tr -d ' ')
       echo "✅ PostgreSQL Hub'Eau initialisé et vérifié"
       echo "📊 Résumé:"
-      echo "   - Schéma: hubeau"
-      echo "   - Tables créées: $table_count"
-      echo "   - PostGIS: installé"
+      echo "   - Schéma: hubeau ✅"
+      echo "   - PostGIS: installé ✅"
 
-      # Afficher les premières tables comme confirmation
-      echo "📋 Exemples de tables créées:"
-      docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT '   - ' || table_name FROM information_schema.tables WHERE table_schema='hubeau' ORDER BY table_name LIMIT 5"
+      if [ -z "$table_count" ] || [ "$table_count" -eq 0 ]; then
+        echo "   - Tables: 0 (DLT les créera automatiquement au premier run)"
+      else
+        echo "   - Tables: $table_count (déjà créées par DLT)"
+        # Afficher les premières tables comme confirmation
+        echo "📋 Exemples de tables existantes:"
+        docker exec brgm-postgres psql -U postgres -d postgres -tAc "SELECT '   - ' || table_name FROM information_schema.tables WHERE table_schema='hubeau' ORDER BY table_name LIMIT 5"
+      fi
     - echo "🔍 Vérification des variables d'environnement dans dagster_webserver..."
     - |
       echo "Variables DAGSTER_PG dans le conteneur webserver:"
