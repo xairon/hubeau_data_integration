@@ -13,12 +13,41 @@ import yaml
 import time
 import tempfile
 from pathlib import Path
-from dagster import asset, AssetExecutionContext, Output, MetadataValue, Config
+from datetime import datetime
+from dagster import (
+    asset,
+    AssetExecutionContext,
+    Output,
+    MetadataValue,
+    Config,
+    DynamicPartitionsDefinition,
+    StaticPartitionsDefinition
+)
 from pydantic import Field
 from typing import Optional, Literal, Dict, Any
 
 from hubeau_pipeline.sources.hubeau_csv_source import hubeau_csv_source, IngestionMode
 from src.dlt_pipeline.destinations import get_postgres_destination
+
+
+# ============================================================================
+# PARTITIONS DÉFINITIONS
+# ============================================================================
+
+# Partitions pour les modes (avec années prédéfinies + possibilité d'ajout dynamique)
+# Les années peuvent être ajoutées dynamiquement via API ou UI
+HUBEAU_PARTITIONS = DynamicPartitionsDefinition(name="hubeau_time_partitions")
+
+# Partitions statiques pour facilité d'usage
+MODE_PARTITIONS = StaticPartitionsDefinition([
+    "full",           # Tout l'historique
+    "incremental",    # Derniers 2 jours
+    "2024",          # Année 2024
+    "2023",          # Année 2023
+    "2022",          # Année 2022
+    "2021",          # Année 2021
+    "2020",          # Année 2020
+])
 
 
 class IngestionConfig(Config):
@@ -61,7 +90,13 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         name=asset_name,
         group_name=group_name,
         compute_kind="dlt",
-        op_tags={"format": "csv", "source": "hubeau"}
+        op_tags={"format": "csv", "source": "hubeau"},
+        partitions_def=MODE_PARTITIONS if supports_date_filter else None,  # Partitions seulement si filtre date supporté
+        metadata={
+            "partition_type": "time_based" if supports_date_filter else "none",
+            "supports_incremental": supports_date_filter,
+            "description": f"Ingestion Hub'Eau pour {resource_name}"
+        }
     )
     def csv_asset(
         context: AssetExecutionContext,
@@ -73,6 +108,28 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         - YEAR : Une annee specifique
         - INCREMENTAL : Derniers N jours
         """
+
+        # ✨ Détecter le mode depuis la partition si disponible
+        if context.has_partition_key:
+            partition = context.partition_key
+            context.log.info(f"📋 Partition sélectionnée: {partition}")
+
+            if partition == "full":
+                config.mode = "full"
+                config.year = None
+            elif partition == "incremental":
+                config.mode = "incremental"
+                config.year = None
+                # Garder incremental_days de la config (défaut: 2)
+            else:
+                # C'est une année (2024, 2023, etc.)
+                try:
+                    year_value = int(partition)
+                    config.mode = "year"
+                    config.year = year_value
+                except ValueError:
+                    context.log.error(f"❌ Partition invalide: {partition} (attendu: full, incremental, ou YYYY)")
+                    raise ValueError(f"Partition invalide: {partition}")
 
         # Validation
         if config.mode == "year" and not config.year:
@@ -131,29 +188,16 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             use_station_slicing=use_station_slicing
         )
 
-        # Execution avec configuration optimisée mémoire
+        # Execution
         start_time = time.time()
 
-        context.log.info(
-            f"⚙️  Configuration DLT: workers=1 (économie mémoire), "
-            f"format temporaire=jsonl (streaming optimisé)"
-        )
-
         try:
-            # Exécuter avec 1 seul worker pour économiser mémoire
-            #
-            # Note: loader_file_format contrôle le format des fichiers TEMPORAIRES
-            # créés par DLT entre NORMALIZE et LOAD (dans /tmp/dlt_pipelines/)
-            # - Ces fichiers sont créés APRÈS téléchargement des CSV
-            # - Ils sont utilisés pour l'insertion en PostgreSQL
-            # - Ils sont automatiquement supprimés après l'import
-            #
-            # JSONL = moins de RAM que Parquet car DLT stream ligne par ligne
-            load_info = pipeline.run(
-                source,
-                workers=1,                      # 1 worker = moins de RAM utilisée
-                loader_file_format="jsonl"      # Format temporaire optimisé mémoire
-            )
+            # Exécuter le pipeline DLT
+            # DLT va :
+            # 1. Recevoir les données depuis la source (Pandas a déjà inféré les types)
+            # 2. Créer les tables PostgreSQL automatiquement si elles n'existent pas
+            # 3. Insérer les données avec UPSERT (merge) basé sur primary_key
+            load_info = pipeline.run(source)
             elapsed = time.time() - start_time
 
             # Extraire metriques de load_info
