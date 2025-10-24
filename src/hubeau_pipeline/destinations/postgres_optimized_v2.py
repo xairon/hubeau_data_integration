@@ -280,26 +280,30 @@ class PostgresBulkDestinationV2:
         return df
 
     def _create_table_from_dataframe(self, df: pd.DataFrame, table_name: str, conn):
-        """Crée la table si elle n'existe pas en inférant les types depuis le DataFrame"""
+        """
+        Crée la table si elle n'existe pas - STRATÉGIE ULTRA-SAFE
+
+        Tout est créé en TEXT sauf datetime évident
+        Optimisation des types se fait APRÈS ingestion (SchemaOptimizer)
+
+        Avantages:
+        - Zéro erreur COPY (text accepte tout)
+        - Pas de retries multiples
+        - Performance optimale en post-processing
+        """
         with conn.cursor() as cursor:
-            # Inférer les types depuis pandas
+            # Inférence ULTRA-SAFE: TEXT par défaut
             col_defs = []
             for col in df.columns:
                 dtype = df[col].dtype
-                if dtype == 'object':
-                    pg_type = 'TEXT'
-                elif dtype in ['int64', 'Int64']:
-                    pg_type = 'BIGINT'
-                elif dtype in ['int32', 'Int32']:
-                    pg_type = 'INTEGER'
-                elif dtype in ['float64', 'float32']:
-                    pg_type = 'DOUBLE PRECISION'
-                elif dtype == 'bool':
-                    pg_type = 'BOOLEAN'
-                elif 'datetime' in str(dtype):
+
+                # Seulement datetime est typé directement (évident et safe)
+                if 'datetime' in str(dtype):
                     pg_type = 'TIMESTAMP'
                 else:
-                    pg_type = 'TEXT'  # Fallback
+                    # TOUT LE RESTE en TEXT - ultra-safe!
+                    # L'optimisation se fera après avec SchemaOptimizer
+                    pg_type = 'TEXT'
 
                 col_defs.append(f"{col} {pg_type}")
 
@@ -404,17 +408,42 @@ class PostgresBulkDestinationV2:
                         if cache_key in self._table_columns_cache:
                             del self._table_columns_cache[cache_key]
 
-                        # RETRY COPY avec NOUVEAU cursor
+                        # RETRY COPY avec NOUVEAU cursor - PEUT échouer sur AUTRE colonne
                         logger.info(f"🔄 Retry COPY après correction de schéma...")
-                        with conn.cursor() as retry_cursor:
-                            output.seek(0)  # Reset buffer
-                            retry_cursor.copy_expert(copy_sql, output)
-                            conn.commit()
-                            logger.info(f"✅ COPY réussi: {len(df)} records → {table_name}")
-                            return  # Success après retry
+                        max_retries = 10  # Max 10 colonnes à corriger
+                        for retry_attempt in range(max_retries):
+                            try:
+                                with conn.cursor() as retry_cursor:
+                                    output.seek(0)  # Reset buffer
+                                    retry_cursor.copy_expert(copy_sql, output)
+                                    conn.commit()
+                                    logger.info(f"✅ COPY réussi: {len(df)} records → {table_name}")
+                                    return  # Success!
+                            except errors.InvalidTextRepresentation as retry_error:
+                                # ENCORE une autre colonne mal typée!
+                                retry_error_msg = str(retry_error)
+                                retry_match = re.search(r'column (\w+):', retry_error_msg)
+                                if retry_match:
+                                    next_column = retry_match.group(1)
+                                    logger.warning(f"🔧 Autre colonne problématique: {next_column} → TEXT")
+                                    conn.rollback()
+                                    with conn.cursor() as fix_cursor:
+                                        fix_cursor.execute(f"""
+                                            ALTER TABLE {self.schema_name}.{table_name}
+                                            ALTER COLUMN {next_column} TYPE TEXT
+                                        """)
+                                        conn.commit()
+                                    # Invalider cache et continuer la boucle
+                                    if cache_key in self._table_columns_cache:
+                                        del self._table_columns_cache[cache_key]
+                                else:
+                                    raise retry_error  # Erreur différente
+
+                        # Si on arrive ici, trop de colonnes à corriger
+                        raise Exception(f"Trop de colonnes mal typées dans {table_name} (>{max_retries})")
 
                     except Exception as alter_error:
-                        logger.error(f"❌ Erreur lors de l'ALTER: {alter_error}")
+                        logger.error(f"❌ Erreur lors de l'AUTO-FIX: {alter_error}")
                         raise e  # Re-raise original error
 
             # Si pas une erreur de type connue, re-raise

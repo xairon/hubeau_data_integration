@@ -312,13 +312,14 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 "prelevements_ouvrages",          # 168k records
             ]
 
-            # Datasets critiques OOM (killed by SIGKILL) → 2k ou 1k batch
+            # Datasets critiques OOM (killed by SIGKILL) → 1k batch
             ULTRA_CRITICAL_OOM_RESOURCES = [
                 "quality_groundwater_stations",   # 81k records - SIGKILL @ 5k, 2k (BEAUCOUP de colonnes)
+                "hydrobio_stations",              # 20k records - SIGKILL @ 8k, 2k (accumulation mémoire)
             ]
 
             CRITICAL_OOM_RESOURCES = [
-                "hydrobio_stations",              # 20k records - SIGKILL @ 8k batch
+                # Vide maintenant - tous les critiques sont dans ULTRA_CRITICAL
             ]
 
             # Volumineux (>20k records) → 8k batch
@@ -381,6 +382,10 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
 
                     # Vider le batch
                     batch = []
+
+                    # GARBAGE COLLECTION AGRESSIF pour libérer RAM immédiatement
+                    import gc
+                    gc.collect()
 
             # Charger le dernier batch (reste)
             if batch:
