@@ -1,87 +1,17 @@
-source:
-  name: hydrometry
-  max_table_nesting: 2
 resource:
   name: hydrometry_observations
   endpoint: /obs_elab.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
-  primary_key: [code_station, date_obs_elab, grandeur_hydro_elab]
-  write_disposition: append
-  # Fix: Table needs to be created with these exact column names matching API v2 response
-  # API returns: code_site, code_station, date_obs_elab, resultat_obs_elab, date_prod,
-  #              code_statut, libelle_statut, code_methode, libelle_methode,
-  #              code_qualification, libelle_qualification, longitude, latitude, grandeur_hydro_elab
-  columns:
-    # Identifiants (3 attributs)
-    code_site:
-      data_type: text
-      nullable: true
-    code_station:
-      data_type: text
-      nullable: false
-    date_obs_elab:
-      data_type: timestamp
-      nullable: false
-    grandeur_hydro_elab:
-      data_type: text
-      nullable: false
-
-    # Localisation (2 attributs)
-    longitude:
-      data_type: double
-      nullable: true
-    latitude:
-      data_type: double
-      nullable: true
-
-    # Résultat (2 attributs)
-    resultat_obs_elab:
-      data_type: double
-      nullable: true
-    date_prod:
-      data_type: timestamp
-      nullable: true
-
-    # Qualification (6 attributs)
-    code_statut:
-      data_type: integer
-      nullable: true
-    libelle_statut:
-      data_type: text
-      nullable: true
-    code_qualification:
-      data_type: integer
-      nullable: true
-    libelle_qualification:
-      data_type: text
-      nullable: true
-    code_methode:
-      data_type: integer
-      nullable: true
-    libelle_methode:
-      data_type: text
-      nullable: true
-
+  primary_key:
+  - code_station
+  - date_obs_elab
+  - grandeur_hydro_elab
 extraction:
-  slicing_mode: station_month_chunked
-  pagination:
-    type: page_based
   default_params: {}
 performance:
   parallelism: 5
   chunk_size: 10000
+  batch_size: 8000
   retry_times: 3
   retry_delay: 2.0
   rate_limit: 2.0
-transformers:
-- validate_primary_keys
-- normalize_dates:
-    fields:
-    - date_obs_elab
-    - date_prod
-- validate_coordinates:
-    lat_field: latitude
-    lon_field: longitude
-destinations:
-  postgres:
-    dataset_name: hubeau

@@ -1,29 +1,15 @@
-source:
-  name: temperature
-  format: csv
-
 resource:
   name: temperature_stations
   endpoint: /station.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/temperature
   primary_key:
   - code_station
-  write_disposition: merge
-
 extraction:
-  format: csv
-  pagination:
-    type: csv_with_json_count
   default_params: {}
-
 performance:
-  workers: 2
-  batch_size: 5000
+  parallelism: 5
+  chunk_size: 10000
+  batch_size: 50000
   retry_times: 5
   retry_delay: 2.0
   rate_limit: 2.0
-  timeout: 120
-
-destinations:
-  postgres:
-    dataset_name: hubeau

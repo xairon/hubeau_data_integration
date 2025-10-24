@@ -1,7 +1,3 @@
-source:
-  name: temperature
-  format: csv
-
 resource:
   name: temperature_chroniques
   endpoint: /chronique.csv
@@ -10,22 +6,12 @@ resource:
   - code_station
   - date_mesure_temp
   - code_parametre
-  write_disposition: merge
-
 extraction:
-  format: csv
-  pagination:
-    type: csv_with_json_count
   default_params: {}
-
 performance:
-  workers: 2
-  batch_size: 5000
+  parallelism: 5
+  chunk_size: 10000
+  batch_size: 50000
   retry_times: 5
   retry_delay: 2.0
   rate_limit: 2.0
-  timeout: 120
-
-destinations:
-  postgres:
-    dataset_name: hubeau

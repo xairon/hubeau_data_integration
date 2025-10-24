@@ -307,51 +307,20 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             # Déterminer write_disposition: replace pour mode full, append sinon
             write_disposition = "replace" if config.mode == "full" else "append"
 
-            # ✅ BATCH_SIZE dynamique selon la ressource pour éviter OOM
-            # CRITICAL: VPS 3GB RAM limit - batch size must prevent accumulation > 2GB
-            # Python dict overhead: ~1KB per record → 5000 records = ~5MB
+            # ✅ BATCH_SIZE depuis YAML config (évite OOM sur VPS 3GB RAM)
+            # Batch sizes optimisés par essai-erreur après crashes SIGKILL
+            # Voir configs/hubeau/*.yml → performance.batch_size
+            BATCH_SIZE = yaml_config['performance'].get('batch_size', 50000)
 
-            # Très volumineux (>50k records) → 5k batch
-            VERY_LARGE_RESOURCES = [
-                "prelevements_points",            # 186k records
-                "prelevements_ouvrages",          # 168k records
-            ]
-
-            # Datasets critiques OOM (killed by SIGKILL) → 1k batch
-            ULTRA_CRITICAL_OOM_RESOURCES = [
-                "quality_groundwater_stations",   # 81k records - SIGKILL @ 5k, 2k (BEAUCOUP de colonnes)
-                "hydrobio_stations",              # 20k records - SIGKILL @ 8k, 2k (accumulation mémoire)
-            ]
-
-            CRITICAL_OOM_RESOURCES = [
-                # Vide maintenant - tous les critiques sont dans ULTRA_CRITICAL
-            ]
-
-            # Volumineux (>20k records) → 8k batch
-            LARGE_RESOURCES = [
-                "piezometry_stations",            # 23k records
-                "quality_rivers_stations",        # 24k records
-                "hydrobio_indices",
-                "hydrobio_taxons",
-                "quality_rivers_analyses",
-                "prelevements_chroniques",
-                "hydrometry_obs_elab"
-            ]
-
-            if resource_name in ULTRA_CRITICAL_OOM_RESOURCES:
-                BATCH_SIZE = 1000  # Batch extrêmement réduit - dernier recours
-                context.log.info(f"🔥 Dataset ultra-critique OOM: {resource_name} → BATCH_SIZE=1,000")
-            elif resource_name in CRITICAL_OOM_RESOURCES:
-                BATCH_SIZE = 2000  # Batch ultra-réduit pour éviter OOM / SIGKILL
-                context.log.info(f"🚨 Dataset critique OOM: {resource_name} → BATCH_SIZE=2,000")
-            elif resource_name in VERY_LARGE_RESOURCES:
-                BATCH_SIZE = 5000  # Batch très réduit pour datasets >50k
-                context.log.info(f"⚠️  Dataset très volumineux: {resource_name} → BATCH_SIZE=5,000")
-            elif resource_name in LARGE_RESOURCES:
-                BATCH_SIZE = 8000  # Batch réduit pour datasets >20k
-                context.log.info(f"⚠️  Dataset volumineux: {resource_name} → BATCH_SIZE=8,000")
+            # Log niveau selon batch size
+            if BATCH_SIZE <= 1000:
+                context.log.warning(f"Dataset ultra-critique OOM: {resource_name} → BATCH_SIZE={BATCH_SIZE:,}")
+            elif BATCH_SIZE <= 5000:
+                context.log.warning(f"Dataset tres volumineux: {resource_name} → BATCH_SIZE={BATCH_SIZE:,}")
+            elif BATCH_SIZE <= 8000:
+                context.log.info(f"Dataset volumineux: {resource_name} → BATCH_SIZE={BATCH_SIZE:,}")
             else:
-                BATCH_SIZE = 50000  # Batch standard pour datasets <10k
+                context.log.info(f"BATCH_SIZE={BATCH_SIZE:,}")
 
             context.log.info(f"📥 Streaming par batch (BATCH_SIZE={BATCH_SIZE:,}, disposition={write_disposition})...")
             batch = []
