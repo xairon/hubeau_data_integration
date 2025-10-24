@@ -1,36 +1,95 @@
 """
-Assets Hub'Eau - Data pipeline layers
+Assets Hub'Eau - Ingestion directe PostgreSQL
 
-Architecture follows Modern Data Stack conventions:
-- Bronze layer: Hub'Eau APIs → DLT CSV → PostgreSQL (ingestion directe CSV)
-- Raw layer: Hub'Eau APIs → DLT JSON → PostgreSQL (legacy, deprecated)
-- Staging layer: Data cleaning, validation, normalization (future)
-- Marts layer: Business-ready metrics and aggregations (future)
-- Monitoring layer: Pipeline observability
-
-Standard: dbt/Dagster asset layering pattern
+Structure:
+- hubeau_assets.py : Ingestion des données Hub'Eau
+- monitoring/      : Monitoring qualité données
 """
 
-from .bronze import all_csv_assets
-# DEPRECATED: JSON ingestion layer - commented out for CSV migration
-# from .raw import all_raw_assets
-from .staging import __all__ as staging_assets
-from .marts import __all__ as marts_assets
+from .hubeau_assets import (
+    # Chroniques/Observations (avec filtres date)
+    piezometry_chroniques_csv,
+    quality_groundwater_analyses_csv,
+    quality_rivers_analyses_csv,
+    quality_rivers_conditions_csv,
+    quality_rivers_operations_csv,
+    temperature_chroniques_csv,
+    hydrometry_obs_elab_csv,
+    hydrobio_indices_csv,
+    hydrobio_taxons_csv,
+    ecoulement_observations_csv,
+    prelevements_chroniques_csv,
+    # Stations/Référentiels (sans filtres date)
+    piezometry_stations_csv,
+    quality_groundwater_stations_csv,
+    quality_rivers_stations_csv,
+    temperature_stations_csv,
+    hydrometry_sites_csv,
+    hydrometry_stations_csv,
+    hydrobio_stations_csv,
+    ecoulement_stations_csv,
+    ecoulement_campagnes_csv,
+    prelevements_points_csv,
+    prelevements_ouvrages_csv,
+)
 from .monitoring import all_monitoring_assets
 
-# Combine all assets from all layers
-# PRIORITÉ: Bronze (CSV) > Raw (JSON legacy)
-all_assets = (
-    all_csv_assets +           # NEW: Bronze layer - CSV ingestion
-    # all_raw_assets +         # DEPRECATED: Raw layer - JSON ingestion (commented out)
-    staging_assets +
-    marts_assets +
-    all_monitoring_assets
-)
+# Tous les assets Hub'Eau
+all_hubeau_assets = [
+    # Chroniques/Observations
+    piezometry_chroniques_csv,
+    quality_groundwater_analyses_csv,
+    quality_rivers_analyses_csv,
+    quality_rivers_conditions_csv,
+    quality_rivers_operations_csv,
+    temperature_chroniques_csv,
+    hydrometry_obs_elab_csv,
+    hydrobio_indices_csv,
+    hydrobio_taxons_csv,
+    ecoulement_observations_csv,
+    prelevements_chroniques_csv,
+    # Stations/Référentiels
+    piezometry_stations_csv,
+    quality_groundwater_stations_csv,
+    quality_rivers_stations_csv,
+    temperature_stations_csv,
+    hydrometry_sites_csv,
+    hydrometry_stations_csv,
+    hydrobio_stations_csv,
+    ecoulement_stations_csv,
+    ecoulement_campagnes_csv,
+    prelevements_points_csv,
+    prelevements_ouvrages_csv,
+]
+
+# Tous les assets du pipeline
+all_assets = all_hubeau_assets + all_monitoring_assets
 
 __all__ = [
     "all_assets",
-    "all_csv_assets",          # NEW: Bronze layer assets
-    # "all_raw_assets",        # DEPRECATED: Disabled for CSV migration
+    "all_hubeau_assets",
     "all_monitoring_assets",
+    # Individual assets
+    "piezometry_chroniques_csv",
+    "quality_groundwater_analyses_csv",
+    "quality_rivers_analyses_csv",
+    "quality_rivers_conditions_csv",
+    "quality_rivers_operations_csv",
+    "temperature_chroniques_csv",
+    "hydrometry_obs_elab_csv",
+    "hydrobio_indices_csv",
+    "hydrobio_taxons_csv",
+    "ecoulement_observations_csv",
+    "prelevements_chroniques_csv",
+    "piezometry_stations_csv",
+    "quality_groundwater_stations_csv",
+    "quality_rivers_stations_csv",
+    "temperature_stations_csv",
+    "hydrometry_sites_csv",
+    "hydrometry_stations_csv",
+    "hydrobio_stations_csv",
+    "ecoulement_stations_csv",
+    "ecoulement_campagnes_csv",
+    "prelevements_points_csv",
+    "prelevements_ouvrages_csv",
 ]

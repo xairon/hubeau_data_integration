@@ -1,41 +1,59 @@
 # Hub'Eau Data Pipeline
 
-Pipeline de données pour l'ingestion et le traitement des données hydrologiques françaises depuis les APIs Hub'Eau.
+Pipeline simple d'ingestion des données hydrologiques françaises depuis les APIs Hub'Eau vers PostgreSQL.
 
 ## Architecture
 
-- **Orchestration**: Dagster
-- **Ingestion**: DLT (Data Load Tool)
-- **Base de données**: PostgreSQL
-- **Déploiement**: Docker & GitLab CI/CD
+```
+Hub'Eau APIs → DLT → PostgreSQL → Dagster (orchestration)
+```
 
-## Structure du projet
+**Technologies** :
+- **Orchestration** : Dagster
+- **Ingestion** : DLT (Data Load Tool)
+- **Base de données** : PostgreSQL
+- **Déploiement** : Docker + GitLab CI/CD
+
+## Fonctionnalités
+
+- ✅ **8 APIs Hub'Eau** : Piézométrie, Hydrométrie, Qualité, Température, etc.
+- ✅ **28 endpoints** configurés
+- ✅ **3 modes d'ingestion** : FULL, YEAR, INCREMENTAL
+- ✅ **Déduplication automatique** (MERGE/UPSERT)
+- ✅ **Monitoring qualité** données
+- ✅ **CI/CD GitLab** automatique
+
+## Structure du Projet
 
 ```
 brgm/
-├── src/hubeau_pipeline/     # Code source principal
-│   ├── assets/              # Assets Dagster (pipelines DLT)
-│   ├── jobs/               # Jobs Dagster
-│   ├── sensors/            # Sensors Dagster
-│   └── utils/              # Utilitaires
-├── configs/hubeau/         # Configurations YAML des sources
-├── docker/                 # Dockerfiles et scripts d'init
-├── dagster_home/           # Configuration Dagster
-└── docs/                   # Documentation détaillée
+├── src/hubeau_pipeline/      # Code source
+│   ├── assets/               # Assets Dagster
+│   ├── jobs/                 # Jobs d'orchestration
+│   ├── sensors/              # Monitoring
+│   ├── destinations/         # PostgreSQL
+│   └── definitions.py        # Point d'entrée Dagster
+│
+├── configs/hubeau/           # 28 configurations YAML
+├── docker/                   # Dockerfiles
+├── dagster_home/             # Config Dagster
+├── docs/                     # Documentation
+└── scripts/                  # Scripts maintenance
 ```
 
-## Démarrage rapide
+## Démarrage Rapide
 
-### Local
+### Développement Local
 
 ```bash
-# 1. Créer le fichier .env
+# 1. Configuration
 cp .env.example .env
+# Éditer .env avec vos credentials PostgreSQL
 
-# 2. Démarrer les services
+# 2. Démarrage
 docker-compose up -d
 
-# 3. Accéder à Dagster UI
+# 3. Accès Dagster UI
 open http://localhost:8080
 ```
 
@@ -43,22 +61,39 @@ open http://localhost:8080
 
 Le déploiement se fait automatiquement via GitLab CI/CD sur push vers `main`.
 
-## APIs Hub'Eau supportées
+## Modes d'Ingestion
 
-- **Piézométrie** - Niveaux des nappes phréatiques
-- **Hydrométrie** - Hauteur et débit des cours d'eau
-- **Qualité des eaux** - Analyses physicochimiques (rivières et nappes)
-- **Prélèvements** - Volumes d'eau prélevés
-- **Écoulements** - État des cours d'eau (assec, écoulement visible, etc.)
-- **Température** - Température des cours d'eau
-- **Hydrobiologie** - Indices biologiques
+Chaque asset peut être exécuté en 3 modes :
+
+| Mode | Description | Usage |
+|------|-------------|-------|
+| **FULL** | Tout l'historique | Première installation |
+| **YEAR** | Année spécifique | Backfill ciblé |
+| **INCREMENTAL** | Derniers N jours | Mise à jour quotidienne |
+
+**Configuration** : Via Dagster UI Launchpad ou CLI
+
+Voir [Documentation complète](docs/MODES_INGESTION.md)
+
+## APIs Hub'Eau Supportées
+
+- **Piézométrie** : Niveaux nappes phréatiques
+- **Hydrométrie** : Hauteur et débit cours d'eau
+- **Qualité rivières** : Analyses physicochimiques
+- **Qualité nappes** : Analyses eaux souterraines
+- **Température** : Température cours d'eau
+- **Écoulements** : État cours d'eau (assec, etc.)
+- **Hydrobiologie** : Indices biologiques
+- **Prélèvements** : Volumes prélevés
 
 ## Documentation
 
+- [Modes d'ingestion](docs/MODES_INGESTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Schéma base de données](docs/SCHEMA_BDD_HUBEAU.md)
-- [Configuration](docs/ENVIRONMENT_CONFIGURATION.md)
-- [Guide de démarrage](docs/QUICK_START_LOCAL.md)
+- [Schéma base de données](docs/SCHEMA_BDD.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [APIs Hub'Eau](docs/APIS_HUBEAU.md)
+- [Projet JUNON](docs/PROJET_JUNON_VISION.md)
 
 ## License
 

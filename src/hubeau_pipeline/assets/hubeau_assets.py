@@ -1,9 +1,9 @@
 """
-Assets Dagster pour ingestion CSV Hub'Eau
+Assets Hub'Eau - Ingestion PostgreSQL
 
-Factory pattern pour generer automatiquement 22 assets avec support multi-mode :
+Pipeline simple d'ingestion des données Hub'Eau vers PostgreSQL avec support multi-mode :
 - FULL : Tout l'historique
-- YEAR : Une annee specifique
+- YEAR : Une année spécifique
 - INCREMENTAL : Derniers N jours
 """
 
@@ -34,7 +34,7 @@ except ImportError:
 from typing import Optional, Literal, Dict, Any
 
 from hubeau_pipeline.sources.hubeau_csv_source import hubeau_csv_source, IngestionMode
-from src.dlt_pipeline.destinations import get_postgres_destination
+from hubeau_pipeline.destinations.postgres_optimized_v2 import get_postgres_destination
 
 
 # ============================================================================

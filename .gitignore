@@ -64,6 +64,10 @@ data/
 
 # Jupyter
 .ipynb_checkpoints/
+notebooks/
+
+# Analysis files
+_api_types_analysis.json
 
 # Dagster
 dagster_home/storage/

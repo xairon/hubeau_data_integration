@@ -1,280 +1,236 @@
-# Architecture Hub'Eau Data Pipeline
+# Architecture Hub'Eau Pipeline
 
-## Vue d'ensemble
+## Vue d'Ensemble
 
-Le projet Hub'Eau Data Pipeline est une solution complète d'ingestion et de traitement des données hydrologiques françaises. Il collecte automatiquement les données depuis les APIs Hub'Eau et les stocke dans une base PostgreSQL structurée.
-
-## Architecture technique
+Pipeline simple d'ingestion des données Hub'Eau vers PostgreSQL avec orchestration Dagster.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         GitLab CI/CD                        │
-│              (Déploiement automatique sur push)             │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│                    VPS Production                           │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │                  Dagster Orchestrator               │    │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────┐    │    │
-│  │  │ Webserver├──►│  Daemon  ├──►│   Scheduler  │    │    │
-│  │  └──────────┘  └──────────┘  └──────────────┘    │    │
-│  └────────────────────┬───────────────────────────────┘    │
-│                       │ gRPC                                │
-│  ┌────────────────────▼───────────────────────────────┐    │
-│  │                   DLT Worker                        │    │
-│  │         (Ingestion depuis APIs Hub'Eau)            │    │
-│  └────────────────────┬───────────────────────────────┘    │
-│                       │                                     │
-│  ┌────────────────────▼───────────────────────────────┐    │
-│  │                PostgreSQL Database                  │    │
-│  │              Schema: hubeau (tables)               │    │
-│  └─────────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│           APIs Hub'Eau (8 APIs)             │
+│  Piézométrie | Hydrométrie | Qualité | ...  │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│              DLT (Ingestion)                │
+│  - Format CSV                               │
+│  - Déduplication (MERGE)                    │
+│  - Retry automatique                        │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│           PostgreSQL Database               │
+│  Schema: hubeau                             │
+│  - Tables stations (9)                      │
+│  - Tables chroniques (11)                   │
+│  - Métadonnées DLT (3)                      │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────┐
+│        Dagster (Orchestration)              │
+│  - UI Web (port 8080)                       │
+│  - Jobs par API                             │
+│  - Sensors monitoring                       │
+│  - Schedules automatiques                   │
+└─────────────────────────────────────────────┘
 ```
 
-## Composants principaux
+## Composants
 
-### 1. Orchestration - Dagster
+### 1. DLT - Ingestion
 
-**Rôle**: Planification et exécution des pipelines de données
+**Rôle** : Extraction Hub'Eau → Chargement PostgreSQL
 
-**Composants**:
-- **Webserver**: Interface utilisateur (port 8080)
-- **Daemon**: Exécution des jobs et sensors
-- **Scheduler**: Planification des runs
-- **PostgreSQL Dagster**: Métadonnées Dagster
+**Fonctionnalités** :
+- Format CSV direct
+- Déduplication automatique (MERGE/UPSERT)
+- Retry sur erreur API
+- Rate limiting
+- 3 modes : FULL / YEAR / INCREMENTAL
 
-**Assets définis**:
-- Assets de référence (stations, sites, ouvrages)
-- Assets de données temporelles (chroniques, mesures)
-- Partitionnement par année (2020-2024)
+**Configuration** : 28 fichiers YAML dans `configs/hubeau/`
 
-### 2. Ingestion - DLT (Data Load Tool)
+### 2. PostgreSQL - Stockage
 
-**Rôle**: Extraction et chargement des données depuis les APIs Hub'Eau
+**Rôle** : Base de données unique
 
-**Caractéristiques**:
-- Ingestion directe dans PostgreSQL
-- Tables pré-créées via script SQL d'initialisation
-- Support du mode merge (upsert) avec clés primaires
-- Retry automatique en cas d'erreur
-- Rate limiting pour respecter les quotas API
+**Structure** :
+- Schema `hubeau` avec toutes les données
+- Tables pré-créées via script SQL
+- Index optimisés (temporels, géographiques)
+- Métadonnées DLT (_dlt_loads, _dlt_pipeline_state)
 
-**Sources configurées**:
-- Piézométrie (nappes phréatiques)
-- Hydrométrie (cours d'eau)
-- Qualité des eaux (rivières et nappes)
-- Prélèvements
-- Écoulements
-- Température
-- Hydrobiologie
+**Initialisation** : Script `/docker/init-scripts/postgres/01_create_schema.sql`
 
-### 3. Stockage - PostgreSQL
+### 3. Dagster - Orchestration
 
-**Rôle**: Base de données principale
+**Rôle** : Planification et monitoring
 
-**Structure**:
-- Schema `hubeau`: Toutes les données Hub'Eau
-- Tables pré-créées via script SQL d'initialisation
-- Index optimisés pour requêtes temporelles et géographiques
-- Support PostGIS pour données géospatiales
-- Triggers pour mise à jour automatique des timestamps
+**Composants** :
+- Webserver UI (http://localhost:8080)
+- Daemon (exécution jobs/sensors)
+- Jobs par API (11 jobs)
+- Sensors (alertes, monitoring)
 
-### 4. Déploiement - Docker & GitLab CI/CD
+**Base métadonnées** : PostgreSQL Dagster (séparée)
 
-**Conteneurs Docker**:
+### 4. Docker - Déploiement
+
+**Services** :
 ```yaml
-services:
-  dagster_postgres    # Base Dagster (métadonnées)
-  postgres           # Base données Hub'Eau
-  dlt_worker         # Worker DLT
-  dagster_webserver  # UI Dagster
-  dagster_daemon     # Daemon Dagster
-  adminer           # Interface DB
+- postgres           # Base données Hub'Eau
+- dagster_postgres   # Base métadonnées Dagster
+- dagster_webserver  # UI Dagster
+- dagster_daemon     # Daemon Dagster
+- worker             # Worker DLT
 ```
 
-**Pipeline CI/CD**:
-1. Push sur branche `main`
-2. Build des images Docker
-3. Déploiement automatique sur VPS
-4. Restart des services
+## Flux de Données
 
-## Structure de la base de données
+### Ingestion Standard
 
-### Schema `hubeau`
-
-Le schema est créé automatiquement au démarrage via `/docker/init-scripts/postgres/01_create_schema.sql`.
-
-**Tables principales**:
-
-#### Tables de référence (stations, sites)
-- `piezometry_stations` - Stations piézométriques
-- `hydrometry_sites` - Sites hydrométriques
-- `hydrometry_stations` - Stations hydrométriques
-- `quality_rivers_stations` - Stations qualité rivières
-- `quality_groundwater_stations` - Stations qualité nappes
-- `temperature_stations` - Stations température
-- `ecoulement_stations` - Stations écoulement
-- `hydrobio_stations` - Stations hydrobiologie
-- `prelevements_ouvrages` - Ouvrages de prélèvement
-
-#### Tables de données temporelles
-- `piezometry_chroniques` - Mesures piézométriques
-- `hydrometry_observations` - Observations hydrométriques
-- `quality_rivers_analyses` - Analyses qualité rivières
-- `quality_groundwater_analyses` - Analyses qualité nappes
-- `temperature_chroniques` - Mesures température
-- `ecoulement_campagnes` - Campagnes écoulement
-- `hydrobio_indices` - Indices biologiques
-- `prelevements_chroniques` - Volumes prélevés
-
-#### Tables système DLT
-- `_dlt_loads` - Historique des chargements
-- `_dlt_pipeline_state` - État des pipelines
-- `_dlt_version` - Versions des schémas
-
-### Index et optimisations
-
-**Index temporels**:
-- Sur toutes les colonnes de date (`date_mesure`, `date_obs`, `date_prelevement`)
-- Sur les colonnes `year` (générées automatiquement)
-
-**Index géographiques**:
-- Sur `code_commune_insee`, `code_departement`
-- Index spatiaux PostGIS disponibles (commentés par défaut)
-
-**Triggers**:
-- `updated_at` mis à jour automatiquement sur modification
-
-## Flux de données
-
-### 1. Ingestion initiale
 ```
-API Hub'Eau → DLT → PostgreSQL (tables stations/référentiels)
+1. Dagster Job déclenché (manuel ou automatique)
+2. DLT récupère données depuis Hub'Eau API
+3. Transformation CSV
+4. Chargement PostgreSQL (MERGE)
+5. Dagster log résultats
 ```
 
-### 2. Mise à jour des chroniques
-```
-Sensor Dagster → Job partitionné → DLT → PostgreSQL (données temporelles)
-```
+### Modes d'Ingestion
 
-### 3. Backfill automatique
-```
-Sensor détection partitions manquantes → Jobs backfill → DLT → PostgreSQL
-```
-
-Note: Le sensor de backfill ne se déclenche pas sur une nouvelle installation (protection intégrée).
+Voir [MODES_INGESTION.md](MODES_INGESTION.md)
 
 ## Configuration
 
-### Variables d'environnement principales
+### Variables d'Environnement
 
-**PostgreSQL données**:
-- `PG_HOST`: Hôte PostgreSQL (défaut: postgres)
-- `PG_PASSWORD`: Mot de passe (depuis GitLab CI/CD)
-- `PG_DB`: Base de données (défaut: postgres)
-- `PG_USER`: Utilisateur (défaut: postgres)
-- `HUBEAU_SCHEMA`: Schema (défaut: hubeau)
+Voir [CONFIGURATION.md](CONFIGURATION.md)
 
-**Dagster**:
-- `DAGSTER_PG_HOST`: Hôte PostgreSQL Dagster
-- `DAGSTER_PG_PASSWORD`: Mot de passe Dagster
+### Configurations YAML
 
-**DLT**:
-- `DESTINATION__POSTGRES__CREDENTIALS__HOST`: postgres
-- `DESTINATION__POSTGRES__CREDENTIALS__DATABASE`: postgres
-- `DESTINATION__POSTGRES__CREDENTIALS__USERNAME`: postgres
-- `DESTINATION__POSTGRES__CREDENTIALS__PASSWORD`: ${PG_PASSWORD}
+28 fichiers dans `configs/hubeau/` :
+- 1 fichier = 1 endpoint API
+- Configuration endpoint, pagination, filtres
+- Clés primaires pour déduplication
 
-### Configuration des sources
+Exemple `piezometry_chroniques.yml` :
+```yaml
+name: piezometry_chroniques
+base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
+path: /chroniques
+primary_keys: [code_bss, date_mesure]
+replication_key: date_mesure
+```
 
-Les sources sont configurées via fichiers YAML dans `configs/hubeau/`:
-- Configuration des endpoints API
-- Paramètres de pagination
-- Mapping des champs
-- Filtres temporels et géographiques
+## Jobs Dagster
 
-## Jobs et Sensors Dagster
+Un job par API :
+- `piezometry_job`
+- `quality_rivers_job`
+- `hydrometry_job`
+- `temperature_job`
+- `ecoulement_job`
+- `hydrobio_job`
+- `prelevements_job`
+- `quality_groundwater_job`
 
-### Jobs principaux
+Jobs globaux :
+- `all_stations_job` (9 assets stations)
+- `all_chroniques_job` (11 assets chroniques)
+- `all_hubeau_job` (tous assets)
 
-- **`sync_all_yearly_data`**: Synchronise toutes les données pour une année
-- **`hubeau_piezometry_job`**: Données piézométriques
-- **`hubeau_hydrometry_job`**: Données hydrométriques
-- **`hubeau_quality_job`**: Qualité des eaux
-- **`hubeau_temperature_job`**: Température des cours d'eau
+## Sensors
 
-### Sensors
+**Monitoring** :
+- `error_detection_sensor` : Détection erreurs
+- `pipeline_failure_alert_sensor` : Alertes échecs
+- `long_running_pipeline_sensor` : Pipelines lents
+- `repeated_failure_sensor` : Échecs répétés
 
-- **`backfill_missing_partitions_sensor`**:
-  - Détecte les partitions manquantes
-  - Ne se déclenche pas sur nouvelle installation
-  - Limite à 3 backfills par exécution
-  - Variable `FORCE_INITIAL_BACKFILL=true` pour forcer
+## Monitoring
+
+**Dagster UI** :
+- Vue d'ensemble des runs
+- Logs détaillés par asset
+- Métriques d'exécution
+- Graphe de dépendances
+
+**PostgreSQL** :
+- Adminer (http://localhost:8081)
+- Requêtes SQL directes
+- Volumétrie tables
+
+## Déploiement
+
+### Local (Docker Compose)
+
+```bash
+docker-compose up -d
+```
+
+Services démarrés :
+- PostgreSQL données (port 5432)
+- PostgreSQL Dagster (interne)
+- Dagster Webserver (port 8080)
+- Dagster Daemon
+- Worker DLT
+- Adminer (port 8081)
+
+### Production (GitLab CI/CD)
+
+Push sur `main` → déploiement automatique VPS
+
+Pipeline :
+1. Build images Docker
+2. Deploy sur VPS
+3. Health checks
+4. Rollback si échec
+
+Voir [.gitlab-ci.yml](../.gitlab-ci.yml)
 
 ## Optimisations
 
 ### Performance
-- Pipelines DLT isolés par asset pour éviter conflits de schéma
-- Utilisation de `/tmp` pour fichiers temporaires DLT
-- Rate limiting pour respecter quotas API
-- Index PostgreSQL sur colonnes clés
-- Write disposition "merge" pour upserts efficaces
+- Exécution séquentielle (1 asset à la fois) pour éviter OOM
+- Index PostgreSQL optimisés
+- Rate limiting API Hub'Eau
+- Batch size adaptatif
 
 ### Résilience
-- Retry automatique sur erreurs API
+- Retry automatique sur erreurs
 - Health checks Docker
-- Backfill sensor pour rattraper données manquantes
-- Logs centralisés dans Dagster
-- État DLT persisté dans PostgreSQL
-
-### Monitoring
-- Dagster UI pour suivi des runs
-- Adminer pour inspection base de données
-- Logs structurés avec niveaux (INFO, WARNING, ERROR)
-- Métriques d'exécution dans Dagster
+- Logs structurés
+- État DLT persisté
 
 ## Sécurité
 
-- Mots de passe stockés dans GitLab CI/CD Variables
-- Pas de secrets dans le code ou fichiers de config
-- Connexions PostgreSQL via réseau Docker interne
-- Ports exposés uniquement si nécessaire
-- `.dlt/*.toml` dans `.gitignore` pour éviter fuite de credentials
-
-## Maintenance
-
-### Logs
-- **Dagster UI**: http://localhost:8080 - Tous les logs d'exécution
-- **Docker logs**: `docker logs <container_name>`
-- **PostgreSQL logs**: Dans le container PostgreSQL
-
-### Backup
-- Volume Docker PostgreSQL persistant: `/srv/brgm-data/postgres`
-- État Dagster: `/srv/brgm-data/dagster_pg`
-- Possibilité de backup via `pg_dump`
-
-### Mise à jour
-1. Push sur `main` déclenche déploiement automatique
-2. GitLab CI/CD build les nouvelles images
-3. Déploiement sur VPS avec health checks
-4. Rollback possible via GitLab
+- Mots de passe dans GitLab CI/CD Variables (masked)
+- Pas de secrets dans le code
+- Réseau Docker interne
+- `.dlt/*.toml` gitignored
 
 ## Troubleshooting
 
-### Problème: DLT crée trop de tables enfants
-**Solution**: Les tables sont pré-créées via script SQL, DLT utilise la structure existante
+### Erreur : "could not translate host name postgres"
+→ Vérifier service `postgres` dans docker-compose
 
-### Problème: "could not translate host name postgres"
-**Solution**: Vérifier que le service `postgres` est bien défini dans docker-compose
+### Erreur : DLT connection failed
+→ Vérifier variables `PG_HOST`, `PG_PASSWORD`
 
-### Problème: Backfill automatique non désiré
-**Solution**: Le sensor détecte automatiquement les nouvelles installations et ne backfill pas
+### Erreur : Dagster UI inaccessible
+→ Vérifier `dagster_webserver` container status
 
-### Problème: Données non mises à jour
-**Vérifier**:
-1. Dagster UI pour les logs d'erreur
-2. Connexion PostgreSQL fonctionne
-3. API Hub'Eau accessible
-4. Credentials corrects dans GitLab Variables
+### Logs
+```bash
+# Daemon Dagster
+docker logs -f brgm-dagster-daemon
+
+# Worker
+docker logs -f brgm-worker
+
+# PostgreSQL
+docker logs -f brgm-postgres
+```

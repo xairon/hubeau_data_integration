@@ -1,5 +1,5 @@
 """
-Jobs CSV Hub'Eau - Un job par API
+Jobs Hub'Eau - Un job par API
 
 Chaque job contient les assets d'une API spécifique:
 - Stations/référentiels
@@ -31,9 +31,9 @@ SEQUENTIAL_EXECUTION_CONFIG = {
 # ====================================
 
 # PIEZOMETRY: Stations + Chroniques
-piezometry_csv_job = define_asset_job(
-    name="piezometry_csv",
-    description="Piézométrie CSV: Stations → Chroniques (avec slicing)",
+piezometry_job = define_asset_job(
+    name="piezometry",
+    description="Piézométrie: Stations → Chroniques",
     selection=AssetSelection.keys(
         AssetKey("piezometry_stations_csv"),
         AssetKey("piezometry_chroniques_csv")
@@ -42,9 +42,9 @@ piezometry_csv_job = define_asset_job(
 )
 
 # QUALITY RIVERS: Stations + Analyses + Conditions + Operations
-quality_rivers_csv_job = define_asset_job(
-    name="quality_rivers_csv",
-    description="Qualité Cours d'Eau CSV: Stations → Analyses/Conditions/Operations",
+quality_rivers_job = define_asset_job(
+    name="quality_rivers",
+    description="Qualité Cours d'Eau : Stations → Analyses/Conditions/Operations",
     selection=AssetSelection.keys(
         AssetKey("quality_rivers_stations_csv"),
         AssetKey("quality_rivers_analyses_csv"),
@@ -55,9 +55,9 @@ quality_rivers_csv_job = define_asset_job(
 )
 
 # QUALITY GROUNDWATER: Stations + Analyses
-quality_groundwater_csv_job = define_asset_job(
-    name="quality_groundwater_csv",
-    description="Qualité Nappes CSV: Stations → Analyses",
+quality_groundwater_job = define_asset_job(
+    name="quality_groundwater",
+    description="Qualité Nappes : Stations → Analyses",
     selection=AssetSelection.keys(
         AssetKey("quality_groundwater_stations_csv"),
         AssetKey("quality_groundwater_analyses_csv")
@@ -66,9 +66,9 @@ quality_groundwater_csv_job = define_asset_job(
 )
 
 # HYDROMETRY: Sites + Stations + Observations
-hydrometry_csv_job = define_asset_job(
-    name="hydrometry_csv",
-    description="Hydrométrie CSV: Sites + Stations → Observations",
+hydrometry_job = define_asset_job(
+    name="hydrometry",
+    description="Hydrométrie : Sites + Stations → Observations",
     selection=AssetSelection.keys(
         AssetKey("hydrometry_sites_csv"),
         AssetKey("hydrometry_stations_csv"),
@@ -78,9 +78,9 @@ hydrometry_csv_job = define_asset_job(
 )
 
 # TEMPERATURE: Stations + Chroniques
-temperature_csv_job = define_asset_job(
-    name="temperature_csv",
-    description="Température CSV: Stations → Chroniques",
+temperature_job = define_asset_job(
+    name="temperature",
+    description="Température : Stations → Chroniques",
     selection=AssetSelection.keys(
         AssetKey("temperature_stations_csv"),
         AssetKey("temperature_chroniques_csv")
@@ -89,9 +89,9 @@ temperature_csv_job = define_asset_job(
 )
 
 # HYDROBIO: Stations + Indices + Taxons
-hydrobio_csv_job = define_asset_job(
-    name="hydrobio_csv",
-    description="Hydrobiologie CSV: Stations → Indices/Taxons",
+hydrobio_job = define_asset_job(
+    name="hydrobio",
+    description="Hydrobiologie : Stations → Indices/Taxons",
     selection=AssetSelection.keys(
         AssetKey("hydrobio_stations_csv"),
         AssetKey("hydrobio_indices_csv"),
@@ -101,9 +101,9 @@ hydrobio_csv_job = define_asset_job(
 )
 
 # ECOULEMENT: Stations + Campagnes + Observations
-ecoulement_csv_job = define_asset_job(
-    name="ecoulement_csv",
-    description="Écoulement CSV: Stations + Campagnes → Observations",
+ecoulement_job = define_asset_job(
+    name="ecoulement",
+    description="Écoulement : Stations + Campagnes → Observations",
     selection=AssetSelection.keys(
         AssetKey("ecoulement_stations_csv"),
         AssetKey("ecoulement_campagnes_csv"),
@@ -113,9 +113,9 @@ ecoulement_csv_job = define_asset_job(
 )
 
 # PRELEVEMENTS: Ouvrages + Points + Chroniques
-prelevements_csv_job = define_asset_job(
-    name="prelevements_csv",
-    description="Prélèvements CSV: Ouvrages + Points → Chroniques",
+prelevements_job = define_asset_job(
+    name="prelevements",
+    description="Prélèvements : Ouvrages + Points → Chroniques",
     selection=AssetSelection.keys(
         AssetKey("prelevements_ouvrages_csv"),
         AssetKey("prelevements_points_csv"),
@@ -130,8 +130,8 @@ prelevements_csv_job = define_asset_job(
 # ====================================
 
 # Job pour TOUTES les stations/référentiels
-all_stations_csv_job = define_asset_job(
-    name="all_stations_csv",
+all_stations_job = define_asset_job(
+    name="all_stations",
     description="Toutes les stations/référentiels CSV (séquentiel pour éviter OOM)",
     selection=AssetSelection.keys(
         # Stations
@@ -151,8 +151,8 @@ all_stations_csv_job = define_asset_job(
 )
 
 # Job pour TOUTES les chroniques/analyses/observations
-all_chroniques_csv_job = define_asset_job(
-    name="all_chroniques_csv",
+all_chroniques_job = define_asset_job(
+    name="all_chroniques",
     description="Toutes les chroniques/analyses/observations CSV (séquentiel pour éviter OOM)",
     selection=AssetSelection.keys(
         # Chroniques/Observations
@@ -172,9 +172,9 @@ all_chroniques_csv_job = define_asset_job(
 )
 
 # Job COMPLET (tout)
-all_hubeau_csv_job = define_asset_job(
-    name="all_hubeau_csv",
-    description="Toutes les données Hub'Eau CSV - stations + chroniques (séquentiel pour éviter OOM)",
+all_hubeau_job = define_asset_job(
+    name="all_hubeau",
+    description="Toutes les données Hub'Eau - stations + chroniques (séquentiel pour éviter OOM)",
     selection=AssetSelection.all(),
     config=SEQUENTIAL_EXECUTION_CONFIG
 )
@@ -186,9 +186,9 @@ all_hubeau_csv_job = define_asset_job(
 
 # Schedule pour refresh hebdomadaire des stations
 @schedule(
-    job=all_stations_csv_job,
+    job=all_stations_job,
     cron_schedule="0 3 * * 0",  # Dimanche 03h00
-    name="weekly_stations_refresh_csv"
+    name="weekly_stations_refresh"
 )
 def weekly_stations_schedule(context):
     """
@@ -224,9 +224,9 @@ def weekly_stations_schedule(context):
 
 # Schedule pour refresh quotidien des chroniques
 @schedule(
-    job=all_chroniques_csv_job,
+    job=all_chroniques_job,
     cron_schedule="0 2 * * *",  # Tous les jours 02h00
-    name="daily_chroniques_refresh_csv"
+    name="daily_chroniques_refresh"
 )
 def daily_chroniques_schedule(context):
     """

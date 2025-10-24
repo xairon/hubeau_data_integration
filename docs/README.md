@@ -1,13 +1,34 @@
 # Documentation Hub'Eau Pipeline
 
-## Documents principaux
+## 🚀 Démarrage
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Architecture technique du projet
-- **[SCHEMA_BDD_HUBEAU.md](SCHEMA_BDD_HUBEAU.md)** - Schéma de la base de données
-- **[APIS_HUBEAU_REFERENCE_COMPLETE.md](APIS_HUBEAU_REFERENCE_COMPLETE.md)** - Référence complète des APIs Hub'Eau
-- **[ENVIRONMENT_CONFIGURATION.md](ENVIRONMENT_CONFIGURATION.md)** - Configuration des variables d'environnement
-- **[GITLAB_CI_VARIABLES_SETUP.md](GITLAB_CI_VARIABLES_SETUP.md)** - Configuration GitLab CI/CD
-- **[QUICK_START_LOCAL.md](QUICK_START_LOCAL.md)** - Guide de démarrage rapide en local
-- **[OPTIMISATIONS.md](OPTIMISATIONS.md)** - Guide d'optimisation des performances
-- **[OBSERVABILITY.md](OBSERVABILITY.md)** - Monitoring et observabilité
-- **[ADMINER_USAGE.md](ADMINER_USAGE.md)** - Utilisation d'Adminer pour la base de données
+- [README principal](../README.md)
+- [Configuration](CONFIGURATION.md)
+- [Modes d'ingestion](MODES_INGESTION.md)
+
+## 📖 Architecture
+
+- [Architecture générale](ARCHITECTURE.md)
+- [Schéma base de données](SCHEMA_BDD.md)
+- [APIs Hub'Eau supportées](APIS_HUBEAU.md)
+
+## 🔧 Administration
+
+- [Configuration environnement](CONFIGURATION.md)
+- [GitLab CI/CD](GITLAB_CI_VARIABLES_SETUP.md)
+- [Monitoring](OBSERVABILITY.md)
+
+## 🌊 Contexte
+
+- [Projet JUNON - Vision](PROJET_JUNON_VISION.md)
+
+## 🛠️ Outils
+
+- **Dagster UI** : http://localhost:8080
+- **Adminer** (PostgreSQL) : http://localhost:8081
+
+## 📚 Ressources Externes
+
+- [Hub'Eau](https://hubeau.eaufrance.fr)
+- [Dagster](https://dagster.io)
+- [DLT](https://dlthub.com)
