@@ -199,23 +199,32 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         """
 
         # ✨ Détecter le mode depuis la partition si disponible
+        # NOTE: Config est frozen (Pydantic), on doit créer un NOUVEL objet au lieu de muter
         if context.has_partition_key:
             partition = context.partition_key
             context.log.info(f"📋 Partition sélectionnée: {partition}")
 
             if partition == "full":
-                config.mode = "full"
-                config.year = None
+                config = IngestionConfig(
+                    mode="full",
+                    year=None,
+                    incremental_days=config.incremental_days
+                )
             elif partition == "incremental":
-                config.mode = "incremental"
-                config.year = None
-                # Garder incremental_days de la config (défaut: 2)
+                config = IngestionConfig(
+                    mode="incremental",
+                    year=None,
+                    incremental_days=config.incremental_days
+                )
             else:
                 # C'est une année (2024, 2023, etc.)
                 try:
                     year_value = int(partition)
-                    config.mode = "year"
-                    config.year = year_value
+                    config = IngestionConfig(
+                        mode="year",
+                        year=year_value,
+                        incremental_days=config.incremental_days
+                    )
                 except ValueError:
                     context.log.error(f"❌ Partition invalide: {partition} (attendu: full, incremental, ou YYYY)")
                     raise ValueError(f"Partition invalide: {partition}")
@@ -224,12 +233,17 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         if config.mode == "year" and not config.year:
             raise ValueError("Mode YEAR necessite le parametre 'year'")
 
+        # Si resource ne supporte pas les filtres date, forcer mode FULL
         if not supports_date_filter and config.mode in ["year", "incremental"]:
             context.log.warning(
                 f"{resource_name} ne supporte pas les filtres date. "
                 f"Passage en mode FULL."
             )
-            config.mode = "full"
+            config = IngestionConfig(
+                mode="full",
+                year=None,
+                incremental_days=config.incremental_days
+            )
 
         # Charger config YAML
         yaml_config = load_yaml_config(resource_name)
