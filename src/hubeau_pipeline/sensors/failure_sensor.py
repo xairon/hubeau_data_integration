@@ -27,7 +27,7 @@ def pipeline_failure_alert_sensor(context: SensorEvaluationContext):
     # Chercher les runs échoués dans les dernières 24h
     since = datetime.now() - timedelta(hours=24)
 
-    failed_runs = context.instance.get_runs(
+    failed_run_records = context.instance.get_run_records(
         filters=RunsFilter(
             statuses=[DagsterRunStatus.FAILURE],
             updated_after=since,
@@ -35,16 +35,17 @@ def pipeline_failure_alert_sensor(context: SensorEvaluationContext):
         limit=10,
     )
 
-    if not failed_runs:
+    if not failed_run_records:
         context.log.debug("✅ Aucun échec détecté dans les dernières 24h")
         return
 
     # Log chaque échec
-    for run in failed_runs:
+    for run_record in failed_run_records:
+        run = run_record.dagster_run
         job_name = run.job_name
         run_id = run.run_id
-        # Note: created_at deprecated in Dagster 1.11, use create_timestamp instead
-        created_timestamp = run.create_timestamp if hasattr(run, 'create_timestamp') else run.start_time
+        # Use RunRecord.create_timestamp which is always available
+        created_timestamp = run_record.create_timestamp
 
         context.log.error(
             f"❌ ÉCHEC DÉTECTÉ - Job: {job_name}, Run ID: {run_id}, "
@@ -66,7 +67,7 @@ def pipeline_failure_alert_sensor(context: SensorEvaluationContext):
 
     # Log récapitulatif
     context.log.warning(
-        f"⚠️ TOTAL: {len(failed_runs)} échec(s) détecté(s) dans les dernières 24h"
+        f"⚠️ TOTAL: {len(failed_run_records)} échec(s) détecté(s) dans les dernières 24h"
     )
 
 
@@ -83,7 +84,7 @@ def long_running_pipeline_sensor(context: SensorEvaluationContext):
     """
 
     # Runs en cours
-    running_runs = context.instance.get_runs(
+    running_run_records = context.instance.get_run_records(
         filters=RunsFilter(
             statuses=[DagsterRunStatus.STARTED],
         ),
@@ -93,9 +94,10 @@ def long_running_pipeline_sensor(context: SensorEvaluationContext):
     long_running_threshold = timedelta(hours=2)
     now = datetime.now()
 
-    for run in running_runs:
-        if run.start_time:
-            duration = now - run.start_time
+    for run_record in running_run_records:
+        run = run_record.dagster_run
+        if run_record.start_time:
+            duration = now - datetime.fromtimestamp(run_record.start_time)
 
             if duration > long_running_threshold:
                 context.log.warning(
@@ -125,7 +127,7 @@ def repeated_failure_sensor(context: SensorEvaluationContext):
     # Chercher les runs échoués dans les derniers 7 jours
     since = datetime.now() - timedelta(days=7)
 
-    failed_runs = context.instance.get_runs(
+    failed_run_records = context.instance.get_run_records(
         filters=RunsFilter(
             statuses=[DagsterRunStatus.FAILURE],
             updated_after=since,
@@ -136,7 +138,8 @@ def repeated_failure_sensor(context: SensorEvaluationContext):
     # Grouper par job + partition
     failures_by_partition = {}
 
-    for run in failed_runs:
+    for run_record in failed_run_records:
+        run = run_record.dagster_run
         job_name = run.job_name
         partition_key = run.tags.get("dagster/partition", "no_partition")
         key = f"{job_name}:{partition_key}"
@@ -144,7 +147,7 @@ def repeated_failure_sensor(context: SensorEvaluationContext):
         if key not in failures_by_partition:
             failures_by_partition[key] = []
 
-        failures_by_partition[key].append(run)
+        failures_by_partition[key].append(run_record)
 
     # Identifier partitions avec >= 3 échecs
     problematic_partitions = {
