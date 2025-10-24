@@ -204,7 +204,7 @@ def fetch_csv_page(
     endpoint: str,
     page: int,
     params: Dict = None,
-    chunk_size: int = 5000,
+    chunk_size: int = 500,  # ← Réduit de 5000 à 500 pour éviter OOM
     max_retries: int = 3
 ) -> Iterator[pd.DataFrame]:
     """
@@ -215,7 +215,7 @@ def fetch_csv_page(
         endpoint: Endpoint API
         page: Numéro de page
         params: Paramètres de requête
-        chunk_size: Taille des chunks pour réduire mémoire (défaut: 5000 lignes)
+        chunk_size: Taille des chunks pour réduire mémoire (défaut: 500 lignes - réduit pour éviter OOM/SIGKILL)
         max_retries: Nombre de tentatives en cas de timeout (défaut: 3)
 
     Yields:
