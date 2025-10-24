@@ -186,13 +186,14 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         op_tags={"format": "csv", "source": "hubeau"},
         partitions_def=MODE_PARTITIONS if supports_date_filter else None,  # Partitions seulement si filtre date supporté
         deps=asset_deps,  # ← Dépendances vers assets stations
-        freshness_policy=CHRONIQUES_FRESHNESS_POLICY if supports_date_filter else None,  # ← Freshness 48h
+        # NOTE: freshness_policy retiré - incompatible avec Dagster 1.11.0+
+        # TODO: Migrer vers AutomationCondition + freshness_checks
         metadata={
             "partition_type": "time_based" if supports_date_filter else "none",
             "supports_incremental": supports_date_filter,
             "description": f"Ingestion Hub'Eau pour {resource_name}",
             "depends_on": ASSET_DEPENDENCIES.get(resource_name, []),  # ← Metadata dependencies
-            "freshness_check": "48h" if supports_date_filter else "none"  # ← Metadata freshness
+            "freshness_check": "48h" if supports_date_filter else "none"  # ← Metadata freshness (info only)
         }
     )
     def csv_asset(

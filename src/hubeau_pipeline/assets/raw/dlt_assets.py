@@ -693,7 +693,7 @@ def temperature_stations_reference(context: AssetExecutionContext) -> Dict[str, 
     group_name="hubeau_hydrometry",
     partitions_def=YEARLY_PARTITIONS,
     deps=[hydrometry_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def hydrometry_obs_elab(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrometry elaborated observations (historical data)."""
@@ -705,7 +705,7 @@ def hydrometry_obs_elab(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_quality_rivers",
     partitions_def=YEARLY_PARTITIONS,
     deps=[quality_rivers_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def quality_rivers_operations(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers sampling operations."""
@@ -717,7 +717,7 @@ def quality_rivers_operations(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_quality_rivers",
     partitions_def=YEARLY_PARTITIONS,
     deps=[quality_rivers_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def quality_rivers_conditions(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests quality rivers environmental conditions."""
@@ -729,7 +729,7 @@ def quality_rivers_conditions(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_piezometry",
     partitions_def=YEARLY_PARTITIONS,
     deps=[piezometry_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def piezometry_chroniques_historical(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry historical chroniques (complete historical data)."""
@@ -745,7 +745,7 @@ def piezometry_chroniques_historical(context: AssetExecutionContext) -> Dict[str
     group_name="hubeau_hydrobiology",
     partitions_def=YEARLY_PARTITIONS,
     deps=[hydrobio_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology taxons data using dlt."""
@@ -757,7 +757,7 @@ def hydrobio_taxons(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_hydrobiology",
     partitions_def=YEARLY_PARTITIONS,
     deps=[hydrobio_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests hydrobiology indices data using dlt."""
@@ -769,7 +769,7 @@ def hydrobio_indices(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_piezometry",
     partitions_def=YEARLY_PARTITIONS,
     deps=[piezometry_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests piezometry chroniques data using dlt."""
@@ -781,7 +781,7 @@ def piezometry_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_quality_rivers",
     partitions_def=YEARLY_PARTITIONS,
     deps=[quality_rivers_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests superficial waterbodies quality analyses data using dlt."""
@@ -793,7 +793,7 @@ def quality_rivers_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_quality_groundwater",
     partitions_def=YEARLY_PARTITIONS,
     deps=[quality_groundwater_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests groundwater quality analyses data using dlt."""
@@ -805,7 +805,7 @@ def quality_groundwater_analyses(context: AssetExecutionContext) -> Dict[str, An
     group_name="hubeau_ecoulement",
     partitions_def=YEARLY_PARTITIONS,
     deps=[ecoulement_stations_reference, ecoulement_campagnes_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests ecoulement observations data using dlt (données annuelles)."""
@@ -817,7 +817,7 @@ def ecoulement_observations(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_prelevements",
     partitions_def=YEARLY_PARTITIONS,
     deps=[prelevements_ouvrages_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests prelevements chroniques data using dlt."""
@@ -830,7 +830,7 @@ def prelevements_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     group_name="hubeau_temperature",
     partitions_def=YEARLY_PARTITIONS,
     deps=[temperature_stations_reference],
-    freshness_policy=DLT_FRESHNESS_POLICY
+    # NOTE: freshness_policy retiré - incompatible Dagster 1.11.0+
 )
 def temperature_chroniques(context: AssetExecutionContext) -> Dict[str, Any]:
     """Ingests temperature chroniques data using dlt with yearly partitions and automatic fallback."""
