@@ -10,6 +10,23 @@ from dagster import define_asset_job, AssetSelection, AssetKey, schedule, RunReq
 
 
 # ====================================
+# CONFIGURATION GLOBALE - EXECUTION SEQUENTIELLE
+# ====================================
+# Force l'exécution séquentielle (1 asset à la fois) pour éviter OOM/SIGKILL
+# VPS: 8GB RAM, dlt_worker: 3GB limit
+# Avec 11 assets stations en parallèle → 5.5GB+ → SIGKILL
+SEQUENTIAL_EXECUTION_CONFIG = {
+    "execution": {
+        "config": {
+            "multiprocess": {
+                "max_concurrent": 1  # 1 asset à la fois, jamais de parallélisme
+            }
+        }
+    }
+}
+
+
+# ====================================
 # JOBS PAR API
 # ====================================
 
@@ -20,7 +37,8 @@ piezometry_csv_job = define_asset_job(
     selection=AssetSelection.keys(
         AssetKey("piezometry_stations_csv"),
         AssetKey("piezometry_chroniques_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # QUALITY RIVERS: Stations + Analyses + Conditions + Operations
@@ -32,7 +50,8 @@ quality_rivers_csv_job = define_asset_job(
         AssetKey("quality_rivers_analyses_csv"),
         AssetKey("quality_rivers_conditions_csv"),
         AssetKey("quality_rivers_operations_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # QUALITY GROUNDWATER: Stations + Analyses
@@ -42,7 +61,8 @@ quality_groundwater_csv_job = define_asset_job(
     selection=AssetSelection.keys(
         AssetKey("quality_groundwater_stations_csv"),
         AssetKey("quality_groundwater_analyses_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # HYDROMETRY: Sites + Stations + Observations
@@ -53,7 +73,8 @@ hydrometry_csv_job = define_asset_job(
         AssetKey("hydrometry_sites_csv"),
         AssetKey("hydrometry_stations_csv"),
         AssetKey("hydrometry_obs_elab_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # TEMPERATURE: Stations + Chroniques
@@ -63,7 +84,8 @@ temperature_csv_job = define_asset_job(
     selection=AssetSelection.keys(
         AssetKey("temperature_stations_csv"),
         AssetKey("temperature_chroniques_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # HYDROBIO: Stations + Indices + Taxons
@@ -74,7 +96,8 @@ hydrobio_csv_job = define_asset_job(
         AssetKey("hydrobio_stations_csv"),
         AssetKey("hydrobio_indices_csv"),
         AssetKey("hydrobio_taxons_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # ECOULEMENT: Stations + Campagnes + Observations
@@ -85,7 +108,8 @@ ecoulement_csv_job = define_asset_job(
         AssetKey("ecoulement_stations_csv"),
         AssetKey("ecoulement_campagnes_csv"),
         AssetKey("ecoulement_observations_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # PRELEVEMENTS: Ouvrages + Points + Chroniques
@@ -96,7 +120,8 @@ prelevements_csv_job = define_asset_job(
         AssetKey("prelevements_ouvrages_csv"),
         AssetKey("prelevements_points_csv"),
         AssetKey("prelevements_chroniques_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 
@@ -107,7 +132,7 @@ prelevements_csv_job = define_asset_job(
 # Job pour TOUTES les stations/référentiels
 all_stations_csv_job = define_asset_job(
     name="all_stations_csv",
-    description="Toutes les stations/référentiels CSV",
+    description="Toutes les stations/référentiels CSV (séquentiel pour éviter OOM)",
     selection=AssetSelection.keys(
         # Stations
         AssetKey("piezometry_stations_csv"),
@@ -121,13 +146,14 @@ all_stations_csv_job = define_asset_job(
         AssetKey("ecoulement_campagnes_csv"),
         AssetKey("prelevements_ouvrages_csv"),
         AssetKey("prelevements_points_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # Job pour TOUTES les chroniques/analyses/observations
 all_chroniques_csv_job = define_asset_job(
     name="all_chroniques_csv",
-    description="Toutes les chroniques/analyses/observations CSV",
+    description="Toutes les chroniques/analyses/observations CSV (séquentiel pour éviter OOM)",
     selection=AssetSelection.keys(
         # Chroniques/Observations
         AssetKey("piezometry_chroniques_csv"),
@@ -141,14 +167,16 @@ all_chroniques_csv_job = define_asset_job(
         AssetKey("hydrobio_taxons_csv"),
         AssetKey("ecoulement_observations_csv"),
         AssetKey("prelevements_chroniques_csv")
-    )
+    ),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 # Job COMPLET (tout)
 all_hubeau_csv_job = define_asset_job(
     name="all_hubeau_csv",
-    description="Toutes les données Hub'Eau CSV (stations + chroniques)",
-    selection=AssetSelection.all()
+    description="Toutes les données Hub'Eau CSV - stations + chroniques (séquentiel pour éviter OOM)",
+    selection=AssetSelection.all(),
+    config=SEQUENTIAL_EXECUTION_CONFIG
 )
 
 
