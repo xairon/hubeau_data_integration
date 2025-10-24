@@ -278,6 +278,46 @@ class PostgresBulkDestinationV2:
 
         return df
 
+    def _create_table_from_dataframe(self, df: pd.DataFrame, table_name: str, conn):
+        """Crée la table si elle n'existe pas en inférant les types depuis le DataFrame"""
+        with conn.cursor() as cursor:
+            # Inférer les types depuis pandas
+            col_defs = []
+            for col in df.columns:
+                dtype = df[col].dtype
+                if dtype == 'object':
+                    pg_type = 'TEXT'
+                elif dtype in ['int64', 'Int64']:
+                    pg_type = 'BIGINT'
+                elif dtype in ['int32', 'Int32']:
+                    pg_type = 'INTEGER'
+                elif dtype in ['float64', 'float32']:
+                    pg_type = 'DOUBLE PRECISION'
+                elif dtype == 'bool':
+                    pg_type = 'BOOLEAN'
+                elif 'datetime' in str(dtype):
+                    pg_type = 'TIMESTAMP'
+                else:
+                    pg_type = 'TEXT'  # Fallback
+
+                col_defs.append(f"{col} {pg_type}")
+
+            create_sql = f"""
+                CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
+                    {', '.join(col_defs)}
+                )
+            """
+            cursor.execute(create_sql)
+            conn.commit()
+            logger.info(f"✅ Table {table_name} créée avec {len(col_defs)} colonnes")
+
+            # Invalider le cache pour forcer refresh
+            cache_key = f"{self.schema_name}.{table_name}"
+            if cache_key in self._table_columns_cache:
+                del self._table_columns_cache[cache_key]
+            if cache_key in self._cache_timestamps:
+                del self._cache_timestamps[cache_key]
+
     def _copy_from_dataframe(self, df: pd.DataFrame, table_name: str, conn=None):
         """
         COPY optimisé avec connexion réutilisable
@@ -291,6 +331,12 @@ class PostgresBulkDestinationV2:
             with conn.cursor() as cursor:
                 # Récupérer colonnes (depuis cache si possible)
                 target_columns = self._get_target_columns(table_name, conn)
+
+                # Si table n'existe pas, la créer
+                if not target_columns:
+                    logger.warning(f"⚠️ Table {table_name} n'existe pas - création automatique")
+                    self._create_table_from_dataframe(df, table_name, conn)
+                    target_columns = self._get_target_columns(table_name, conn)
 
                 # Filtrer colonnes SANS COPIER le DataFrame
                 df_columns = df.columns.tolist()
