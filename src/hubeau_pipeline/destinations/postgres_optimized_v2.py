@@ -114,12 +114,103 @@ class PostgresBulkDestinationV2:
             if need_release:
                 self._release_connection(conn)
 
-    def _clean_dataframe_inplace(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _get_table_column_types(self, table_name: str, conn=None) -> Dict[str, str]:
+        """
+        Récupère les types des colonnes de la table avec CACHE
+        Utilisé pour le casting de types avant COPY
+        """
+        cache_key = f"{self.schema_name}.{table_name}_types"
+        now = time.time()
+
+        if (cache_key in self._table_columns_cache and
+            cache_key in self._cache_timestamps and
+            now - self._cache_timestamps[cache_key] < self._cache_ttl):
+            logger.debug(f"📦 Cache hit pour types {cache_key}")
+            return self._table_columns_cache[cache_key]
+
+        need_release = False
+        if conn is None:
+            conn = self._get_connection()
+            need_release = True
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(f"""
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = %s AND table_name = %s
+                    ORDER BY ordinal_position
+                """, (self.schema_name, table_name))
+                type_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+                # Mettre en cache
+                self._table_columns_cache[cache_key] = type_map
+                self._cache_timestamps[cache_key] = now
+                logger.debug(f"📝 Cache miss pour types {cache_key} - mis en cache")
+
+                return type_map
+        finally:
+            if need_release:
+                self._release_connection(conn)
+
+    def _clean_dataframe_inplace(self, df: pd.DataFrame, table_name: str = None, conn=None) -> pd.DataFrame:
         """
         Nettoie le DataFrame EN PLACE pour économiser la mémoire
         Évite les copies inutiles
+
+        Args:
+            df: DataFrame à nettoyer
+            table_name: Nom de la table (optionnel, pour casting de types)
+            conn: Connexion PostgreSQL (optionnel, pour récupérer les types)
         """
         import json
+
+        # ✅ Casting de types selon le schéma PostgreSQL
+        if table_name and conn:
+            try:
+                column_types = self._get_table_column_types(table_name, conn)
+                for col in df.columns:
+                    if col not in column_types:
+                        continue
+
+                    pg_type = column_types[col]
+
+                    # Cast integer types (integer, bigint, smallint)
+                    if pg_type in ['integer', 'bigint', 'smallint']:
+                        # Convert float strings like "1.0" to integers
+                        if df[col].dtype in ['object', 'float64']:
+                            try:
+                                # Replace NaN/None with None, convert others to int
+                                df[col] = df[col].apply(
+                                    lambda x: None if pd.isna(x) or x == '' else int(float(x))
+                                )
+                                logger.debug(f"✅ Cast {col} to {pg_type}")
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
+
+                    # Cast double precision / real
+                    elif pg_type in ['double precision', 'real', 'numeric']:
+                        if df[col].dtype == 'object':
+                            try:
+                                df[col] = df[col].apply(
+                                    lambda x: None if pd.isna(x) or x == '' else float(x)
+                                )
+                                logger.debug(f"✅ Cast {col} to {pg_type}")
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
+
+                    # Cast boolean
+                    elif pg_type == 'boolean':
+                        if df[col].dtype == 'object':
+                            try:
+                                df[col] = df[col].apply(
+                                    lambda x: None if pd.isna(x) or x == '' else bool(x)
+                                )
+                                logger.debug(f"✅ Cast {col} to {pg_type}")
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not retrieve column types for {table_name}: {e}")
 
         for col in df.columns:
             if df[col].dtype == 'object':
@@ -201,7 +292,7 @@ class PostgresBulkDestinationV2:
                 if len(common_columns) < len(df_columns):
                     df = df[common_columns]  # Vue, pas copie si possible
 
-                df = self._clean_dataframe_inplace(df)
+                df = self._clean_dataframe_inplace(df, table_name=table_name, conn=conn)
 
                 # Gérer colonnes DLT si nécessaires
                 if '_dlt_load_id' in target_columns and '_dlt_load_id' not in df.columns:
@@ -259,7 +350,7 @@ class PostgresBulkDestinationV2:
                 # Nettoyer DataFrame EN PLACE
                 if len(common_columns) < len(df_columns):
                     df = df[common_columns]
-                df = self._clean_dataframe_inplace(df)
+                df = self._clean_dataframe_inplace(df, table_name=table_name, conn=conn)
 
                 # Fix: Deduplicate rows to avoid "ON CONFLICT DO UPDATE command cannot affect row a second time"
                 # This error occurs when the same primary key appears multiple times in a single batch

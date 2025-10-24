@@ -302,10 +302,26 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             # Déterminer write_disposition: replace pour mode full, append sinon
             write_disposition = "replace" if config.mode == "full" else "append"
 
-            context.log.info(f"📥 Streaming par batch (BATCH_SIZE=50000, disposition={write_disposition})...")
+            # ✅ BATCH_SIZE dynamique selon la ressource pour éviter OOM
+            # Datasets volumineux/problématiques → batch plus petit (10k)
+            # Autres datasets → batch standard (50k)
+            PROBLEMATIC_RESOURCES = [
+                "hydrobio_stations",
+                "hydrobio_indices",
+                "hydrobio_taxons",
+                "quality_rivers_analyses",
+                "prelevements_ouvrages",
+                "prelevements_chroniques",
+                "hydrometry_obs_elab"
+            ]
 
-            # Streaming par batch de 50k records (comme dlt_assets.py)
-            BATCH_SIZE = 50000
+            if resource_name in PROBLEMATIC_RESOURCES:
+                BATCH_SIZE = 10000  # Batch réduit pour éviter OOM sur datasets volumineux
+                context.log.info(f"⚠️  Dataset volumineux détecté: {resource_name} → BATCH_SIZE réduit à 10,000")
+            else:
+                BATCH_SIZE = 50000  # Batch standard pour datasets plus petits
+
+            context.log.info(f"📥 Streaming par batch (BATCH_SIZE={BATCH_SIZE:,}, disposition={write_disposition})...")
             batch = []
             total_records = 0
             batch_count = 0
