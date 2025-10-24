@@ -2,8 +2,9 @@
 Assets Hub'Eau - Ingestion directe PostgreSQL
 
 Structure:
-- hubeau_assets.py : Ingestion des données Hub'Eau
-- monitoring/      : Monitoring qualité données
+- hubeau_assets.py      : Ingestion des données Hub'Eau
+- monitoring/           : Monitoring qualité données
+- schema_optimization.py: Optimisation intelligente des schémas PostgreSQL
 """
 
 from .hubeau_assets import (
@@ -33,6 +34,7 @@ from .hubeau_assets import (
     prelevements_ouvrages_csv,
 )
 from .monitoring import all_monitoring_assets
+from .schema_optimization import optimize_hubeau_schema, analyze_table_schema
 
 # Tous les assets Hub'Eau
 all_hubeau_assets = [
@@ -62,13 +64,23 @@ all_hubeau_assets = [
     prelevements_ouvrages_csv,
 ]
 
+# Assets d'optimisation de schéma
+all_schema_assets = [
+    optimize_hubeau_schema,
+    analyze_table_schema,
+]
+
 # Tous les assets du pipeline
-all_assets = all_hubeau_assets + all_monitoring_assets
+all_assets = all_hubeau_assets + all_monitoring_assets + all_schema_assets
 
 __all__ = [
     "all_assets",
     "all_hubeau_assets",
     "all_monitoring_assets",
+    "all_schema_assets",
+    # Schema optimization
+    "optimize_hubeau_schema",
+    "analyze_table_schema",
     # Individual assets
     "piezometry_chroniques_csv",
     "quality_groundwater_analyses_csv",
