@@ -399,15 +399,16 @@ class PostgresBulkDestinationV2:
                             conn.commit()
                             logger.info(f"✅ Colonne {problematic_column} convertie en TEXT")
 
-                            # Invalider le cache
-                            cache_key = f"{self.schema_name}.{table_name}_types"
-                            if cache_key in self._table_columns_cache:
-                                del self._table_columns_cache[cache_key]
+                        # Invalider le cache
+                        cache_key = f"{self.schema_name}.{table_name}_types"
+                        if cache_key in self._table_columns_cache:
+                            del self._table_columns_cache[cache_key]
 
-                            # RETRY COPY
-                            logger.info(f"🔄 Retry COPY après correction de schéma...")
+                        # RETRY COPY avec NOUVEAU cursor
+                        logger.info(f"🔄 Retry COPY après correction de schéma...")
+                        with conn.cursor() as retry_cursor:
                             output.seek(0)  # Reset buffer
-                            cursor.copy_expert(copy_sql, output)
+                            retry_cursor.copy_expert(copy_sql, output)
                             conn.commit()
                             logger.info(f"✅ COPY réussi: {len(df)} records → {table_name}")
                             return  # Success après retry
