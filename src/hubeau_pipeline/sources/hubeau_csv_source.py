@@ -22,7 +22,17 @@ import time
 from enum import Enum
 from datetime import datetime, timedelta
 
+# Configure logger pour qu'il soit capture par Dagster
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Ajouter un handler console si pas deja present pour que Dagster capture les logs
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(levelname)s - %(name)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
 class IngestionMode(Enum):
@@ -72,8 +82,8 @@ class HubeauAPIClient:
             time.sleep(self.rate_limit - elapsed)
         self.last_request_time = time.time()
 
-    def get(self, endpoint: str, params: Dict = None, timeout: int = 60) -> requests.Response:
-        """GET avec rate limiting et retry"""
+    def get(self, endpoint: str, params: Dict = None, timeout: int = 180) -> requests.Response:
+        """GET avec rate limiting et retry (timeout 180s pour grandes pages CSV)"""
         self._rate_limit()
 
         url = f"{self.base_url}{endpoint}"
@@ -83,7 +93,7 @@ class HubeauAPIClient:
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
-            logger.error(f"Erreur requete {url}: {e}")
+            logger.error(f"❌ Erreur requete {url}: {e}")
             raise
 
 
@@ -180,7 +190,7 @@ def get_total_pages_from_json(
 
         total_pages = (total_count // actual_page_size) + (1 if total_count % actual_page_size > 0 else 0)
 
-        logger.info(f"Total: {total_count:,} records, page_size={actual_page_size}, {total_pages} pages")
+        logger.info(f"📊 {endpoint}: Total={total_count:,} records, page_size={actual_page_size}, pages={total_pages}")
 
         return total_pages, total_count
 
@@ -193,30 +203,69 @@ def fetch_csv_page(
     client: HubeauAPIClient,
     endpoint: str,
     page: int,
-    params: Dict = None
-) -> pd.DataFrame:
+    params: Dict = None,
+    chunk_size: int = 5000,
+    max_retries: int = 3
+) -> Iterator[pd.DataFrame]:
     """
-    Telecharge et parse une page CSV
+    Telecharge et parse une page CSV en chunks avec retry sur timeout
+
+    Args:
+        client: Client HTTP
+        endpoint: Endpoint API
+        page: Numéro de page
+        params: Paramètres de requête
+        chunk_size: Taille des chunks pour réduire mémoire (défaut: 5000 lignes)
+        max_retries: Nombre de tentatives en cas de timeout (défaut: 3)
+
+    Yields:
+        DataFrames par chunks pour économiser la mémoire
     """
-    try:
-        response = client.get(endpoint, params={**(params or {}), 'page': page})
+    retry_count = 0
 
-        # Hub'Eau utilise separateur point-virgule
-        df = pd.read_csv(
-            io.StringIO(response.text),
-            sep=';',
-            quotechar='"',
-            low_memory=False,
-            on_bad_lines='skip'
-        )
+    while retry_count <= max_retries:
+        try:
+            response = client.get(endpoint, params={**(params or {}), 'page': page}, timeout=180)
 
-        return df
+            # Hub'Eau utilise separateur point-virgule
+            # Utiliser chunksize pour lire par morceaux et économiser mémoire
+            chunks = pd.read_csv(
+                io.StringIO(response.text),
+                sep=';',
+                quotechar='"',
+                low_memory=False,
+                on_bad_lines='skip',
+                chunksize=chunk_size
+            )
 
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame()
-    except Exception as e:
-        logger.error(f"Erreur parsing CSV page {page}: {e}")
-        raise
+            for chunk in chunks:
+                yield chunk
+
+            # Succès, sortir de la boucle retry
+            break
+
+        except pd.errors.EmptyDataError:
+            logger.warning(f"⚠️  Page {page}: CSV vide")
+            yield pd.DataFrame()
+            break
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
+            retry_count += 1
+            if retry_count > max_retries:
+                logger.error(f"❌ Page {page}: Max retries ({max_retries}) atteint après timeout: {e}")
+                raise
+
+            # Backoff exponentiel: 5s, 10s, 20s
+            wait_time = 5 * (2 ** (retry_count - 1))
+            logger.warning(
+                f"⚠️  Page {page}: Timeout (tentative {retry_count}/{max_retries}), "
+                f"retry dans {wait_time}s - Error: {type(e).__name__}"
+            )
+            time.sleep(wait_time)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur parsing CSV page {page}: {type(e).__name__}: {e}")
+            raise
 
 
 def _paginate_csv(
@@ -235,7 +284,7 @@ def _paginate_csv(
         raise
 
     if total_count == 0:
-        logger.warning(f"{resource_name}: Aucune donnee")
+        logger.warning(f"⚠️  {resource_name}: Aucune donnee trouvee pour ces parametres")
         return
 
     records_total = 0
@@ -244,35 +293,48 @@ def _paginate_csv(
 
     for page in range(1, total_pages + 1):
         try:
-            df = fetch_csv_page(client, endpoint, page, params)
+            chunk_count = 0
+            page_records = 0
 
-            if df.empty:
-                logger.warning(f"{resource_name}: Page {page}/{total_pages} vide")
-                continue
+            # Itérer sur les chunks de la page
+            for df_chunk in fetch_csv_page(client, endpoint, page, params):
+                if df_chunk.empty:
+                    continue
 
-            records = df.to_dict('records')
-            records_total += len(records)
+                chunk_count += 1
+                records = df_chunk.to_dict('records')
+                page_records += len(records)
+                records_total += len(records)
 
-            logger.info(
-                f"{resource_name}: Page {page}/{total_pages} -> "
-                f"{len(records)} records (total: {records_total:,}/{total_count:,})"
-            )
+                # Log avec progression
+                progress_pct = (records_total / total_count * 100) if total_count > 0 else 0
+                logger.info(
+                    f"📥 {resource_name}: Page {page}/{total_pages} chunk {chunk_count} -> "
+                    f"{len(records)} records (page: {page_records:,}, total: {records_total:,}/{total_count:,} = {progress_pct:.1f}%)"
+                )
 
-            yield records
+                # Yield immédiatement pour libérer mémoire
+                yield records
+
+            # Log fin de page
+            if page_records == 0:
+                logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} vide (0 records)")
+            else:
+                logger.info(f"✅ {resource_name}: Page {page}/{total_pages} terminée ({page_records:,} records)")
 
             errors_count = 0
 
         except Exception as e:
             errors_count += 1
-            logger.error(f"{resource_name}: Erreur page {page}/{total_pages} (#{errors_count}): {e}")
+            logger.error(f"❌ {resource_name}: Erreur page {page}/{total_pages} (erreur #{errors_count}): {type(e).__name__}: {e}")
 
             if errors_count >= max_consecutive_errors:
-                logger.error(f"{resource_name}: ABANDON apres {errors_count} erreurs")
+                logger.error(f"❌ {resource_name}: ABANDON après {errors_count} erreurs consécutives")
                 raise
 
             continue
 
-    logger.info(f"{resource_name}: TERMINE - {records_total:,} records ingeres")
+    logger.info(f"✅ {resource_name}: TERMINE - {records_total:,} records ingeres")
 
 
 def _paginate_with_station_slicing(
@@ -324,13 +386,17 @@ def _paginate_with_station_slicing(
         station_params = {**params, station_field: station_code}
 
         try:
+            station_records = 0
             # Pagination pour cette station
             for records in _paginate_csv(client, endpoint, station_params, f"{resource_name}[{station_code}]"):
+                station_records += len(records)
                 total_records += len(records)
                 yield records
 
+            logger.info(f"✅ {resource_name}: Station {idx}/{len(stations)} ({station_code}) terminée: {station_records:,} records")
+
         except Exception as e:
-            logger.error(f"{resource_name}: Erreur station {station_code}: {e}")
+            logger.error(f"❌ {resource_name}: Erreur station {station_code}: {type(e).__name__}: {e}")
             # Continuer avec les autres stations
             continue
 
@@ -366,6 +432,9 @@ def hubeau_csv_source(
         use_station_slicing: Activer slicing par station
     """
 
+    # Compteur global pour tracking
+    total_records_yielded = {'count': 0}
+
     @dlt.resource(
         name=resource_name,
         primary_key=primary_key,
@@ -388,24 +457,33 @@ def hubeau_csv_source(
             resource_name=resource_name
         )
 
-        logger.info(f"{resource_name}: Mode={mode.value}, Params={params}")
+        logger.info(f"🔧 {resource_name}: Mode={mode.value}, Params={params}")
 
         # Choisir strategie de pagination
         if use_station_slicing:
             # Slicing par station (piezometry_chroniques)
-            yield from _paginate_with_station_slicing(
+            for batch in _paginate_with_station_slicing(
                 client=client,
                 endpoint=endpoint,
                 params=params,
                 resource_name=resource_name
-            )
+            ):
+                total_records_yielded['count'] += len(batch)
+                yield batch
         else:
             # Pagination standard
-            yield from _paginate_csv(
+            for batch in _paginate_csv(
                 client=client,
                 endpoint=endpoint,
                 params=params,
                 resource_name=resource_name
-            )
+            ):
+                total_records_yielded['count'] += len(batch)
+                yield batch
+
+        logger.info(f"✅ {resource_name}: Total yielded = {total_records_yielded['count']:,} records")
+
+    # Attacher le compteur a la resource pour y acceder depuis l'asset
+    csv_resource._total_records = total_records_yielded
 
     return csv_resource

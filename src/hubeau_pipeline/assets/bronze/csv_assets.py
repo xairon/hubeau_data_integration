@@ -131,23 +131,80 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             use_station_slicing=use_station_slicing
         )
 
-        # Execution
+        # Execution avec configuration optimisée mémoire
         start_time = time.time()
 
+        context.log.info(
+            f"⚙️  Configuration DLT: workers=1 (économie mémoire), "
+            f"format temporaire=jsonl (streaming optimisé)"
+        )
+
         try:
-            load_info = pipeline.run(source)
+            # Exécuter avec 1 seul worker pour économiser mémoire
+            #
+            # Note: loader_file_format contrôle le format des fichiers TEMPORAIRES
+            # créés par DLT entre NORMALIZE et LOAD (dans /tmp/dlt_pipelines/)
+            # - Ces fichiers sont créés APRÈS téléchargement des CSV
+            # - Ils sont utilisés pour l'insertion en PostgreSQL
+            # - Ils sont automatiquement supprimés après l'import
+            #
+            # JSONL = moins de RAM que Parquet car DLT stream ligne par ligne
+            load_info = pipeline.run(
+                source,
+                workers=1,                      # 1 worker = moins de RAM utilisée
+                loader_file_format="jsonl"      # Format temporaire optimisé mémoire
+            )
             elapsed = time.time() - start_time
 
-            # Extraire metriques
+            # Extraire metriques de load_info
             rows_loaded = 0
+
+            # Methode 1: Via load_packages
             if hasattr(load_info, 'load_packages') and load_info.load_packages:
                 for package in load_info.load_packages:
-                    if hasattr(package, 'jobs'):
+                    if hasattr(package, 'jobs') and package.jobs:
                         for job in package.jobs:
-                            if hasattr(job, 'records_count'):
-                                rows_loaded += job.records_count
+                            if hasattr(job, '_rows_count'):
+                                rows_loaded += job._rows_count
+                            elif hasattr(job, 'job_file_info'):
+                                # Compter les lignes dans le fichier
+                                job_info = job.job_file_info
+                                if hasattr(job_info, 'rows_count'):
+                                    rows_loaded += job_info.rows_count
 
-            context.log.info(f"✅ Termine: {rows_loaded:,} lignes en {elapsed:.2f}s")
+            # Methode 2: Via metrics si disponible
+            if rows_loaded == 0 and hasattr(load_info, 'metrics'):
+                metrics = load_info.metrics
+                if hasattr(metrics, 'rows_count'):
+                    rows_loaded = metrics.rows_count
+
+            # Methode 3: Via first_run si disponible
+            if rows_loaded == 0 and hasattr(load_info, 'first_run') and load_info.first_run:
+                try:
+                    rows_loaded = sum(
+                        job._rows_count if hasattr(job, '_rows_count') else 0
+                        for package in load_info.first_run.load_packages
+                        for job in (package.jobs if hasattr(package, 'jobs') else [])
+                    )
+                except:
+                    pass
+
+            # Log détaillé des résultats
+            throughput = rows_loaded / elapsed if elapsed > 0 else 0
+            context.log.info(
+                f"✅ Termine: {rows_loaded:,} lignes en {elapsed:.2f}s "
+                f"({throughput:.1f} lignes/sec)"
+            )
+
+            # Debug: afficher structure load_info si rows_loaded == 0
+            if rows_loaded == 0:
+                context.log.warning(f"⚠️  Aucune ligne detectee dans load_info")
+                context.log.debug(f"load_info type: {type(load_info)}")
+                context.log.debug(f"load_info attributes: {dir(load_info)}")
+
+                # Afficher les packages disponibles pour debug
+                if hasattr(load_info, 'load_packages'):
+                    context.log.debug(f"Nombre de load_packages: {len(load_info.load_packages)}")
 
             return Output(
                 value=load_info,
