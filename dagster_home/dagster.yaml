@@ -26,13 +26,5 @@ run_coordinator:
         value: "hubeau"
         limit: 1  # ✅ Une seule exécution Hub'Eau à la fois
 
-# Configuration de l'executor multiprocess (limite assets en parallèle DANS un run)
-execution:
-  config:
-    multiprocess:
-      max_concurrent: 2  # ✅ Max 2 assets en parallèle (au lieu de 4 par défaut) → Divise RAM par 2
-      retries:
-        enabled: true
-
 telemetry:
   enabled: false
