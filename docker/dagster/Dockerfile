@@ -23,6 +23,7 @@ WORKDIR /app
 COPY pyproject.toml README.md /app/
 COPY src /app/src
 COPY configs /app/configs
+COPY workspace.yaml /app/workspace.yaml
 
 # Install dependencies using uv (100x faster than pip!)
 # Install all dependencies (production + worker)

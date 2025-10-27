@@ -1,0 +1,5 @@
+# Workspace configuration for Dagster
+load_from:
+  - python_module:
+      module_name: hubeau_pipeline.definitions
+      location_name: hubeau_pipeline

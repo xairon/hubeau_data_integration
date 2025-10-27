@@ -515,27 +515,53 @@ class SchemaOptimizer:
             if target_type in ('INTEGER', 'SMALLINT', 'BIGINT'):
                 # Vérifier que toutes les valeurs sont numériques
                 cur.execute(f"""
-                    SELECT COUNT(*), array_agg(DISTINCT {column} ORDER BY {column} LIMIT 5)
+                    SELECT COUNT(*)
                     FROM {schema}.{table}
                     WHERE {column} IS NOT NULL
                       AND {column}::text !~ '^-?[0-9]+$'
                 """)
+                invalid_count = cur.fetchone()[0]
 
-                invalid_count, examples = cur.fetchone()
-                if invalid_count and invalid_count > 0:
+                if invalid_count > 0:
+                    # Récupérer exemples de valeurs invalides
+                    cur.execute(f"""
+                        SELECT array_agg(val)
+                        FROM (
+                            SELECT DISTINCT {column} as val
+                            FROM {schema}.{table}
+                            WHERE {column} IS NOT NULL
+                              AND {column}::text !~ '^-?[0-9]+$'
+                            ORDER BY val
+                            LIMIT 5
+                        ) sub
+                    """)
+                    examples = cur.fetchone()[0]
                     return False, examples
 
             elif target_type in ('DOUBLE PRECISION', 'NUMERIC', 'REAL'):
                 # Vérifier que toutes les valeurs sont des nombres (entiers ou décimaux)
                 cur.execute(f"""
-                    SELECT COUNT(*), array_agg(DISTINCT {column} ORDER BY {column} LIMIT 5)
+                    SELECT COUNT(*)
                     FROM {schema}.{table}
                     WHERE {column} IS NOT NULL
                       AND {column}::text !~ '^-?[0-9]+(\\.[0-9]+)?$'
                 """)
+                invalid_count = cur.fetchone()[0]
 
-                invalid_count, examples = cur.fetchone()
-                if invalid_count and invalid_count > 0:
+                if invalid_count > 0:
+                    # Récupérer exemples de valeurs invalides
+                    cur.execute(f"""
+                        SELECT array_agg(val)
+                        FROM (
+                            SELECT DISTINCT {column} as val
+                            FROM {schema}.{table}
+                            WHERE {column} IS NOT NULL
+                              AND {column}::text !~ '^-?[0-9]+(\\.[0-9]+)?$'
+                            ORDER BY val
+                            LIMIT 5
+                        ) sub
+                    """)
+                    examples = cur.fetchone()[0]
                     return False, examples
 
             elif target_type in ('TIMESTAMP', 'DATE'):
@@ -550,9 +576,14 @@ class SchemaOptimizer:
                 except Exception:
                     # Si même un seul échoue, on ne peut pas convertir
                     cur.execute(f"""
-                        SELECT array_agg(DISTINCT {column} ORDER BY {column} LIMIT 5)
-                        FROM {schema}.{table}
-                        WHERE {column} IS NOT NULL
+                        SELECT array_agg(val)
+                        FROM (
+                            SELECT DISTINCT {column} as val
+                            FROM {schema}.{table}
+                            WHERE {column} IS NOT NULL
+                            ORDER BY val
+                            LIMIT 5
+                        ) sub
                     """)
                     examples = cur.fetchone()[0]
                     return False, examples
