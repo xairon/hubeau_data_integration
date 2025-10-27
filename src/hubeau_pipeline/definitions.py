@@ -7,8 +7,9 @@ from dagster import Definitions, define_asset_job, AssetSelection, multiprocess_
 # Import des assets
 from .assets import all_assets
 
-# Import des jobs
+# Import des jobs originaux ET améliorés
 from .jobs import all_jobs
+from .jobs.hubeau_jobs_improved import all_improved_jobs
 
 # Import des schedules
 from .schedules import all_schedules
@@ -43,7 +44,7 @@ hubeau_job_limited = define_asset_job(
 # Définitions centrales
 defs = Definitions(
     assets=all_assets,
-    jobs=all_jobs + [hubeau_job_limited],  # Ajouter le job avec executor limité
+    jobs=all_jobs + all_improved_jobs + [hubeau_job_limited],  # Jobs originaux + améliorés + limité
     schedules=all_schedules,
     resources=RESOURCES,
     sensors=all_sensors,

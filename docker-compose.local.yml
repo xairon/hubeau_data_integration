@@ -1,0 +1,201 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL - Base de données principale
+  # ============================================================================
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: hubeau_postgres_local
+    environment:
+      POSTGRES_DB: hubeau
+      POSTGRES_USER: hubeau_user
+      POSTGRES_PASSWORD: hubeau_password_local
+      # Optimisations PostgreSQL pour machine locale avec plus de RAM
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=fr_FR.UTF-8"
+      POSTGRES_HOST_AUTH_METHOD: md5
+    volumes:
+      - postgres_data_local:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "5433:5432"  # Port 5433 pour éviter conflit avec PostgreSQL local
+    # Ressources augmentées pour machine locale
+    deploy:
+      resources:
+        limits:
+          memory: 4g  # Plus de RAM disponible en local
+          cpus: '2'
+        reservations:
+          memory: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hubeau_user -d hubeau"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hubeau_network
+
+  # ============================================================================
+  # Dagster Daemon - Orchestrateur de tâches
+  # ============================================================================
+  dagster_daemon:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+    container_name: hubeau_dagster_daemon_local
+    command: ["dagster-daemon", "run"]
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_POSTGRES_HOST: postgres
+      DAGSTER_POSTGRES_PORT: 5432
+      DAGSTER_POSTGRES_DB: hubeau
+      DAGSTER_POSTGRES_USER: hubeau_user
+      DAGSTER_POSTGRES_PASSWORD: hubeau_password_local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hubeau
+      POSTGRES_USER: hubeau_user
+      POSTGRES_PASSWORD: hubeau_password_local
+      # Optimisations Python pour plus de performance
+      PYTHONUNBUFFERED: "1"
+      PYTHONOPTIMIZE: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./configs:/app/configs:ro
+      - ./data:/app/data
+      - dagster_storage_local:/app/dagster_storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Plus de ressources en local
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: '2'
+        reservations:
+          memory: 2g
+    networks:
+      - hubeau_network
+
+  # ============================================================================
+  # Dagster Webserver - Interface Web
+  # ============================================================================
+  dagster_webserver:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+    container_name: hubeau_dagster_webserver_local
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/workspace.yaml"]
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_POSTGRES_HOST: postgres
+      DAGSTER_POSTGRES_PORT: 5432
+      DAGSTER_POSTGRES_DB: hubeau
+      DAGSTER_POSTGRES_USER: hubeau_user
+      DAGSTER_POSTGRES_PASSWORD: hubeau_password_local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hubeau
+      POSTGRES_USER: hubeau_user
+      POSTGRES_PASSWORD: hubeau_password_local
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./configs:/app/configs:ro
+      - ./data:/app/data
+      - dagster_storage_local:/app/dagster_storage
+    ports:
+      - "3001:3000"  # Port 3001 en local pour éviter conflits
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '1'
+        reservations:
+          memory: 1g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/graphql/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - hubeau_network
+
+  # ============================================================================
+  # DLT Worker - Worker pour l'ingestion de données
+  # ============================================================================
+  dlt_worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    container_name: hubeau_dlt_worker_local
+    command: ["python", "-m", "dagster_celery.cli", "worker", "start", "-A", "hubeau_pipeline.app", "--loglevel=info"]
+    environment:
+      DAGSTER_HOME: /app/dagster_home
+      DAGSTER_POSTGRES_HOST: postgres
+      DAGSTER_POSTGRES_PORT: 5432
+      DAGSTER_POSTGRES_DB: hubeau
+      DAGSTER_POSTGRES_USER: hubeau_user
+      DAGSTER_POSTGRES_PASSWORD: hubeau_password_local
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hubeau
+      POSTGRES_USER: hubeau_user
+      POSTGRES_PASSWORD: hubeau_password_local
+      # Optimisations mémoire Python
+      PYTHONMALLOC: malloc
+      PYTHONGC: "700,10,10"
+      PYTHONUNBUFFERED: "1"
+      # Configuration DLT
+      DLT_PIPELINE_DIR: /app/data/dlt
+      DLT_DATA_DIR: /app/data/dlt
+    volumes:
+      - ./dagster_home:/app/dagster_home
+      - ./configs:/app/configs:ro
+      - ./data:/app/data
+      - dagster_storage_local:/app/dagster_storage
+      - ./src:/app/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dagster_daemon:
+        condition: service_started
+    # Beaucoup plus de ressources en local !
+    deploy:
+      resources:
+        limits:
+          memory: 8g  # 8GB de RAM pour le worker
+          cpus: '4'   # 4 CPUs
+        reservations:
+          memory: 4g
+    networks:
+      - hubeau_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import dagster; print('healthy')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+
+# ============================================================================
+# Volumes persistants
+# ============================================================================
+volumes:
+  postgres_data_local:
+    name: hubeau_postgres_data_local
+  dagster_storage_local:
+    name: hubeau_dagster_storage_local
+
+# ============================================================================
+# Réseau Docker
+# ============================================================================
+networks:
+  hubeau_network:
+    name: hubeau_network_local
+    driver: bridge
