@@ -154,7 +154,7 @@ def count_rows_in_postgres(table_name: str, pg: PostgreSQLResource, schema: str 
 
 def log_memory_usage(context: AssetExecutionContext, label: str):
     """
-    Log la consommation mémoire actuelle du process
+    Log la consommation mémoire actuelle du process avec détails
 
     Nécessite: pip install psutil (déjà dans requirements.txt normalement)
 
@@ -167,14 +167,40 @@ def log_memory_usage(context: AssetExecutionContext, label: str):
         import os
 
         process = psutil.Process(os.getpid())
-        mem_mb = process.memory_info().rss / 1024 / 1024
-        context.log.info(f"[MEM] {label}: {mem_mb:.1f} MB")
+        mem_info = process.memory_info()
+
+        # RSS = Resident Set Size (RAM physique utilisée)
+        mem_mb = mem_info.rss / 1024 / 1024
+
+        # VMS = Virtual Memory Size (RAM + Swap)
+        vms_mb = mem_info.vms / 1024 / 1024
+
+        # Percent de RAM système utilisé
+        system_mem = psutil.virtual_memory()
+        system_percent = system_mem.percent
+        system_available_mb = system_mem.available / 1024 / 1024
+
+        context.log.info(
+            f"[MEM] {label}: "
+            f"Process={mem_mb:.1f} MB RSS, "
+            f"{vms_mb:.1f} MB VMS | "
+            f"System={system_percent:.1f}% used, "
+            f"{system_available_mb:.1f} MB available"
+        )
+
+        # Warning si process > 3 GB (proche de la limite problématique)
+        if mem_mb > 3000:
+            context.log.warning(
+                f"⚠️ [MEM] Process utilise {mem_mb:.1f} MB (> 3 GB) - "
+                f"Risque OOM si d'autres assets en parallèle !"
+            )
+
     except ImportError:
-        # psutil pas installé, skip silencieusement
-        pass
+        # psutil pas installé, log warning une fois
+        context.log.warning(f"[MEM] psutil non installé, monitoring RAM désactivé")
     except Exception as e:
-        # Autre erreur, log warning mais ne crash pas
-        context.log.warning(f"[MEM] Erreur monitoring mémoire: {e}")
+        # Autre erreur, log debug mais ne crash pas
+        context.log.debug(f"[MEM] Erreur monitoring mémoire: {e}")
 
 
 def batch_iterator_with_flush(source, batch_size: int, micro_batch_size: int):

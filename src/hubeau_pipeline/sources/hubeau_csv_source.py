@@ -323,6 +323,17 @@ def _paginate_csv(
             else:
                 logger.info(f"✅ {resource_name}: Page {page}/{total_pages} terminée ({page_records:,} records)")
 
+            # Log RAM tous les 10 pages pour monitoring
+            if page % 10 == 0 or page == total_pages:
+                try:
+                    import psutil
+                    import os
+                    process = psutil.Process(os.getpid())
+                    mem_mb = process.memory_info().rss / 1024 / 1024
+                    logger.info(f"[MEM] Page {page}/{total_pages}: {mem_mb:.1f} MB RSS")
+                except:
+                    pass
+
             errors_count = 0
 
         except Exception as e:
@@ -364,15 +375,80 @@ def _paginate_with_station_slicing(
 
     try:
         # ⚠️ NE PAS specifier 'size' pour exploiter le bug Hub'Eau (pas de limite 20k records)
-        stations_response = client.get(stations_endpoint, params={'page': 1})
-        stations_df = pd.read_csv(
-            io.StringIO(stations_response.text),
-            sep=';',
-            quotechar='"'
-        )
+        # Paginer les stations + chunking pour économiser RAM (certains endpoints ont 50k+ stations)
+        all_stations = []
+        page = 1
+        max_pages = 100  # Sécurité pour éviter boucle infinie
 
-        stations = stations_df[station_field].unique().tolist()
-        logger.info(f"{resource_name}: {len(stations)} stations a traiter")
+        logger.info(f"{resource_name}: Récupération liste des stations (avec pagination + chunking)...")
+
+        while page <= max_pages:
+            try:
+                stations_response = client.get(stations_endpoint, params={'page': page})
+
+                # Vérifier si réponse vide
+                if not stations_response.text or len(stations_response.text) < 10:
+                    logger.info(f"  Page {page}: vide, fin de pagination")
+                    break
+
+                # Lire avec chunking pour économiser RAM (500 lignes à la fois)
+                chunks = pd.read_csv(
+                    io.StringIO(stations_response.text),
+                    sep=';',
+                    quotechar='"',
+                    low_memory=False,
+                    on_bad_lines='skip',
+                    chunksize=500  # Chunking comme pour les données principales
+                )
+
+                page_stations = []
+                for chunk in chunks:
+                    if station_field not in chunk.columns:
+                        raise ValueError(f"Colonne {station_field} introuvable dans les stations")
+
+                    # Extraire codes stations uniques du chunk
+                    chunk_stations = chunk[station_field].dropna().unique().tolist()
+                    page_stations.extend(chunk_stations)
+
+                if not page_stations:
+                    logger.info(f"  Page {page}: aucune station, fin de pagination")
+                    break
+
+                all_stations.extend(page_stations)
+                logger.info(f"  Page {page}: +{len(page_stations)} stations (total cumulé: {len(all_stations)})")
+
+                # Si < 1000 stations sur cette page, probablement la dernière
+                if len(page_stations) < 1000:
+                    logger.info(f"  Page {page}: moins de 1000 stations, considéré comme dernière page")
+                    break
+
+                page += 1
+
+            except Exception as page_error:
+                logger.warning(f"  Page {page}: erreur {type(page_error).__name__}: {page_error}")
+                # Si erreur à la page > 1, on continue avec ce qu'on a
+                if page > 1:
+                    logger.info(f"  Erreur pagination page {page}, mais {len(all_stations)} stations déjà récupérées")
+                    break
+                else:
+                    # Erreur à la page 1 = problème critique
+                    raise
+
+        # Dédupliquer les stations (au cas où même station sur plusieurs pages)
+        stations = list(set(all_stations))
+        logger.info(f"{resource_name}: {len(stations)} stations uniques à traiter (dédupliquées depuis {len(all_stations)} entrées)")
+
+        # Log RAM après chargement stations (monitoring)
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            mem_mb = process.memory_info().rss / 1024 / 1024
+            logger.info(f"[MEM] Après chargement {len(stations)} stations: {mem_mb:.1f} MB")
+        except ImportError:
+            pass  # psutil pas dispo, skip
+        except Exception as mem_error:
+            logger.debug(f"Impossible de logger RAM: {mem_error}")
 
     except Exception as e:
         logger.error(f"{resource_name}: Impossible de recuperer stations: {e}")

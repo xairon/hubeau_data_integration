@@ -111,12 +111,19 @@ def optimize_hubeau_schema(
     )
 
 
+class AnalyzeTableConfig(Config):
+    """Configuration pour l'analyse d'une table"""
+    schema: str = Field(default="hubeau", description="Schéma PostgreSQL")
+    table: str = Field(default="piezometry_stations", description="Nom de la table à analyser")
+
+
 @asset(
     group_name="schema_management",
     description="Analyse une table spécifique et génère le plan d'optimisation (sans l'appliquer)",
 )
 def analyze_table_schema(
     context: AssetExecutionContext,
+    config: AnalyzeTableConfig,
     pg: PostgreSQLResource
 ) -> Output[Dict[str, Any]]:
     """
@@ -127,9 +134,8 @@ def analyze_table_schema(
     - Voir les PK/FK détectées
     - Comprendre les optimisations proposées
     """
-    # TODO: Rendre configurable via run config
-    schema = "hubeau"
-    table = context.op_config.get("table", "piezometry_stations_csv")
+    schema = config.schema
+    table = config.table
 
     context.log.info(f"📊 Analyse de {schema}.{table}...")
 
