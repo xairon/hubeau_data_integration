@@ -26,13 +26,17 @@ from .resources import RESOURCES
 # Impact : Divise RAM peak par 2 (évite SIGKILL / OOM)
 # ============================================================================
 
-# Job par défaut avec executor limité à 2 workers
+# ✅ CHANGEMENT #4: Executor limité PAR DÉFAUT pour TOUS les runs
+# Configuration globale de l'executor pour limiter le parallélisme
+limited_executor = multiprocess_executor.configured({
+    "max_concurrent": 2  # ✅ Max 2 assets en parallèle (au lieu de 4 par défaut)
+})
+
+# Job par défaut avec executor limité
 hubeau_job_limited = define_asset_job(
     name="hubeau_materialize_limited",
     selection=AssetSelection.all(),
-    executor_def=multiprocess_executor.configured({
-        "max_concurrent": 2  # ✅ Max 2 assets en parallèle (au lieu de 4)
-    }),
+    executor_def=limited_executor,
     tags={"api": "hubeau"}
 )
 
@@ -43,4 +47,7 @@ defs = Definitions(
     schedules=all_schedules,
     resources=RESOURCES,
     sensors=all_sensors,
+    # ✅ CHANGEMENT #4: Forcer l'executor limité comme défaut global
+    # Tous les jobs utilisent maintenant cet executor sauf override explicite
+    executor=limited_executor,
 )

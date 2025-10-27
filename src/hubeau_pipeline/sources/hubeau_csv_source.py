@@ -186,12 +186,21 @@ def get_total_pages_from_json(
         # Taille de page reelle (varie selon endpoint, generalement ~5000 records)
         actual_page_size = len(data.get('data', []))
 
+        # ⚠️ DETECTION HYDROBIO : Si page_size == count, l'API n'a PAS de pagination !
+        if actual_page_size == total_count:
+            logger.warning(
+                f"⚠️ {endpoint}: API sans pagination détectée ! "
+                f"{total_count:,} records sur UNE SEULE page (risque RAM élevé)"
+            )
+            # Forcer 1 seule page (tout est déjà là)
+            return 1, total_count
+
         if actual_page_size == 0:
             actual_page_size = 5000  # Default Hub'Eau (estimation conservatrice)
 
         total_pages = (total_count // actual_page_size) + (1 if total_count % actual_page_size > 0 else 0)
 
-        logger.info(f"📊 {endpoint}: Total={total_count:,} records (bug Hub'Eau exploité : {actual_page_size} rec/page, {total_pages} pages, PAS de limite 20k)")
+        logger.info(f"📊 {endpoint}: Total={total_count:,} records ({actual_page_size} rec/page, {total_pages} pages)")
 
         return total_pages, total_count
 
@@ -211,6 +220,9 @@ def fetch_csv_page(
     """
     Telecharge et parse une page CSV en chunks avec retry sur timeout
 
+    OPTIMISATION : HTTP Streaming pour grandes réponses (>10MB)
+    pour éviter de charger tout en RAM
+
     Args:
         client: Client HTTP
         endpoint: Endpoint API
@@ -226,18 +238,54 @@ def fetch_csv_page(
 
     while retry_count <= max_retries:
         try:
-            response = client.get(endpoint, params={**(params or {}), 'page': page}, timeout=180)
+            # ✅ CHANGEMENT #2: HTTP Streaming pour grandes réponses
+            # Utiliser stream=True pour éviter de charger tout en RAM
+            url = f"{client.base_url}{endpoint}"
+            client._rate_limit()  # Appliquer rate limiting
 
-            # Hub'Eau utilise separateur point-virgule
-            # Utiliser chunksize pour lire par morceaux et économiser mémoire
-            chunks = pd.read_csv(
-                io.StringIO(response.text),
-                sep=';',
-                quotechar='"',
-                low_memory=False,
-                on_bad_lines='skip',
-                chunksize=chunk_size
+            response = client.session.get(
+                url,
+                params={**(params or {}), 'page': page},
+                timeout=180,
+                stream=True  # ✅ Streaming activé
             )
+            response.raise_for_status()
+
+            # Détecter taille de la réponse
+            content_length = response.headers.get('Content-Length')
+
+            if content_length and int(content_length) > 10_000_000:  # Plus de 10MB
+                logger.warning(
+                    f"⚠️ Page {page}: Grande réponse détectée ({int(content_length)/1024/1024:.1f} MB) "
+                    f"- utilisation streaming HTTP"
+                )
+
+                # ✅ Streaming direct depuis socket sans charger en RAM
+                # response.raw est un objet file-like qui stream depuis le socket
+                chunks = pd.read_csv(
+                    response.raw,  # ✅ Stream direct depuis socket
+                    sep=';',
+                    quotechar='"',
+                    low_memory=False,
+                    on_bad_lines='skip',
+                    chunksize=chunk_size,
+                    encoding='utf-8'  # Spécifier encoding pour raw stream
+                )
+            else:
+                # Petite réponse : méthode classique (plus rapide pour petits fichiers)
+                text = response.text  # Charger une seule fois
+
+                if content_length:
+                    logger.debug(f"Page {page}: Réponse normale ({int(content_length)/1024:.1f} KB)")
+
+                chunks = pd.read_csv(
+                    io.StringIO(text),
+                    sep=';',
+                    quotechar='"',
+                    low_memory=False,
+                    on_bad_lines='skip',
+                    chunksize=chunk_size
+                )
 
             for chunk in chunks:
                 yield chunk
@@ -292,13 +340,28 @@ def _paginate_csv(
     errors_count = 0
     max_consecutive_errors = 3
 
+    # ✅ CHANGEMENT #3: Adaptive chunk_size pour hydrobio (APIs sans pagination)
+    # Si hydrobio ou si une seule page avec beaucoup de data : réduire chunk_size
+    adaptive_chunk_size = 500  # Défaut
+
+    if 'hydrobio' in resource_name.lower():
+        adaptive_chunk_size = 100  # ✅ Hydrobio : chunks plus petits (100 lignes)
+        logger.warning(f"⚠️ {resource_name}: Endpoint hydrobio détecté - chunk_size réduit à {adaptive_chunk_size}")
+    elif total_pages == 1 and total_count > 10000:
+        # API sans pagination avec beaucoup de données
+        adaptive_chunk_size = 100
+        logger.warning(
+            f"⚠️ {resource_name}: Une seule page avec {total_count:,} records - "
+            f"chunk_size réduit à {adaptive_chunk_size}"
+        )
+
     for page in range(1, total_pages + 1):
         try:
             chunk_count = 0
             page_records = 0
 
-            # Itérer sur les chunks de la page
-            for df_chunk in fetch_csv_page(client, endpoint, page, params):
+            # Itérer sur les chunks de la page avec chunk_size adaptatif
+            for df_chunk in fetch_csv_page(client, endpoint, page, params, chunk_size=adaptive_chunk_size):
                 if df_chunk.empty:
                     continue
 

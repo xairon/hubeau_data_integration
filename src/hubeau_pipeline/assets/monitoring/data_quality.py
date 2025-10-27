@@ -28,15 +28,20 @@ def basic_database_check(context: AssetExecutionContext, pg: PostgreSQLResource)
 
     with pg.get_connection() as conn:
         # 1. Vérifier les tables existantes
+        # ✅ CHANGEMENT #5: PostgreSQL 16 utilise 'relname' au lieu de 'tablename'
+        # Utilisation de pg_tables avec LEFT JOIN pour compatibilité PostgreSQL 13+
         df_tables = pd.read_sql("""
             SELECT
-                schemaname,
-                tablename,
-                pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size,
-                n_live_tup AS row_count
-            FROM pg_stat_user_tables
-            WHERE schemaname = 'hubeau'
-            ORDER BY n_live_tup DESC
+                t.schemaname,
+                t.tablename,
+                pg_size_pretty(pg_total_relation_size(t.schemaname||'.'||t.tablename)) AS size,
+                s.n_live_tup AS row_count
+            FROM pg_tables t
+            LEFT JOIN pg_stat_user_tables s
+                ON t.schemaname = s.schemaname
+                AND t.tablename = s.relname
+            WHERE t.schemaname = 'hubeau'
+            ORDER BY s.n_live_tup DESC NULLS LAST
         """, conn)
 
         report["tables"] = df_tables.to_dict('records')

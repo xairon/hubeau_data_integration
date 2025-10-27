@@ -114,7 +114,48 @@ class SchemaOptimizer:
         Returns:
             (inferred_type, is_nullable)
         """
+        # ✅ FIX #1: Colonnes qui doivent TOUJOURS rester en TEXT
+        TEXT_ONLY_COLUMNS = [
+            'code_commune_insee',  # Codes INSEE Corse: 2A004, 2B033, etc.
+            'code_insee',
+            'code_postal',         # Codes postaux avec zéros initiaux
+            'numero_telephone',
+            'numero_siret',
+            'numero_siren',
+            'code_bss'            # Peut avoir format alphanumérique
+        ]
+
+        if column.lower() in TEXT_ONLY_COLUMNS:
+            logger.info(f"  ℹ️ Colonne {column} forcée en TEXT (codes alphanumériques)")
+            # Vérifier juste la nullabilité
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT COUNT(*) as total, COUNT({column}) as non_null
+                    FROM {schema}.{table}
+                """)
+                total, non_null = cur.fetchone()
+                is_nullable = (non_null < total)
+                return 'TEXT', is_nullable
+
         with conn.cursor() as cur:
+            # ✅ FIX #2: Détecter le type actuel avant comparaison avec ''
+            cur.execute("""
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_schema = %s AND table_name = %s AND column_name = %s
+            """, (schema, table, column))
+
+            row = cur.fetchone()
+            current_db_type = row[0] if row else 'text'
+
+            # Adapter la condition WHERE selon le type actuel
+            if current_db_type in ('integer', 'bigint', 'smallint', 'numeric', 'real', 'double precision'):
+                # Types numériques: pas de comparaison avec ''
+                where_clause = f"{column} IS NOT NULL"
+            else:
+                # Types texte: exclure NULL et chaînes vides
+                where_clause = f"{column} IS NOT NULL AND {column}::text != ''"
+
             # 1. Statistiques de base
             cur.execute(f"""
                 SELECT
@@ -122,7 +163,7 @@ class SchemaOptimizer:
                     COUNT({column}) as non_null,
                     COUNT(DISTINCT {column}) as distinct_values
                 FROM {schema}.{table}
-                WHERE {column} IS NOT NULL AND {column} != ''
+                WHERE {where_clause}
             """)
             total, non_null, distinct = cur.fetchone()
 
@@ -135,7 +176,7 @@ class SchemaOptimizer:
             cur.execute(f"""
                 SELECT {column}
                 FROM {schema}.{table}
-                WHERE {column} IS NOT NULL AND {column} != ''
+                WHERE {where_clause}
                 LIMIT 100
             """)
             samples = [row[0] for row in cur.fetchall()]
@@ -152,16 +193,18 @@ class SchemaOptimizer:
             # INTEGER (nombres entiers)
             if self._is_integer_column(samples):
                 # Choisir taille selon max value
-                max_val_str = cur.execute(f"""
-                    SELECT MAX(CAST({column} AS BIGINT))
+                # ✅ FIX #7: cur.execute() ne retourne pas la valeur, il faut fetchone()
+                cur.execute(f"""
+                    SELECT MAX(ABS({column}::BIGINT))
                     FROM {schema}.{table}
                     WHERE {column} ~ '^-?[0-9]+$'
                 """)
-                max_val = cur.fetchone()
-                if max_val and max_val[0]:
-                    if abs(max_val[0]) < 32767:
+                max_val_result = cur.fetchone()
+                if max_val_result and max_val_result[0]:
+                    max_val = max_val_result[0]
+                    if max_val < 32767:
                         return 'SMALLINT', is_nullable
-                    elif abs(max_val[0]) < 2147483647:
+                    elif max_val < 2147483647:
                         return 'INTEGER', is_nullable
                     else:
                         return 'BIGINT', is_nullable
@@ -315,16 +358,18 @@ class SchemaOptimizer:
                             if matching_tables:
                                 ref_table = matching_tables[0]
                                 # Trouver colonne PK dans table référencée
-                                cur.execute(f"""
+                                # ✅ FIX #3: Corriger la précédence des opérateurs AND/OR avec parenthèses
+                                cur.execute("""
                                     SELECT column_name
                                     FROM information_schema.columns
                                     WHERE table_schema = %s AND table_name = %s
-                                    AND column_name LIKE 'code_%' OR column_name LIKE '%_id'
+                                    AND (column_name LIKE 'code_%%' OR column_name LIKE '%%_id')
                                     LIMIT 1
                                 """, (schema, ref_table))
                                 ref_col_result = cur.fetchone()
 
-                                if ref_col_result:
+                                # ✅ FIX #4: Vérifier que le résultat existe avant d'accéder au tuple
+                                if ref_col_result and len(ref_col_result) > 0:
                                     ref_col = ref_col_result[0]
                                     fks[col] = (ref_table, ref_col)
                                     logger.info(f"  🔗 FK détectée: {col} → {ref_table}.{ref_col}")
@@ -458,6 +503,62 @@ class SchemaOptimizer:
         finally:
             conn.close()
 
+    def _validate_type_conversion(self, schema: str, table: str, column: str,
+                                   target_type: str, conn) -> Tuple[bool, Optional[List[str]]]:
+        """
+        ✅ FIX #5: Valider AVANT ALTER TABLE pour éviter les erreurs
+
+        Returns:
+            (is_valid, example_invalid_values)
+        """
+        with conn.cursor() as cur:
+            if target_type in ('INTEGER', 'SMALLINT', 'BIGINT'):
+                # Vérifier que toutes les valeurs sont numériques
+                cur.execute(f"""
+                    SELECT COUNT(*), array_agg(DISTINCT {column} ORDER BY {column} LIMIT 5)
+                    FROM {schema}.{table}
+                    WHERE {column} IS NOT NULL
+                      AND {column}::text !~ '^-?[0-9]+$'
+                """)
+
+                invalid_count, examples = cur.fetchone()
+                if invalid_count and invalid_count > 0:
+                    return False, examples
+
+            elif target_type in ('DOUBLE PRECISION', 'NUMERIC', 'REAL'):
+                # Vérifier que toutes les valeurs sont des nombres (entiers ou décimaux)
+                cur.execute(f"""
+                    SELECT COUNT(*), array_agg(DISTINCT {column} ORDER BY {column} LIMIT 5)
+                    FROM {schema}.{table}
+                    WHERE {column} IS NOT NULL
+                      AND {column}::text !~ '^-?[0-9]+(\\.[0-9]+)?$'
+                """)
+
+                invalid_count, examples = cur.fetchone()
+                if invalid_count and invalid_count > 0:
+                    return False, examples
+
+            elif target_type in ('TIMESTAMP', 'DATE'):
+                # Vérifier que les valeurs peuvent être converties en date/timestamp
+                try:
+                    cur.execute(f"""
+                        SELECT {column}::{target_type}
+                        FROM {schema}.{table}
+                        WHERE {column} IS NOT NULL
+                        LIMIT 1
+                    """)
+                except Exception:
+                    # Si même un seul échoue, on ne peut pas convertir
+                    cur.execute(f"""
+                        SELECT array_agg(DISTINCT {column} ORDER BY {column} LIMIT 5)
+                        FROM {schema}.{table}
+                        WHERE {column} IS NOT NULL
+                    """)
+                    examples = cur.fetchone()[0]
+                    return False, examples
+
+            return True, None
+
     def optimize_table(self, plan: TableOptimization, dry_run: bool = False) -> Dict:
         """
         Applique le plan d'optimisation à une table
@@ -484,9 +585,28 @@ class SchemaOptimizer:
 
         try:
             with conn.cursor() as cur:
+                # ✅ FIX #6: Utiliser SAVEPOINT pour rollback partiel en cas d'erreur
+                if not dry_run:
+                    cur.execute("SAVEPOINT before_optimization")
+
                 # 1. ALTER types
                 for col in plan.columns:
                     if col.current_type != col.inferred_type:
+                        # ✅ FIX #5: Valider AVANT de tenter l'ALTER
+                        is_valid, invalid_examples = self._validate_type_conversion(
+                            plan.schema, plan.table_name, col.column_name,
+                            col.inferred_type, conn
+                        )
+
+                        if not is_valid:
+                            error_msg = (
+                                f"Impossible de convertir {col.column_name} en {col.inferred_type}: "
+                                f"valeurs incompatibles trouvées (ex: {invalid_examples[:3] if invalid_examples else 'N/A'})"
+                            )
+                            stats['errors'].append(error_msg)
+                            logger.warning(f"  ⚠️ {error_msg}")
+                            continue
+
                         alter_sql = f"""
                             ALTER TABLE {plan.schema}.{plan.table_name}
                             ALTER COLUMN {col.column_name} TYPE {col.inferred_type}
@@ -501,6 +621,10 @@ class SchemaOptimizer:
                                 stats['types_changed'] += 1
                                 logger.info(f"  ✅ {col.column_name}: {col.current_type} → {col.inferred_type}")
                             except Exception as e:
+                                # Rollback to savepoint en cas d'erreur
+                                cur.execute("ROLLBACK TO SAVEPOINT before_optimization")
+                                cur.execute("SAVEPOINT before_optimization")
+
                                 error_msg = f"Erreur ALTER {col.column_name}: {e}"
                                 stats['errors'].append(error_msg)
                                 logger.warning(f"  ⚠️ {error_msg}")
@@ -576,6 +700,8 @@ class SchemaOptimizer:
 
                 # Commit si pas dry_run
                 if not dry_run:
+                    # ✅ FIX #6: Release le savepoint si tout s'est bien passé
+                    cur.execute("RELEASE SAVEPOINT before_optimization")
                     conn.commit()
                     logger.info(f"✅ Optimisation terminée: {stats}")
 
