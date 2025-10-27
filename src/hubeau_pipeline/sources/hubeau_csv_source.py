@@ -172,25 +172,26 @@ def get_total_pages_from_json(
     endpoint_json = endpoint.replace('.csv', '')
 
     try:
-        # Requete 1 : count total
-        response = client.get(endpoint_json, params={**(params or {}), 'page': 1, 'size': 1})
+        # Requete 1 : count total SANS specifier 'size' pour exploiter le bug Hub'Eau
+        # Bug Hub'Eau : si 'size' n'est PAS specifie dans les params, on peut acceder a TOUTES les pages
+        # sans la limite habituelle de 20,000 records max (avec le page_size par defaut ~5k)
+        # ⚠️ NE PAS AJOUTER 'size' sinon Hub'Eau impose une limite de 20k records total !
+        response = client.get(endpoint_json, params={**(params or {}), 'page': 1})
         data = response.json()
         total_count = data.get('count', 0)
 
         if total_count == 0:
             return 1, 0
 
-        # Requete 2 : taille de page reelle
-        response = client.get(endpoint_json, params={**(params or {}), 'page': 1})
-        data = response.json()
+        # Taille de page reelle (varie selon endpoint, generalement ~5000 records)
         actual_page_size = len(data.get('data', []))
 
         if actual_page_size == 0:
-            actual_page_size = 20000  # Default Hub'Eau
+            actual_page_size = 5000  # Default Hub'Eau (estimation conservatrice)
 
         total_pages = (total_count // actual_page_size) + (1 if total_count % actual_page_size > 0 else 0)
 
-        logger.info(f"📊 {endpoint}: Total={total_count:,} records, page_size={actual_page_size}, pages={total_pages}")
+        logger.info(f"📊 {endpoint}: Total={total_count:,} records (bug Hub'Eau exploité : {actual_page_size} rec/page, {total_pages} pages, PAS de limite 20k)")
 
         return total_pages, total_count
 
@@ -362,7 +363,8 @@ def _paginate_with_station_slicing(
     logger.info(f"{resource_name}: Recuperation liste des stations...")
 
     try:
-        stations_response = client.get(stations_endpoint, params={'page': 1, 'size': 10000})
+        # ⚠️ NE PAS specifier 'size' pour exploiter le bug Hub'Eau (pas de limite 20k records)
+        stations_response = client.get(stations_endpoint, params={'page': 1})
         stations_df = pd.read_csv(
             io.StringIO(stations_response.text),
             sep=';',
@@ -437,8 +439,11 @@ def hubeau_csv_source(
 
     @dlt.resource(
         name=resource_name,
-        primary_key=primary_key,
-        write_disposition="merge"
+        # NOTE: primary_key non utilisé car on utilise custom destination PostgreSQL
+        # qui fait le merge manuellement dans postgres_optimized_v2.py
+        # Garder None ici économise de la RAM (DLT ne track pas les PK inutilement)
+        primary_key=None,
+        write_disposition="append"  # append car on gère le merge nous-même
     )
     def csv_resource() -> Iterator[List[Dict]]:
 

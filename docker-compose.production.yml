@@ -41,9 +41,12 @@ services:
       start_period: 45s
     restart: unless-stopped
     # Limites ajustées pour VPS 8GB RAM / 2 vCPU
-    # PostgreSQL garde priorité sur RAM mais partage les CPUs
-    mem_limit: 3g
-    mem_reservation: 1g
+    # RÉDUIT de 3g → 2.5g pour donner plus de RAM au dlt_worker (évite SIGKILL)
+    # PostgreSQL peut fonctionner efficacement avec 2.5GB pour notre workload (COPY principalement)
+    mem_limit: 2500m
+    mem_reservation: 800m
+    # OOM Score: priorité normale (PostgreSQL peut redémarrer proprement, moins critique que dlt_worker)
+    oom_score_adj: 0
     cpus: 1.0
 
   dlt_worker:
@@ -77,6 +80,10 @@ services:
       DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD}
       DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST:-postgres}
       DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT:-5432}
+      # Python memory optimizations (évite fragmentation mémoire)
+      PYTHONMALLOC: malloc
+      # Disable Python GC auto-tuning (force GC agressif pour éviter memory leak)
+      PYTHONGC: "700,10,10"
     volumes:
       - ./src:/app/src
       - ./configs:/app/configs:ro
@@ -93,9 +100,14 @@ services:
       retries: 3
     restart: unless-stopped
     # Limites ajustées pour VPS 8GB RAM / 2 vCPU
-    # dlt_worker est le service critique qui charge les données
-    mem_limit: 3g
-    mem_reservation: 1g
+    # AUGMENTÉ de 3g → 4.5g pour éviter SIGKILL (OOM Killer)
+    # Calcul: 1 asset = 250-500MB, 3-4 assets en parallèle = 1-2GB, PostgreSQL buffers = 500MB, Python overhead = 500MB → Total 2.5-3.5GB
+    # Marge de sécurité: +1GB → 4.5GB total
+    mem_limit: 4500m
+    mem_reservation: 1500m
+    # OOM Score: priorité basse pour éviter SIGKILL (OOM Killer tue dlt_worker en premier si RAM pleine)
+    # -500 = moins susceptible d'être tué que les autres processus
+    oom_score_adj: -500
     cpus: 1.0
 
   dagster_webserver:
