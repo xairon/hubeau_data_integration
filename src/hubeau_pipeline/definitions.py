@@ -2,8 +2,7 @@
 Définitions Dagster centrales - Point d'entrée de l'application
 """
 
-from dagster import Definitions, define_asset_job, AssetSelection
-from dagster._core.executor import multi_or_in_process_executor
+from dagster import Definitions, define_asset_job, AssetSelection, multiprocess_executor
 
 # Import des assets
 from .assets import all_assets
@@ -31,8 +30,8 @@ from .resources import RESOURCES
 hubeau_job_limited = define_asset_job(
     name="hubeau_materialize_limited",
     selection=AssetSelection.all(),
-    executor_def=multi_or_in_process_executor.configured({
-        "max_concurrent": 2  # ✅ Max 2 assets en parallèle
+    executor_def=multiprocess_executor.configured({
+        "max_concurrent": 2  # ✅ Max 2 assets en parallèle (au lieu de 4)
     }),
     tags={"api": "hubeau"}
 )
