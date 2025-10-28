@@ -243,6 +243,17 @@ def fetch_csv_page(
                 timeout=180
             )
 
+            # ✅ VALIDATION ROBUSTE: Vérifier le contenu de la réponse
+            if not response.text or len(response.text.strip()) == 0:
+                logger.warning(f"⚠️  Page {page}: Réponse vide")
+                return pd.DataFrame()
+            
+            # ✅ DETECTION FORMAT INVALIDE: Vérifier si la réponse est JSON au lieu de CSV
+            response_text = response.text.strip()
+            if response_text.startswith('{') or response_text.startswith('['):
+                logger.warning(f"⚠️  Page {page}: Format invalide (reçu JSON au lieu de CSV), page potentiellement vide ou erreur API")
+                return pd.DataFrame()
+
             # Parse CSV complet (pas de chunking)
             df = pd.read_csv(
                 io.StringIO(response.text),
@@ -252,10 +263,19 @@ def fetch_csv_page(
                 on_bad_lines='skip'
             )
 
+            # ✅ VALIDATION SUPPLEMENTAIRE: Vérifier que le DataFrame n'est pas vide de manière inattendue
+            if df.empty and len(response.text) > 100:  # Si response non vide mais DataFrame vide
+                logger.warning(f"⚠️  Page {page}: DataFrame vide malgré réponse de {len(response.text)} caractères")
+
             return df
 
         except pd.errors.EmptyDataError:
             logger.warning(f"⚠️  Page {page}: CSV vide")
+            return pd.DataFrame()
+
+        except pd.errors.ParserError as e:
+            logger.warning(f"⚠️  Page {page}: Erreur parsing CSV (format invalide?): {e}")
+            # Retourner DataFrame vide au lieu de lever l'erreur - continue avec les autres pages
             return pd.DataFrame()
 
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
@@ -274,7 +294,9 @@ def fetch_csv_page(
 
         except Exception as e:
             logger.error(f"❌ Erreur parsing CSV page {page}: {type(e).__name__}: {e}")
-            raise
+            # ✅ ROBUSTESSE: Au lieu de lever l'erreur, retourner DataFrame vide et continuer
+            logger.warning(f"⚠️  Page {page}: Retour DataFrame vide pour continuer l'ingestion")
+            return pd.DataFrame()
 
 
 def _paginate_csv(
@@ -314,9 +336,39 @@ def _paginate_csv(
                 logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} vide")
                 continue
 
-            # Convertir toute la page en liste de dicts
-            records = df.to_dict('records')
-            records_count = len(records)
+            # ✅ VALIDATION ROBUSTE: Convertir toute la page en liste de dicts avec vérifications
+            try:
+                records = df.to_dict('records')
+                
+                # ✅ DOUBLE VALIDATION: S'assurer qu'on a bien une liste de dictionnaires
+                if not isinstance(records, list):
+                    logger.error(f"❌ Page {page}: Format invalide (attendu list, reçu {type(records)})")
+                    # Tenter de corriger en wrappant dans une liste
+                    if isinstance(records, dict):
+                        records = [records]
+                    else:
+                        logger.warning(f"⚠️  Page {page}: Impossible de corriger le format, page ignorée")
+                        continue
+                
+                # Validation supplémentaire: chaque élément doit être un dict
+                validated_records = []
+                for i, record in enumerate(records):
+                    if isinstance(record, dict):
+                        validated_records.append(record)
+                    else:
+                        logger.warning(f"⚠️  Page {page}, record {i}: Format invalide (attendu dict, reçu {type(record)}), record ignoré")
+                
+                records = validated_records
+                records_count = len(records)
+                
+                if records_count == 0:
+                    logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} - aucun record valide après validation")
+                    continue
+                    
+            except Exception as conversion_error:
+                logger.error(f"❌ Page {page}: Erreur conversion DataFrame->dict: {type(conversion_error).__name__}: {conversion_error}")
+                continue
+
             records_total += records_count
 
             # Log progression

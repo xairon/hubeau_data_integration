@@ -283,7 +283,7 @@ HUBEAU_FIELD_TYPES: Dict[str, Dict[str, str]] = {
         "code_systeme_alti_site": "TEXT",
         "commentaire_influence_locale_station": "TEXT",
         "commentaire_station": "TEXT",
-        "coordLatLon": "TEXT",
+        "coordlatlon": "TEXT",
         "coordonnee_x_station": "DOUBLE PRECISION",
         "coordonnee_y_station": "DOUBLE PRECISION",
         "date_activation_ref_alti_station": "TIMESTAMP",

@@ -14,6 +14,9 @@ from typing import Iterator, Any, Dict, List, Optional
 import logging
 from threading import Lock
 
+# Import des type mappings Hub'Eau
+from hubeau_pipeline.schema import get_table_schema, get_field_type, HUBEAU_FIELD_TYPES
+
 logger = logging.getLogger(__name__)
 
 
@@ -297,31 +300,36 @@ class PostgresBulkDestinationV2:
 
     def _create_table_from_dataframe(self, df: pd.DataFrame, table_name: str, conn):
         """
-        Crée la table si elle n'existe pas - STRATÉGIE ULTRA-SAFE
+        Crée la table si elle n'existe pas avec types optimisés Hub'Eau
 
-        Tout est créé en TEXT sauf datetime évident
-        Optimisation des types se fait APRÈS ingestion (SchemaOptimizer)
-
-        Avantages:
-        - Zéro erreur COPY (text accepte tout)
-        - Pas de retries multiples
-        - Performance optimale en post-processing
+        Utilise les type mappings de hubeau_type_mappings.py pour créer
+        directement les colonnes avec les bons types PostgreSQL.
+        Fallback vers TEXT pour les colonnes non mappées (sécurité).
         """
         with conn.cursor() as cursor:
-            # Inférence ULTRA-SAFE: TEXT par défaut
+            # ✅ STRATEGIE OPTIMISEE: Utiliser les type mappings Hub'Eau
+            table_schema = get_table_schema(table_name)
             col_defs = []
+            
             for col in df.columns:
-                dtype = df[col].dtype
-
-                # Seulement datetime est typé directement (évident et safe)
-                if 'datetime' in str(dtype):
-                    pg_type = 'TIMESTAMP'
+                # Essayer d'abord le mapping Hub'Eau
+                if table_schema and col in table_schema:
+                    pg_type = table_schema[col]
+                    logger.debug(f"  {col} -> {pg_type} (mapping Hub'Eau)")
                 else:
-                    # TOUT LE RESTE en TEXT - ultra-safe!
-                    # L'optimisation se fera après avec SchemaOptimizer
-                    pg_type = 'TEXT'
+                    # Fallback: inférence basique mais robuste
+                    dtype = df[col].dtype
+                    if 'datetime' in str(dtype):
+                        pg_type = 'TIMESTAMP'
+                    elif 'int' in str(dtype):
+                        pg_type = 'BIGINT'
+                    elif 'float' in str(dtype):
+                        pg_type = 'DOUBLE PRECISION'
+                    else:
+                        pg_type = 'TEXT'  # Safe fallback
+                    logger.debug(f"  {col} -> {pg_type} (inférence, pas de mapping)")
 
-                col_defs.append(f"{col} {pg_type}")
+                col_defs.append(f'"{col}" {pg_type}')
 
             create_sql = f"""
                 CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
@@ -330,7 +338,11 @@ class PostgresBulkDestinationV2:
             """
             cursor.execute(create_sql)
             conn.commit()
-            logger.info(f"✅ Table {table_name} créée avec {len(col_defs)} colonnes")
+            
+            # Log des informations utiles
+            mapped_cols = len([c for c in df.columns if table_schema and c in table_schema])
+            total_cols = len(df.columns)
+            logger.info(f"✅ Table {table_name} créée: {total_cols} colonnes ({mapped_cols} avec mapping Hub'Eau)")
 
             # Invalider le cache pour forcer refresh
             cache_key = f"{self.schema_name}.{table_name}"
@@ -359,16 +371,38 @@ class PostgresBulkDestinationV2:
                     self._create_table_from_dataframe(df, table_name, conn)
                     target_columns = self._get_target_columns(table_name, conn)
 
-                # Filtrer colonnes SANS COPIER le DataFrame
+                # ✅ FILTRAGE ROBUSTE: Gérer les différences de casse et colonnes inconnues
                 df_columns = df.columns.tolist()
-                common_columns = [col for col in df_columns if col in target_columns]
+                
+                # Normalisation des noms (case-insensitive matching)
+                target_columns_lower = {col.lower(): col for col in target_columns}
+                column_mapping = {}
+                common_columns = []
+                
+                for df_col in df_columns:
+                    df_col_lower = df_col.lower()
+                    if df_col_lower in target_columns_lower:
+                        # Colonne trouvée (exact ou case-insensitive)
+                        target_col = target_columns_lower[df_col_lower]
+                        column_mapping[df_col] = target_col
+                        common_columns.append(df_col)
+                    else:
+                        logger.debug(f"  Colonne ignorée: {df_col} (pas de mapping dans {table_name})")
 
                 if not common_columns:
+                    logger.error(f"❌ Aucune colonne commune entre DataFrame et table {table_name}")
+                    logger.error(f"   DataFrame: {df_columns[:10]}...")
+                    logger.error(f"   Table: {list(target_columns)[:10]}...")
                     raise ValueError(f"Aucune colonne commune entre DataFrame et table {table_name}")
 
-                # Sélectionner colonnes et nettoyer EN PLACE
-                if len(common_columns) < len(df_columns):
-                    df = df[common_columns]  # Vue, pas copie si possible
+                # Appliquer renommage si nécessaire et sélectionner colonnes
+                if column_mapping:
+                    df = df[common_columns].rename(columns=column_mapping)
+                    common_columns = [column_mapping.get(col, col) for col in common_columns]
+                else:
+                    df = df[common_columns]
+                
+                logger.debug(f"  Colonnes utilisées: {len(common_columns)}/{len(df_columns)} ({', '.join(common_columns[:5])}...)")
 
                 df = self._clean_dataframe_inplace(df, table_name=table_name, conn=conn)
 
