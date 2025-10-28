@@ -116,6 +116,12 @@ services:
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
     ports:
       - "8080:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/server_info || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     restart: unless-stopped
 
   # Dagster Daemon - Orchestration (schedules, sensors)
@@ -142,6 +148,12 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
     command: ["dagster-daemon","run"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     restart: unless-stopped
 
   # Adminer - Interface web PostgreSQL

@@ -49,7 +49,7 @@ def pipeline_failure_alert_sensor(context: SensorEvaluationContext):
 
         context.log.error(
             f"❌ ÉCHEC DÉTECTÉ - Job: {job_name}, Run ID: {run_id}, "
-            f"Créé le: {datetime.fromtimestamp(created_timestamp) if created_timestamp else 'unknown'}"
+            f"Créé le: {created_timestamp.strftime('%Y-%m-%d %H:%M:%S') if created_timestamp else 'unknown'}"
         )
 
         # TODO: Envoyer notification Slack
@@ -97,7 +97,7 @@ def long_running_pipeline_sensor(context: SensorEvaluationContext):
     for run_record in running_run_records:
         run = run_record.dagster_run
         if run_record.start_time:
-            duration = now - datetime.fromtimestamp(run_record.start_time)
+            duration = now - run_record.start_time
 
             if duration > long_running_threshold:
                 context.log.warning(

@@ -214,89 +214,49 @@ def fetch_csv_page(
     endpoint: str,
     page: int,
     params: Dict = None,
-    chunk_size: int = 500,  # ← Réduit de 5000 à 500 pour éviter OOM
     max_retries: int = 3
-) -> Iterator[pd.DataFrame]:
+) -> pd.DataFrame:
     """
-    Telecharge et parse une page CSV en chunks avec retry sur timeout
+    Télécharge une page CSV complète (~5000 records par défaut selon l'API)
 
-    OPTIMISATION : HTTP Streaming pour grandes réponses (>10MB)
-    pour éviter de charger tout en RAM
+    SIMPLIFIÉ: Pas de chunking - l'API Hub'Eau retourne des pages de ~5k records
+    On charge la page complète en mémoire (avec 32GB RAM, pas de problème)
 
     Args:
         client: Client HTTP
         endpoint: Endpoint API
         page: Numéro de page
         params: Paramètres de requête
-        chunk_size: Taille des chunks pour réduire mémoire (défaut: 500 lignes - réduit pour éviter OOM/SIGKILL)
         max_retries: Nombre de tentatives en cas de timeout (défaut: 3)
 
-    Yields:
-        DataFrames par chunks pour économiser la mémoire
+    Returns:
+        DataFrame complet de la page (~5000 lignes)
     """
     retry_count = 0
 
     while retry_count <= max_retries:
         try:
-            # ✅ CHANGEMENT #2: HTTP Streaming pour grandes réponses
-            # Utiliser stream=True pour éviter de charger tout en RAM
-            url = f"{client.base_url}{endpoint}"
-            client._rate_limit()  # Appliquer rate limiting
-
-            response = client.session.get(
-                url,
+            # Simple GET request
+            response = client.get(
+                endpoint,
                 params={**(params or {}), 'page': page},
-                timeout=180,
-                stream=True  # ✅ Streaming activé
+                timeout=180
             )
-            response.raise_for_status()
 
-            # Détecter taille de la réponse
-            content_length = response.headers.get('Content-Length')
+            # Parse CSV complet (pas de chunking)
+            df = pd.read_csv(
+                io.StringIO(response.text),
+                sep=';',
+                quotechar='"',
+                low_memory=False,
+                on_bad_lines='skip'
+            )
 
-            if content_length and int(content_length) > 10_000_000:  # Plus de 10MB
-                logger.warning(
-                    f"⚠️ Page {page}: Grande réponse détectée ({int(content_length)/1024/1024:.1f} MB) "
-                    f"- utilisation streaming HTTP"
-                )
-
-                # ✅ Streaming direct depuis socket sans charger en RAM
-                # response.raw est un objet file-like qui stream depuis le socket
-                chunks = pd.read_csv(
-                    response.raw,  # ✅ Stream direct depuis socket
-                    sep=';',
-                    quotechar='"',
-                    low_memory=False,
-                    on_bad_lines='skip',
-                    chunksize=chunk_size,
-                    encoding='utf-8'  # Spécifier encoding pour raw stream
-                )
-            else:
-                # Petite réponse : méthode classique (plus rapide pour petits fichiers)
-                text = response.text  # Charger une seule fois
-
-                if content_length:
-                    logger.debug(f"Page {page}: Réponse normale ({int(content_length)/1024:.1f} KB)")
-
-                chunks = pd.read_csv(
-                    io.StringIO(text),
-                    sep=';',
-                    quotechar='"',
-                    low_memory=False,
-                    on_bad_lines='skip',
-                    chunksize=chunk_size
-                )
-
-            for chunk in chunks:
-                yield chunk
-
-            # Succès, sortir de la boucle retry
-            break
+            return df
 
         except pd.errors.EmptyDataError:
             logger.warning(f"⚠️  Page {page}: CSV vide")
-            yield pd.DataFrame()
-            break
+            return pd.DataFrame()
 
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
             retry_count += 1
@@ -324,7 +284,10 @@ def _paginate_csv(
     resource_name: str
 ) -> Iterator[List[Dict]]:
     """
-    Pagination CSV avec requete JSON prealable
+    Pagination simple: une page = ~5000 records
+
+    SIMPLIFIÉ: Pas de chunking, pas de micro-batching
+    L'API Hub'Eau retourne des pages de ~5k records, on les charge complètes
     """
     try:
         total_pages, total_count = get_total_pages_from_json(client, endpoint, params)
@@ -340,62 +303,31 @@ def _paginate_csv(
     errors_count = 0
     max_consecutive_errors = 3
 
-    # ✅ CHANGEMENT #3: Adaptive chunk_size pour hydrobio (APIs sans pagination)
-    # Si hydrobio ou si une seule page avec beaucoup de data : réduire chunk_size
-    adaptive_chunk_size = 500  # Défaut
-
-    if 'hydrobio' in resource_name.lower():
-        adaptive_chunk_size = 100  # ✅ Hydrobio : chunks plus petits (100 lignes)
-        logger.warning(f"⚠️ {resource_name}: Endpoint hydrobio détecté - chunk_size réduit à {adaptive_chunk_size}")
-    elif total_pages == 1 and total_count > 10000:
-        # API sans pagination avec beaucoup de données
-        adaptive_chunk_size = 100
-        logger.warning(
-            f"⚠️ {resource_name}: Une seule page avec {total_count:,} records - "
-            f"chunk_size réduit à {adaptive_chunk_size}"
-        )
+    logger.info(f"🚀 {resource_name}: Pagination de {total_pages} pages (~5k records/page)")
 
     for page in range(1, total_pages + 1):
         try:
-            chunk_count = 0
-            page_records = 0
+            # ✅ Charger page complète (DataFrame complet)
+            df = fetch_csv_page(client, endpoint, page, params)
 
-            # Itérer sur les chunks de la page avec chunk_size adaptatif
-            for df_chunk in fetch_csv_page(client, endpoint, page, params, chunk_size=adaptive_chunk_size):
-                if df_chunk.empty:
-                    continue
+            if df.empty:
+                logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} vide")
+                continue
 
-                chunk_count += 1
-                records = df_chunk.to_dict('records')
-                page_records += len(records)
-                records_total += len(records)
+            # Convertir toute la page en liste de dicts
+            records = df.to_dict('records')
+            records_count = len(records)
+            records_total += records_count
 
-                # Log avec progression
-                progress_pct = (records_total / total_count * 100) if total_count > 0 else 0
-                logger.info(
-                    f"📥 {resource_name}: Page {page}/{total_pages} chunk {chunk_count} -> "
-                    f"{len(records)} records (page: {page_records:,}, total: {records_total:,}/{total_count:,} = {progress_pct:.1f}%)"
-                )
+            # Log progression
+            progress_pct = (records_total / total_count * 100) if total_count > 0 else 0
+            logger.info(
+                f"📥 {resource_name}: Page {page}/{total_pages} -> "
+                f"{records_count:,} records (total: {records_total:,}/{total_count:,} = {progress_pct:.1f}%)"
+            )
 
-                # Yield immédiatement pour libérer mémoire
-                yield records
-
-            # Log fin de page
-            if page_records == 0:
-                logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} vide (0 records)")
-            else:
-                logger.info(f"✅ {resource_name}: Page {page}/{total_pages} terminée ({page_records:,} records)")
-
-            # Log RAM tous les 10 pages pour monitoring
-            if page % 10 == 0 or page == total_pages:
-                try:
-                    import psutil
-                    import os
-                    process = psutil.Process(os.getpid())
-                    mem_mb = process.memory_info().rss / 1024 / 1024
-                    logger.info(f"[MEM] Page {page}/{total_pages}: {mem_mb:.1f} MB RSS")
-                except:
-                    pass
+            # Yield toute la page d'un coup
+            yield records
 
             errors_count = 0
 
@@ -454,24 +386,20 @@ def _paginate_with_station_slicing(
                     logger.info(f"  Page {page}: vide, fin de pagination")
                     break
 
-                # Lire avec chunking pour économiser RAM (500 lignes à la fois)
-                chunks = pd.read_csv(
+                # ✅ Charger page complète (pas de chunking avec 32GB RAM)
+                df_stations = pd.read_csv(
                     io.StringIO(stations_response.text),
                     sep=';',
                     quotechar='"',
                     low_memory=False,
-                    on_bad_lines='skip',
-                    chunksize=500  # Chunking comme pour les données principales
+                    on_bad_lines='skip'
                 )
 
-                page_stations = []
-                for chunk in chunks:
-                    if station_field not in chunk.columns:
-                        raise ValueError(f"Colonne {station_field} introuvable dans les stations")
+                if station_field not in df_stations.columns:
+                    raise ValueError(f"Colonne {station_field} introuvable dans les stations")
 
-                    # Extraire codes stations uniques du chunk
-                    chunk_stations = chunk[station_field].dropna().unique().tolist()
-                    page_stations.extend(chunk_stations)
+                # Extraire codes stations uniques de la page
+                page_stations = df_stations[station_field].dropna().unique().tolist()
 
                 if not page_stations:
                     logger.info(f"  Page {page}: aucune station, fin de pagination")
@@ -517,31 +445,51 @@ def _paginate_with_station_slicing(
         logger.error(f"{resource_name}: Impossible de recuperer stations: {e}")
         raise
 
-    # Etape 2 : Pour chaque station, recuperer ses chroniques
+    # Etape 2 : Pour chaque batch de stations, recuperer leurs chroniques
+    # ✅ BATCH PAR 80 STATIONS (API Hub'Eau supporte jusqu'à 200 code_bss en query param)
+    STATIONS_PER_BATCH = 80
     total_records = 0
 
-    for idx, station_code in enumerate(stations, 1):
-        logger.info(f"{resource_name}: Station {idx}/{len(stations)}: {station_code}")
+    # Diviser stations en batches de 80
+    station_batches = [stations[i:i + STATIONS_PER_BATCH] for i in range(0, len(stations), STATIONS_PER_BATCH)]
+    num_batches = len(station_batches)
 
-        # Parametres avec code station
-        station_params = {**params, station_field: station_code}
+    logger.info(f"{resource_name}: {len(stations)} stations → {num_batches} batches de {STATIONS_PER_BATCH} stations")
+
+    for batch_idx, station_batch in enumerate(station_batches, 1):
+        # Joindre les codes stations avec virgule pour query param
+        stations_param = ','.join(station_batch)
+
+        logger.info(
+            f"{resource_name}: Batch {batch_idx}/{num_batches} "
+            f"({len(station_batch)} stations: {station_batch[0]}...{station_batch[-1]})"
+        )
+
+        # Parametres avec batch de stations
+        batch_params = {**params, station_field: stations_param}
 
         try:
-            station_records = 0
-            # Pagination pour cette station
-            for records in _paginate_csv(client, endpoint, station_params, f"{resource_name}[{station_code}]"):
-                station_records += len(records)
+            batch_records = 0
+            # Pagination pour ce batch de stations
+            for records in _paginate_csv(client, endpoint, batch_params, f"{resource_name}[batch_{batch_idx}]"):
+                batch_records += len(records)
                 total_records += len(records)
                 yield records
 
-            logger.info(f"✅ {resource_name}: Station {idx}/{len(stations)} ({station_code}) terminée: {station_records:,} records")
+            logger.info(
+                f"✅ {resource_name}: Batch {batch_idx}/{num_batches} terminé: "
+                f"{batch_records:,} records ({total_records:,} cumulés)"
+            )
 
         except Exception as e:
-            logger.error(f"❌ {resource_name}: Erreur station {station_code}: {type(e).__name__}: {e}")
-            # Continuer avec les autres stations
+            logger.error(
+                f"❌ {resource_name}: Erreur batch {batch_idx}/{num_batches} "
+                f"(stations {station_batch[0]}...{station_batch[-1]}): {type(e).__name__}: {e}"
+            )
+            # Continuer avec les autres batches
             continue
 
-    logger.info(f"{resource_name}: TERMINE slicing - {total_records:,} records ingeres")
+    logger.info(f"{resource_name}: TERMINE slicing - {total_records:,} records ingeres depuis {num_batches} batches")
 
 
 @dlt.source
@@ -631,3 +579,68 @@ def hubeau_csv_source(
     csv_resource._total_records = total_records_yielded
 
     return csv_resource
+
+
+def get_raw_data_iterator(config_dict: Dict) -> Iterator[List[Dict]]:
+    """
+    Get raw data iterator without DLT resource wrapper.
+    Returns actual lists of records (pages), not individual records.
+
+    This bypasses DLT's automatic list unpacking behavior which converts
+    yielded lists into individual dict records.
+
+    Args:
+        config_dict: Configuration dictionary containing:
+            - resource: name, endpoint, base_url, primary_key
+            - extraction: default_params
+            - performance: rate_limit
+            - pagination: station_field, stations_endpoint (optional)
+
+    Returns:
+        Iterator yielding lists of ~5000 dict records (complete pages)
+    """
+    # Extract configuration
+    resource_config = config_dict.get('resource', {})
+    extraction_config = config_dict.get('extraction', {})
+    performance_config = config_dict.get('performance', {})
+    pagination_config = config_dict.get('pagination', {})
+
+    resource_name = resource_config.get('name', 'unknown')
+    endpoint = resource_config.get('endpoint')
+    base_url = resource_config.get('base_url', 'https://hubeau.eaufrance.fr/api/v1')
+
+    # Create API client
+    client = HubeauAPIClient(
+        base_url=base_url,
+        rate_limit=performance_config.get('rate_limit', 2.0)
+    )
+
+    # Build parameters (default to FULL mode for simplicity)
+    params = extraction_config.get('default_params', {})
+
+    logger.info(f"🔧 {resource_name}: Direct iterator (bypass DLT), params={params}")
+
+    # Choose pagination method based on config
+    if 'station_field' in pagination_config:
+        # Station-based pagination (e.g., piezometry_chroniques)
+        station_field = pagination_config['station_field']
+
+        logger.info(f"📍 {resource_name}: Using station slicing (field: {station_field})")
+
+        return _paginate_with_station_slicing(
+            client=client,
+            endpoint=endpoint,
+            params=params,
+            resource_name=resource_name,
+            station_field=station_field
+        )
+    else:
+        # Standard pagination
+        logger.info(f"📄 {resource_name}: Using standard pagination")
+
+        return _paginate_csv(
+            client=client,
+            endpoint=endpoint,
+            params=params,
+            resource_name=resource_name
+        )

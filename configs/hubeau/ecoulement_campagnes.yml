@@ -3,14 +3,12 @@ resource:
   endpoint: /campagnes.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
   primary_key:
-  - code_departement
-  - date_campagne
+  - code_campagne
 extraction:
   default_params: {}
 performance:
   parallelism: 5
-  chunk_size: 10000
-  batch_size: 100000  # Optimisé avec micro-batching (2x augmentation - safe)
+  batch_size: 5000
   retry_times: 3
   retry_delay: 2.0
   rate_limit: 2.0

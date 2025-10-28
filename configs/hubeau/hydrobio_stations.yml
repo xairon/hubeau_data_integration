@@ -8,8 +8,7 @@ extraction:
   default_params: {}
 performance:
   parallelism: 5
-  chunk_size: 1000  # ✅ CHANGEMENT #6: Réduit de 10000 à 1000 (hydrobio = pas de pagination)
-  batch_size: 1000  # ✅ CHANGEMENT #6: Réduit de 10000 à 1000 pour économiser RAM
+  batch_size: 5000
   retry_times: 3
   retry_delay: 2.0
   rate_limit: 2.0

@@ -7,11 +7,10 @@ from dagster import Definitions, define_asset_job, AssetSelection, multiprocess_
 # Import des assets
 from .assets import all_assets
 
-# Import des jobs originaux ET améliorés
-from .jobs import all_jobs
-from .jobs.hubeau_jobs_improved import all_improved_jobs
+# Import des jobs et schedules
+from .jobs import all_jobs, all_schedules as hubeau_schedules
 
-# Import des schedules
+# Import des schedules (vide actuellement - pour extensions futures)
 from .schedules import all_schedules
 
 # Import des capteurs
@@ -33,22 +32,14 @@ limited_executor = multiprocess_executor.configured({
     "max_concurrent": 2  # ✅ Max 2 assets en parallèle (au lieu de 4 par défaut)
 })
 
-# Job par défaut avec executor limité
-hubeau_job_limited = define_asset_job(
-    name="hubeau_materialize_limited",
-    selection=AssetSelection.all(),
-    executor_def=limited_executor,
-    tags={"api": "hubeau"}
-)
-
 # Définitions centrales
 defs = Definitions(
     assets=all_assets,
-    jobs=all_jobs + all_improved_jobs + [hubeau_job_limited],  # Jobs originaux + améliorés + limité
-    schedules=all_schedules,
+    jobs=all_jobs,  # 12 jobs : 8 par API + 2 globaux + 2 tests
+    schedules=all_schedules + hubeau_schedules,  # Schedules génériques + schedules Hub'Eau
     resources=RESOURCES,
     sensors=all_sensors,
-    # ✅ CHANGEMENT #4: Forcer l'executor limité comme défaut global
-    # Tous les jobs utilisent maintenant cet executor sauf override explicite
+    # ✅ Executor limité comme défaut global (max 2 assets parallèles)
+    # Tous les jobs utilisent cet executor sauf override explicite
     executor=limited_executor,
 )

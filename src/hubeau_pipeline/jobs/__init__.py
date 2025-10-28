@@ -17,10 +17,13 @@ from .hubeau_jobs import (
     # Jobs globaux
     all_stations_job,
     all_chroniques_job,
-    all_hubeau_job,
+    # Schedules
+    weekly_stations_schedule,
+    daily_chroniques_schedule,
 )
 
 all_jobs = [
+    # Jobs par API
     piezometry_job,
     quality_rivers_job,
     quality_groundwater_job,
@@ -29,9 +32,14 @@ all_jobs = [
     hydrobio_job,
     ecoulement_job,
     prelevements_job,
+    # Jobs globaux (pour schedules)
     all_stations_job,
     all_chroniques_job,
-    all_hubeau_job,
+]
+
+all_schedules = [
+    weekly_stations_schedule,
+    daily_chroniques_schedule,
 ]
 
 __all__ = [
@@ -47,7 +55,10 @@ __all__ = [
     # Jobs globaux
     "all_stations_job",
     "all_chroniques_job",
-    "all_hubeau_job",
+    # Schedules
+    "weekly_stations_schedule",
+    "daily_chroniques_schedule",
     # Collections
     "all_jobs",
+    "all_schedules",
 ]
