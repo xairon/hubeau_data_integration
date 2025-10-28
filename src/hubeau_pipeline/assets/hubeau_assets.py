@@ -216,8 +216,16 @@ def batch_iterator_with_flush(source, batch_size: int, micro_batch_size: int):
         List[Dict] de taille micro_batch_size (sauf dernier)
     """
     micro_batch = []
+    
+    # ✅ Extraire les données depuis DLT source correctement
+    resource_name_key = list(source.resources.keys())[0]  # Premier (et seul) resource
+    data_iterator = source.resources[resource_name_key]()  # Appeler pour obtenir l'iterator
 
-    for record in source:
+    for record in data_iterator:
+        # Validation type
+        if not isinstance(record, dict):
+            continue
+            
         micro_batch.append(record)
 
         # Yield quand micro-batch plein
@@ -382,8 +390,10 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             if isinstance(primary_keys, str):
                 primary_keys = [primary_keys]
 
-            # Déterminer write_disposition: replace pour mode full, append sinon
-            write_disposition = "replace" if config.mode == "full" else "append"
+            # ✅ Déterminer write_disposition:
+            # - FULL: replace (TRUNCATE + INSERT) - Efface tout et recommence
+            # - YEAR/INCREMENTAL: merge (UPSERT via PK) - Met à jour sans doublons
+            write_disposition = "replace" if config.mode == "full" else "merge"
 
             # ✅ BATCH_SIZE depuis YAML config - désormais AUGMENTÉ car mémoire sécurisée par micro-batching
             # Voir configs/hubeau/*.yml → performance.batch_size (augmenté de 3-10x vs anciennes valeurs)
@@ -414,10 +424,15 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             for micro_batch in batch_iterator_with_flush(source, BATCH_SIZE, MICRO_BATCH_SIZE):
                 micro_batch_count += 1
 
-                # Premier micro-batch: utiliser write_disposition original (TRUNCATE si replace)
-                # Micro-batchs suivants: toujours append
-                batch_write_disposition = write_disposition if is_first_write else "append"
-                is_first_write = False
+                # ✅ LOGIQUE CORRIGÉE pour micro-batching:
+                # - Mode "replace": premier micro-batch fait TRUNCATE+INSERT, suivants font APPEND
+                # - Mode "merge": TOUS les micro-batches font MERGE (pour éviter doublons)
+                if write_disposition == "replace":
+                    batch_write_disposition = "replace" if is_first_write else "append"
+                    is_first_write = False
+                else:
+                    # Mode merge/year/incremental: TOUJOURS merge pour éviter doublons
+                    batch_write_disposition = write_disposition
 
                 # Log tous les 10 micro-batches (évite spam)
                 if micro_batch_count % 10 == 0:
