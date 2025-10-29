@@ -35,6 +35,9 @@ COPY src /app/src
 # .[worker]: Install with worker extra dependencies
 RUN uv pip install --no-cache --system ".[worker]"
 
+# Prevent Python from writing bytecode
+ENV PYTHONDONTWRITEBYTECODE=1
+
 # Copy remaining application code
 COPY configs /app/configs
 COPY scripts /app/scripts

@@ -306,11 +306,20 @@ class PostgresBulkDestinationV2:
         directement les colonnes avec les bons types PostgreSQL.
         Fallback vers TEXT pour les colonnes non mappées (sécurité).
         """
+        # ALWAYS normalize DataFrame columns before creating table
+        # Force column normalization - don't use copy() as it may preserve references
+        original_cols = list(df.columns)
+        normalized_cols = [str(col).lower() for col in original_cols]
+
+        # Create completely new DataFrame with normalized columns
+        df = pd.DataFrame(df.values, columns=normalized_cols)
+
         with conn.cursor() as cursor:
             # ✅ STRATEGIE OPTIMISEE: Utiliser les type mappings Hub'Eau
             table_schema = get_table_schema(table_name)
+
             col_defs = []
-            
+
             for col in df.columns:
                 # Essayer d'abord le mapping Hub'Eau
                 if table_schema and col in table_schema:
@@ -329,7 +338,7 @@ class PostgresBulkDestinationV2:
                         pg_type = 'TEXT'  # Safe fallback
                     logger.debug(f"  {col} -> {pg_type} (inférence, pas de mapping)")
 
-                col_defs.append(f'"{col}" {pg_type}')
+                col_defs.append(f'"{col.lower()}" {pg_type}')
 
             create_sql = f"""
                 CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
@@ -362,6 +371,7 @@ class PostgresBulkDestinationV2:
 
         try:
             with conn.cursor() as cursor:
+                # Les colonnes du DataFrame sont déjà normalisées dans load_batch
                 # Récupérer colonnes (depuis cache si possible)
                 target_columns = self._get_target_columns(table_name, conn)
 
@@ -401,7 +411,7 @@ class PostgresBulkDestinationV2:
                     common_columns = [column_mapping.get(col, col) for col in common_columns]
                 else:
                     df = df[common_columns]
-                
+
                 logger.debug(f"  Colonnes utilisées: {len(common_columns)}/{len(df_columns)} ({', '.join(common_columns[:5])}...)")
 
                 df = self._clean_dataframe_inplace(df, table_name=table_name, conn=conn)
@@ -713,8 +723,17 @@ class PostgresBulkDestinationV2:
             logger.warning(f"⚠️ Pas de données pour {table_name}")
             return
 
-        # DataFrame avec mappings
-        df = pd.DataFrame(data)
+        # Normaliser les clés du dictionnaire AVANT de créer le DataFrame
+        normalized_data = []
+        for record in data:
+            normalized_record = {key.lower(): value for key, value in record.items()}
+            normalized_data.append(normalized_record)
+
+        # DataFrame avec colonnes déjà normalisées
+        df = pd.DataFrame(normalized_data)
+
+        # Double vérification - normaliser aussi les colonnes du DataFrame
+        df.columns = [col.lower() for col in df.columns]
 
         if column_mappings:
             df = df.rename(columns=column_mappings)
