@@ -355,16 +355,17 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                     continue
 
                 # ✅ Write disposition pour cette page:
-                # - Mode "replace": première page fait TRUNCATE+INSERT, suivantes font APPEND
+                # - Mode "replace": première page fait TRUNCATE+INSERT, suivantes font MERGE (évite doublons API)
                 # - Mode "merge": TOUTES les pages font MERGE (évite doublons)
                 if write_disposition == "replace":
-                    batch_write_disposition = "replace" if is_first_write else "append"
+                    batch_write_disposition = "replace" if is_first_write else "merge"
                     is_first_write = False
                 else:
                     batch_write_disposition = write_disposition
 
                 # Charger page complète en base
                 load_start = time.time()
+                context.log.info(f"🔍🔍🔍 CALLING load_batch with disposition={batch_write_disposition}, page={page_count}")
                 postgres_bulk_destination.load_batch(
                     table_name=table_name,
                     data=page_records,

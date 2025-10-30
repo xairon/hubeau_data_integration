@@ -498,11 +498,13 @@ def _paginate_with_station_slicing(
         raise
 
     # Etape 2 : Pour chaque batch de stations, recuperer leurs chroniques
-    # ✅ BATCH PAR 80 STATIONS (API Hub'Eau supporte jusqu'à 200 code_bss en query param)
-    STATIONS_PER_BATCH = 80
+    # ✅ BATCH PAR 40 STATIONS (Réduction pour éviter les URL trop longues causant des 400 Bad Request)
+    # Note: L'API Hub'Eau supporte jusqu'à 200 code_bss, mais les URLs deviennent trop longues (>3000 chars)
+    # causant des erreurs 400 sur les pages 5+ lorsqu'on utilise 80 stations par batch
+    STATIONS_PER_BATCH = 40
     total_records = 0
 
-    # Diviser stations en batches de 80
+    # Diviser stations en batches de 40
     station_batches = [stations[i:i + STATIONS_PER_BATCH] for i in range(0, len(stations), STATIONS_PER_BATCH)]
     num_batches = len(station_batches)
 

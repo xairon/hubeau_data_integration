@@ -1,12 +1,14 @@
 resource:
   name: piezometry_chroniques
-  endpoint: /chroniques_tr.csv
+  endpoint: /chroniques.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
   primary_key:
   - code_bss
-  - timestamp_mesure
+  - date_mesure
 extraction:
-  default_params: {}
+  default_params:
+    size: 5000
+    date_debut_mesure: "2020-01-01"
 performance:
   parallelism: 5
   batch_size: 5000

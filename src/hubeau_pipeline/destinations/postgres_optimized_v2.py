@@ -15,7 +15,7 @@ import logging
 from threading import Lock
 
 # Import des type mappings Hub'Eau
-from hubeau_pipeline.schema import get_table_schema, get_field_type, HUBEAU_FIELD_TYPES
+from hubeau_pipeline.schema import get_table_schema, get_field_type, get_primary_key, HUBEAU_FIELD_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -340,14 +340,69 @@ class PostgresBulkDestinationV2:
 
                 col_defs.append(f'"{col.lower()}" {pg_type}')
 
+            # ✅ Ajouter PRIMARY KEY si défini dans TABLE_PK_MAPPING
+            primary_keys = get_primary_key(table_name)
+
+            # 🔍 DEBUG: Logs massifs pour comprendre le problème
+            logger.warning(f"🔍🔍🔍 DEBUG CREATE TABLE {table_name}:")
+            logger.warning(f"  - primary_keys from mapping: {primary_keys}")
+            logger.warning(f"  - df.columns ({len(df.columns)} total): {list(df.columns)[:20]}")
+
+            if primary_keys:
+                # IMPORTANT: Normaliser les primary_keys en lowercase pour matcher les colonnes du DataFrame
+                primary_keys_original = primary_keys.copy() if isinstance(primary_keys, list) else list(primary_keys)
+                primary_keys = [pk.lower() for pk in primary_keys]
+                logger.warning(f"  - primary_keys (normalized): {primary_keys}")
+                logger.warning(f"  - primary_keys (original): {primary_keys_original}")
+
+                # Vérifier que toutes les colonnes PK existent
+                pk_cols_exist = all(pk in df.columns for pk in primary_keys)
+                logger.warning(f"  - pk_cols_exist check: {pk_cols_exist}")
+
+                if not pk_cols_exist:
+                    missing_pks = [pk for pk in primary_keys if pk not in df.columns]
+                    present_pks = [pk for pk in primary_keys if pk in df.columns]
+                    logger.warning(f"  - missing PK columns: {missing_pks}")
+                    logger.warning(f"  - present PK columns: {present_pks}")
+                    # Check if columns exist with different case
+                    similar_cols = []
+                    for pk in missing_pks:
+                        for col in df.columns:
+                            if pk.lower() == col.lower():
+                                similar_cols.append((pk, col))
+                    if similar_cols:
+                        logger.warning(f"  - similar columns found (case mismatch?): {similar_cols}")
+
+                if pk_cols_exist:
+                    pk_constraint = f",\nPRIMARY KEY ({', '.join(primary_keys)})"
+                    logger.warning(f"✅✅✅ PRIMARY KEY WILL BE CREATED: {', '.join(primary_keys)}")
+                else:
+                    pk_constraint = ""
+                    logger.error(f"❌❌❌ PRIMARY KEY NOT CREATED - colonnes manquantes!")
+                    logger.error(f"    DataFrame columns: {list(df.columns)}")
+                    logger.error(f"    Required PK columns: {primary_keys}")
+                    logger.error(f"    Missing columns: {[pk for pk in primary_keys if pk not in df.columns]}")
+            else:
+                pk_constraint = ""
+                logger.warning(f"⚠️ No PRIMARY KEY defined in TABLE_PK_MAPPING for {table_name}")
+
             create_sql = f"""
                 CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
-                    {', '.join(col_defs)}
+                    {', '.join(col_defs)}{pk_constraint}
                 )
             """
+
+            # 🔍 DEBUG: Logger le SQL exact
+            logger.warning(f"🔍🔍🔍 SQL CREATE TABLE for {table_name}:")
+            sql_lines = create_sql.strip().split('\n')
+            for i, line in enumerate(sql_lines[:15]):  # First 15 lines
+                logger.warning(f"    L{i+1}: {line}")
+            if len(sql_lines) > 15:
+                logger.warning(f"    ... ({len(sql_lines) - 15} more lines)")
+
             cursor.execute(create_sql)
             conn.commit()
-            
+
             # Log des informations utiles
             mapped_cols = len([c for c in df.columns if table_schema and c in table_schema])
             total_cols = len(df.columns)
@@ -541,22 +596,51 @@ class PostgresBulkDestinationV2:
         """
         UPSERT optimisé avec connexion unique
         """
+        logger.info(f"🔍 DEBUG _upsert_dataframe START:")
+        logger.info(f"  - table_name: {table_name}")
+        logger.info(f"  - primary_keys input: {primary_keys}")
+        logger.info(f"  - df.shape: {df.shape}")
+        logger.info(f"  - df.columns[:10]: {df.columns.tolist()[:10]}")
+
         conn = self._get_connection()
         staging_table = f"staging_{int(time.time() * 1000)}"
 
         try:
             with conn.cursor() as cursor:
                 # Récupérer colonnes cibles (cache)
+                logger.info(f"🔍 DEBUG: Getting target columns for {table_name}...")
                 target_columns = self._get_target_columns(table_name, conn)
+                logger.info(f"🔍 DEBUG: target_columns = {target_columns[:10] if target_columns else 'EMPTY LIST'}")
+
+                # Si table n'existe pas, la créer (comme dans _copy_from_dataframe)
+                if not target_columns:
+                    logger.warning(f"⚠️ Table {table_name} n'existe pas - création automatique pour UPSERT")
+                    logger.info(f"🔍 DEBUG: Creating table from DataFrame...")
+                    self._create_table_from_dataframe(df, table_name, conn)
+                    target_columns = self._get_target_columns(table_name, conn)
+                    logger.info(f"🔍 DEBUG: After creation, target_columns = {target_columns[:10] if target_columns else 'STILL EMPTY!'}")
 
                 # Filtrer colonnes
                 df_columns = df.columns.tolist()
+                logger.info(f"🔍 DEBUG: df_columns = {df_columns[:10]}")
+
                 common_columns = [col for col in df_columns if col in target_columns]
+                logger.info(f"🔍 DEBUG: common_columns = {common_columns[:10]}")
 
                 # Vérifier primary keys
+                logger.info(f"🔍 DEBUG: Checking primary_keys {primary_keys} in common_columns...")
                 missing_pks = [pk for pk in primary_keys if pk not in common_columns]
+
                 if missing_pks:
+                    logger.error(f"🔍 DEBUG ERROR DETAIL:")
+                    logger.error(f"  - primary_keys: {primary_keys}")
+                    logger.error(f"  - df_columns: {df_columns}")
+                    logger.error(f"  - target_columns: {target_columns}")
+                    logger.error(f"  - common_columns: {common_columns}")
+                    logger.error(f"  - missing_pks: {missing_pks}")
                     raise ValueError(f"Primary keys manquantes: {missing_pks}")
+
+                logger.info(f"✅ DEBUG: Primary keys validation passed!")
 
                 # Nettoyer DataFrame EN PLACE
                 if len(common_columns) < len(df_columns):
@@ -566,11 +650,25 @@ class PostgresBulkDestinationV2:
                 # Fix: Deduplicate rows to avoid "ON CONFLICT DO UPDATE command cannot affect row a second time"
                 # This error occurs when the same primary key appears multiple times in a single batch
                 original_len = len(df)
-                df = df.drop_duplicates(subset=primary_keys, keep='last')
+
+                # DEFENSIVE: Normaliser les primary_keys pour être sûr qu'ils matchent les colonnes du DataFrame
+                primary_keys_for_dedup = [pk.lower() for pk in primary_keys]
+
+                # Vérifier que TOUTES les primary keys existent dans le DataFrame AVANT deduplication
+                missing_for_dedup = [pk for pk in primary_keys_for_dedup if pk not in df.columns]
+                if missing_for_dedup:
+                    logger.error(f"❌ CRITICAL: Primary keys manquantes pour deduplication: {missing_for_dedup}")
+                    logger.error(f"   DataFrame columns: {df.columns.tolist()}")
+                    logger.error(f"   Primary keys: {primary_keys_for_dedup}")
+                    raise ValueError(f"Cannot deduplicate: primary keys {missing_for_dedup} not in DataFrame")
+
+                logger.info(f"🔍 DEBUG Deduplication: Using primary_keys={primary_keys_for_dedup} on {original_len} rows")
+                df = df.drop_duplicates(subset=primary_keys_for_dedup, keep='last')
+
                 if len(df) < original_len:
                     logger.warning(f"⚠️ Deduplication: removed {original_len - len(df)} duplicate rows from {table_name}")
                 else:
-                    logger.debug(f"✓ No duplicates found in batch for {table_name}")
+                    logger.info(f"✓ No duplicates found in batch for {table_name} ({original_len} rows checked)")
 
                 # Créer staging table (simplifiée avec gestion des NULL)
                 cursor.execute(f"""
@@ -648,11 +746,12 @@ class PostgresBulkDestinationV2:
 
                 if '_dlt_id' in target_columns and '_dlt_id' not in common_columns:
                     insert_columns.append('_dlt_id')
-                    pk_concat = ' || '.join([f"COALESCE({pk}::TEXT, '')" for pk in primary_keys])
+                    # Utiliser les primary_keys normalisées
+                    pk_concat = ' || '.join([f"COALESCE({pk}::TEXT, '')" for pk in primary_keys_for_dedup])
                     select_columns.append(f"MD5({pk_concat})::TEXT")
 
-                # Update columns (exclure PK)
-                update_cols = [c for c in common_columns if c not in primary_keys]
+                # Update columns (exclure PK) - utiliser primary_keys normalisées
+                update_cols = [c for c in common_columns if c not in primary_keys_for_dedup]
 
                 if update_cols:
                     update_set = ', '.join([f"{c} = EXCLUDED.{c}" for c in update_cols])
@@ -662,10 +761,11 @@ class PostgresBulkDestinationV2:
                 else:
                     conflict_action = "DO NOTHING"
 
+                logger.info(f"🔍 DEBUG UPSERT SQL: ON CONFLICT ({','.join(primary_keys_for_dedup)})")
                 upsert_sql = f"""
                     INSERT INTO {self.schema_name}.{table_name} ({','.join(insert_columns)})
                     SELECT {','.join(select_columns)} FROM {staging_table}
-                    ON CONFLICT ({','.join(primary_keys)})
+                    ON CONFLICT ({','.join(primary_keys_for_dedup)})
                     {conflict_action}
                 """
 
@@ -719,9 +819,16 @@ class PostgresBulkDestinationV2:
         column_mappings: Optional[Dict[str, str]] = None
     ):
         """Point d'entrée principal optimisé"""
+        logger.info(f"🔍 DEBUG load_batch START: table={table_name}, disposition={write_disposition}, primary_keys={primary_keys}, data_count={len(data) if data else 0}")
+
         if not data:
             logger.warning(f"⚠️ Pas de données pour {table_name}")
             return
+
+        # Log les premières colonnes des données
+        if data:
+            first_record_keys = list(data[0].keys())[:10]
+            logger.info(f"🔍 DEBUG load_batch: First record keys (sample): {first_record_keys}")
 
         # Normaliser les clés du dictionnaire AVANT de créer le DataFrame
         normalized_data = []
@@ -734,6 +841,13 @@ class PostgresBulkDestinationV2:
 
         # Double vérification - normaliser aussi les colonnes du DataFrame
         df.columns = [col.lower() for col in df.columns]
+
+        # NOUVEAU : Normaliser aussi les primary_keys pour cohérence
+        if primary_keys:
+            original_pks = primary_keys.copy()
+            primary_keys = [pk.lower() for pk in primary_keys]
+            if original_pks != primary_keys:
+                logger.info(f"🔍 DEBUG: Normalized primary_keys from {original_pks} to {primary_keys}")
 
         if column_mappings:
             df = df.rename(columns=column_mappings)
@@ -748,7 +862,20 @@ class PostgresBulkDestinationV2:
         elif write_disposition == "merge":
             if not primary_keys:
                 raise ValueError("primary_keys requis pour merge")
-            self._upsert_dataframe(df, table_name, primary_keys)
+
+            logger.info(f"🔍 DEBUG load_batch MERGE: About to call _upsert_dataframe")
+            logger.info(f"  - table_name: {table_name}")
+            logger.info(f"  - primary_keys: {primary_keys}")
+            logger.info(f"  - df.shape: {df.shape}")
+            logger.info(f"  - df.columns: {df.columns.tolist()[:10]}")
+
+            try:
+                self._upsert_dataframe(df, table_name, primary_keys)
+            except Exception as e:
+                logger.error(f"❌ Erreur UPSERT: {str(e)}")
+                logger.error(f"🔍 DEBUG: Exception type: {type(e).__name__}")
+                logger.error(f"🔍 DEBUG: Full traceback:", exc_info=True)
+                raise
         elif write_disposition == "append":
             self._copy_from_dataframe(df, table_name)
         else:
