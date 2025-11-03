@@ -191,8 +191,8 @@ dagster asset materialize -m hubeau_pipeline -s hydrobio_indices_csv --partition
 
 **Status:** ⏸️ EN ATTENTE (après Phase C validée)
 **Durée estimée:** 1-2 jours
-**Risque:** Moyen (changement de stratégie pagination/upsert)
-**Gain:** -1,200-1,400 lignes (-52-60%)
+**Risque:** Moyen (changement de stratégie upsert/pagination)
+**Gain:** -450-550 lignes (-21-26%) - RÉVISÉ après analyse Arrow/Parquet
 
 ### Objectif
 
@@ -200,57 +200,35 @@ Utiliser dlt pour pagination et upsert, garder COPY custom uniquement si critiqu
 
 ### Changements Détaillés
 
-#### B.1 - Supprimer parallélisation custom → dlt Arrow
+#### B.1 - SKIP - Parallélisation custom JUSTIFIÉE
 
 **Fichier:** `src/hubeau_pipeline/sources/hubeau_csv_parallel.py`
 
-**Problème:** Réinvention complète de la parallélisation (185 lignes) alors que dlt + Arrow le fait nativement
+**DÉCISION:** GARDER le fichier (185 lignes JUSTIFIÉES)
 
-**Action:**
-1. Supprimer `hubeau_csv_parallel.py` entièrement
-2. Dans `hubeau_csv_source.py`, modifier `@dlt.resource` pour yielder Arrow tables au lieu de dicts:
+**Raison:**
+L'API Hub'Eau retourne du CSV, pas de l'Arrow/Parquet. La parallélisation custom est JUSTIFIÉE car:
 
+1. **Rate limiting précis:** Hub'Eau API a des limites strictes (2 req/s), notre `ParallelCSVFetcher` avec `Lock` + `sleep` garantit le respect
+2. **Contrôle fin:** `max_workers=5` ajustable par endpoint selon volumétrie
+3. **dlt `parallelized=True` insuffisant:** Ne gère PAS le rate limiting inter-threads
+
+**Alternative évaluée (rejetée):**
 ```python
-# AVANT (ligne 591):
-def csv_resource() -> Iterator[List[Dict]]:
-    # ...
-    yield batch  # List[Dict]
-
-# APRÈS:
-def csv_resource() -> Iterator[pa.Table]:
-    import pyarrow as pa
-    # ...
-    # Convertir DataFrame → Arrow Table
-    arrow_table = pa.Table.from_pandas(df)
-    yield arrow_table
+# Option: dlt parallelized=True
+@dlt.resource(parallelized=True)  # ← Pas de rate limiting!
+def csv_resource():
+    for page in pages:
+        yield fetch_page(page)  # Risque: dépassement rate limit Hub'Eau
 ```
 
-3. Dans `hubeau_assets.py`, utiliser `loader_file_format="parquet"` pour parallélisation auto:
+**Problème:** dlt `parallelized=True` lance threads SANS coordination de rate limit → risque ban API Hub'Eau
 
-```python
-# Ligne 405-409 (REMPLACER):
-pipeline.run(
-    csv_resource,
-    loader_file_format="parquet",  # ← dlt parallélise automatiquement
-    write_disposition="merge"
-)
-```
+**Arrow/Parquet inutile:** L'API crache du CSV → pandas DataFrame → conversion Arrow inutile (overhead mémoire sans gain)
 
-**Gain:** -185 lignes (fichier entier supprimé)
+**Conclusion:** **SKIP Phase B.1** - La parallélisation custom est une optimisation LÉGITIME pour Hub'Eau
 
-**Fichiers modifiés:**
-- `hubeau_csv_parallel.py` (suppression fichier)
-- `hubeau_csv_source.py` (yield Arrow tables)
-- `hubeau_assets.py` (loader_file_format)
-- `pyproject.toml` (ajouter pyarrow si absent)
-
-**Test de validation:**
-```bash
-# Tester avec un gros endpoint (1M+ records)
-dagster asset materialize -m hubeau_pipeline -s temperature_chroniques_csv --partition 2024
-
-# Comparer durée AVANT/APRÈS (doit être similaire ou plus rapide)
-```
+**Gain:** 0 lignes (parallélisation custom justifiée et conservée)
 
 ---
 
