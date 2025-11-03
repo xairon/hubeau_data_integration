@@ -749,20 +749,22 @@ class PostgresBulkDestinationV2:
                 logger.warning(f"WARNING: No date column found for DELETE+COPY optimization, falling back to UPSERT")
 
         # ✅ FIX: For subsequent batches with partition_year (is_first_batch=False),
-        # use APPEND mode to accumulate pages without UPSERT overhead
+        # use UPSERT to handle cross-page duplicates from Hub'Eau API
         if partition_year and write_disposition == "merge" and not is_first_batch:
-            logger.info(f"INFO: Appending batch for year {partition_year} (batch #{2}+)")
+            logger.info(f"INFO: Upserting batch for year {partition_year} (batch #{2}+)")
 
-            # Deduplicate within this page before APPEND
-            if primary_keys:
-                pk_lower = [pk.lower() for pk in primary_keys]
-                original_len = len(df)
-                df = df.drop_duplicates(subset=pk_lower, keep='last')
-                if len(df) < original_len:
-                    logger.warning(f"WARNING: Removed {original_len - len(df)} duplicate rows within page before APPEND")
+            if not primary_keys:
+                raise ValueError("primary_keys required for UPSERT")
 
-            # APPEND this page's data (no DELETE, no UPSERT)
-            self._copy_from_dataframe(df, table_name)
+            # Deduplicate within this page before UPSERT
+            pk_lower = [pk.lower() for pk in primary_keys]
+            original_len = len(df)
+            df = df.drop_duplicates(subset=pk_lower, keep='last')
+            if len(df) < original_len:
+                logger.warning(f"WARNING: Removed {original_len - len(df)} duplicate rows within page before UPSERT")
+
+            # UPSERT this page's data (handles cross-page duplicates from Hub'Eau API)
+            self._upsert_dataframe(df, table_name, primary_keys)
             return
 
         if write_disposition == "replace":
