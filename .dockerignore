@@ -1,0 +1,63 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Dagster local storage (exclude from Docker build)
+dagster_home/storage/
+dagster_home/history/
+dagster_home/logs/
+dagster_home/schedules/
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Documentation
+docs/
+
+# Environment files (sécurité)
+.env
+.env.*
+!.env.example

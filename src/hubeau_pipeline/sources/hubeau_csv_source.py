@@ -196,22 +196,16 @@ def get_total_pages_from_json(
         # Taille de page reelle (varie selon endpoint, generalement ~5000 records)
         actual_page_size = len(data.get('data', []))
 
-        # ⚠️ DETECTION HYDROBIO : Si page_size == count, l'API n'a PAS de pagination !
+        # Détection API sans pagination
         if actual_page_size == total_count:
-            logger.warning(
-                f"⚠️ {endpoint}: API sans pagination détectée ! "
-                f"{total_count:,} records sur UNE SEULE page (risque RAM élevé)"
-            )
-            # Forcer 1 seule page (tout est déjà là)
+            logger.warning(f"WARNING: {endpoint} - no pagination ({total_count:,} records in single page)")
             return 1, total_count
 
         if actual_page_size == 0:
             actual_page_size = 5000  # Default Hub'Eau (estimation conservatrice)
 
         total_pages = (total_count // actual_page_size) + (1 if total_count % actual_page_size > 0 else 0)
-
-        logger.info(f"📊 {endpoint}: Total={total_count:,} records ({actual_page_size} rec/page, {total_pages} pages)")
-
+        logger.info(f"INFO: {endpoint} - {total_count:,} records, {total_pages} pages")
         return total_pages, total_count
 
     except Exception as e:
@@ -332,14 +326,13 @@ def _paginate_csv(
         raise
 
     if total_count == 0:
-        logger.warning(f"⚠️  {resource_name}: Aucune donnee trouvee pour ces parametres")
+        logger.warning(f"WARNING: {resource_name} - no data found")
         return
 
     records_total = 0
     errors_count = 0
     max_consecutive_errors = 3
-
-    logger.info(f"🚀 {resource_name}: Pagination de {total_pages} pages (~5k records/page)")
+    logger.info(f"INFO: {resource_name} - paginating {total_pages} pages")
 
     for page in range(1, total_pages + 1):
         try:
@@ -347,7 +340,7 @@ def _paginate_csv(
             df = fetch_csv_page(client, endpoint, page, params)
 
             if df.empty:
-                logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} vide")
+                logger.warning(f"WARNING: {resource_name} - page {page}/{total_pages} empty")
                 continue
 
             # ✅ VALIDATION ROBUSTE: Convertir toute la page en liste de dicts avec vérifications
@@ -385,16 +378,11 @@ def _paginate_csv(
 
             records_total += records_count
 
-            # Log progression
-            progress_pct = (records_total / total_count * 100) if total_count > 0 else 0
-            logger.info(
-                f"📥 {resource_name}: Page {page}/{total_pages} -> "
-                f"{records_count:,} records (total: {records_total:,}/{total_count:,} = {progress_pct:.1f}%)"
-            )
+            # Log progression toutes les 10 pages
+            if page % 10 == 0 or page == total_pages:
+                logger.info(f"INFO: {resource_name} - page {page}/{total_pages}, {records_total:,}/{total_count:,} records")
 
-            # Yield toute la page d'un coup
             yield records
-
             errors_count = 0
 
         except Exception as e:
@@ -407,7 +395,7 @@ def _paginate_csv(
 
             continue
 
-    logger.info(f"✅ {resource_name}: TERMINE - {records_total:,} records ingeres")
+    logger.info(f"INFO: {resource_name} - completed, {records_total:,} records")
 
 
 def _paginate_with_station_slicing(
@@ -647,79 +635,3 @@ def hubeau_csv_source(
     csv_resource._total_records = total_records_yielded
 
     return csv_resource
-
-
-def get_raw_data_iterator(config_dict: Dict) -> Iterator[List[Dict]]:
-    """
-    Get raw data iterator without DLT resource wrapper.
-    Returns actual lists of records (pages), not individual records.
-
-    This bypasses DLT's automatic list unpacking behavior which converts
-    yielded lists into individual dict records.
-
-    Args:
-        config_dict: Configuration dictionary containing:
-            - resource: name, endpoint, base_url, primary_key
-            - extraction: default_params
-            - performance: rate_limit
-            - pagination: station_field, stations_endpoint (optional)
-
-    Returns:
-        Iterator yielding lists of ~5000 dict records (complete pages)
-    """
-    # Extract configuration
-    resource_config = config_dict.get('resource', {})
-    extraction_config = config_dict.get('extraction', {})
-    performance_config = config_dict.get('performance', {})
-    pagination_config = config_dict.get('pagination', {})
-
-    resource_name = resource_config.get('name', 'unknown')
-    endpoint = resource_config.get('endpoint')
-    base_url = resource_config.get('base_url', 'https://hubeau.eaufrance.fr/api/v1')
-
-    # Create API client
-    client = HubeauAPIClient(
-        base_url=base_url,
-        rate_limit=performance_config.get('rate_limit', 2.0)
-    )
-
-    # Build parameters (default to FULL mode for simplicity)
-    params = extraction_config.get('default_params', {})
-
-    logger.info(f"🔧 {resource_name}: Direct iterator (bypass DLT), params={params}")
-
-    # ============================================================================
-    # 🚨 MODIFICATION 4: LOG CRITIQUE - Vérifier que les params de date sont présents
-    # ============================================================================
-    if any(key.endswith('_min') or key.endswith('_max') or key == 'annee' for key in params.keys()):
-        logger.info(f"✅ {resource_name}: Filtres de date détectés dans params: {params}")
-    else:
-        logger.warning(f"⚠️  {resource_name}: AUCUN filtre de date dans params! Mode FULL activé (toutes données historiques)")
-
-    if params:
-        logger.info(f"📋 {resource_name}: Paramètres API configurés: {list(params.keys())}")
-
-    # Choose pagination method based on config
-    if 'station_field' in pagination_config:
-        # Station-based pagination (e.g., piezometry_chroniques)
-        station_field = pagination_config['station_field']
-
-        logger.info(f"📍 {resource_name}: Using station slicing (field: {station_field})")
-
-        return _paginate_with_station_slicing(
-            client=client,
-            endpoint=endpoint,
-            params=params,
-            resource_name=resource_name,
-            station_field=station_field
-        )
-    else:
-        # Standard pagination
-        logger.info(f"📄 {resource_name}: Using standard pagination")
-
-        return _paginate_csv(
-            client=client,
-            endpoint=endpoint,
-            params=params,
-            resource_name=resource_name
-        )

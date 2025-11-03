@@ -228,24 +228,9 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         - INCREMENTAL : Derniers N jours
         """
 
-        # ============================================================================
-        # 🚨 DIAGNOSTIC PARTITION - LOGS ULTRA VERBEUX
-        # ============================================================================
-        context.log.info("=" * 80)
-        context.log.info(f"🚨🚨🚨 DEMARRAGE ASSET: {resource_name}")
-        context.log.info(f"🚨 Config initial - mode: {config.mode}, year: {config.year}, incremental_days: {config.incremental_days}")
-        context.log.info(f"🚨 Context.has_partition_key: {context.has_partition_key}")
-        context.log.info(f"🚨 Context.partition_key (raw): {getattr(context, 'partition_key', 'ATTRIBUTE NOT FOUND')}")
-        context.log.info(f"🚨 Context type: {type(context)}")
-        context.log.info(f"🚨 Context.run_config: {context.run_config}")
-
+        # Déterminer mode d'ingestion depuis partition
         if context.has_partition_key:
-            partition_key_value = context.partition_key
-            context.log.info(f"✅ PARTITION DETECTEE: '{partition_key_value}' (type: {type(partition_key_value)})")
-        else:
-            context.log.warning(f"⚠️⚠️⚠️ AUCUNE PARTITION DETECTEE!")
-            context.log.warning(f"⚠️⚠️⚠️ Mode par défaut: {config.mode} - TOUTES les données historiques seront chargées!")
-        context.log.info("=" * 80)
+            context.log.info(f"INFO: Partition detected: {context.partition_key}")
 
         # Étape 1: S'assurer que la table existe (créer via SQL si nécessaire)
         table_name = resource_name
@@ -259,86 +244,40 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
 
         try:
             ensure_table_exists(table_name, conn_params)
-            context.log.info(f"✅ Table hubeau.{table_name} prête")
+            context.log.info(f"INFO: Table hubeau.{table_name} ready")
         except RuntimeError as e:
-            context.log.error(f"❌ Impossible de créer la table: {e}")
+            context.log.error(f"ERROR: Failed to create table: {e}")
             raise
 
-        # ✨ Détecter le mode depuis la partition si disponible
-        # NOTE: Config est frozen (Pydantic), on doit créer un NOUVEL objet au lieu de muter
-        context.log.info("=" * 80)
-        context.log.info(f"🚨 CONVERSION PARTITION → CONFIG")
-        context.log.info(f"🚨 Config AVANT conversion - mode: {config.mode}, year: {config.year}")
-
+        # Détecter mode depuis partition Dagster
         if context.has_partition_key:
             partition = context.partition_key
-            context.log.info(f"✅ Partition détectée: '{partition}'")
-            context.log.info(f"🚨 Conversion de partition '{partition}' en IngestionConfig...")
-
             if partition == "full":
-                context.log.info(f"🚨 Branche 'full' activée")
-                config = IngestionConfig(
-                    mode="full",
-                    year=None,
-                    incremental_days=config.incremental_days
-                )
-                context.log.info(f"🚨 Config créé: mode={config.mode}, year={config.year}")
+                config = IngestionConfig(mode="full", year=None, incremental_days=config.incremental_days)
             elif partition == "incremental":
-                context.log.info(f"🚨 Branche 'incremental' activée")
-                config = IngestionConfig(
-                    mode="incremental",
-                    year=None,
-                    incremental_days=config.incremental_days
-                )
-                context.log.info(f"🚨 Config créé: mode={config.mode}, year={config.year}")
+                config = IngestionConfig(mode="incremental", year=None, incremental_days=config.incremental_days)
             else:
-                # C'est une année (2024, 2023, etc.)
-                context.log.info(f"🚨 Branche 'year' activée - Tentative de conversion '{partition}' en int")
+                # Année spécifique (2024, 2023, etc.)
                 try:
                     year_value = int(partition)
-                    context.log.info(f"🚨 Conversion réussie: year_value={year_value}")
-                    config = IngestionConfig(
-                        mode="year",
-                        year=year_value,
-                        incremental_days=config.incremental_days
-                    )
-                    context.log.info(f"✅ Config créé: mode={config.mode}, year={config.year}")
-                except ValueError as ve:
-                    context.log.error(f"❌ Partition invalide: {partition} (attendu: full, incremental, ou YYYY)")
-                    context.log.error(f"❌ ValueError: {ve}")
-                    raise ValueError(f"Partition invalide: {partition}")
-        else:
-            context.log.warning(f"⚠️  Aucune partition - config par défaut utilisé: mode={config.mode}, year={config.year}")
-
-        context.log.info(f"🚨 Config APRES conversion - mode: {config.mode}, year: {config.year}")
-        context.log.info("=" * 80)
+                    config = IngestionConfig(mode="year", year=year_value, incremental_days=config.incremental_days)
+                except ValueError:
+                    raise ValueError(f"Invalid partition: {partition} (expected: full, incremental, or YYYY)")
 
         # Validation
         if config.mode == "year" and not config.year:
-            raise ValueError("Mode YEAR necessite le parametre 'year'")
+            raise ValueError("Year mode requires 'year' parameter")
 
-        # Si resource ne supporte pas les filtres date, forcer mode FULL
+        # Forcer mode FULL pour ressources sans support filtre date
         if not supports_date_filter and config.mode in ["year", "incremental"]:
-            context.log.warning(
-                f"{resource_name} ne supporte pas les filtres date. "
-                f"Passage en mode FULL."
-            )
-            config = IngestionConfig(
-                mode="full",
-                year=None,
-                incremental_days=config.incremental_days
-            )
+            context.log.warning(f"WARNING: {resource_name} does not support date filters, switching to FULL mode")
+            config = IngestionConfig(mode="full", year=None, incremental_days=config.incremental_days)
 
         # Charger config YAML
         yaml_config = load_yaml_config(resource_name)
 
-        # Logs
-        context.log.info(f"🚀 Ingestion: {resource_name}")
-        context.log.info(f"   Mode: {config.mode}")
-        if config.mode == "year":
-            context.log.info(f"   Annee: {config.year}")
-        elif config.mode == "incremental":
-            context.log.info(f"   Derniers {config.incremental_days} jours")
+        # Log mode d'ingestion
+        context.log.info(f"INFO: Starting ingestion - resource={resource_name}, mode={config.mode}, year={config.year if config.mode=='year' else 'N/A'}")
 
         # Use EXACT same PostgreSQL destination as old JSON system
         postgres_config = {
@@ -365,50 +304,25 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         child_col: Optional[str] = None      # Définir au niveau global pour scope dans boucle
         fk_list = TABLE_FK_MAPPING.get(resource_name)
 
-        context.log.info(f"🔍🔍🔍 DEBUG FK MAPPING: resource_name={resource_name}, fk_list={fk_list}")
-
-        # TABLE_FK_MAPPING format: Dict[str, List[Tuple[child_col, parent_table, parent_col]]]
-        # For now, we only support filtering on the FIRST FK (multiple FK filtering = future enhancement)
+        # Charger clés FK si nécessaire
         if fk_list is not None and len(fk_list) > 0:
             import psycopg2
-
-            context.log.info(f"🔍🔍🔍 DEBUG: FK list found, loading parent keys...")
-
-            # Extract first FK tuple
             child_col, parent_table, parent_col = fk_list[0]
-
-            context.log.info(f"🔍🔍🔍 DEBUG: FK tuple unpacked: child_col={child_col}, parent_table={parent_table}, parent_col={parent_col}")
-
-            context.log.info(
-                f"🔎 FK filter activé: {table_name}.{child_col} → {parent_table}.{parent_col}"
-            )
+            context.log.info(f"INFO: FK filter enabled: {table_name}.{child_col} -> {parent_table}.{parent_col}")
             try:
                 _conn = psycopg2.connect(**conn_params)
                 _cur = _conn.cursor()
-                _cur.execute(
-                    f"SELECT {parent_col} FROM hubeau.{parent_table}"
-                )
+                _cur.execute(f"SELECT {parent_col} FROM hubeau.{parent_table}")
                 parent_keys = {row[0] for row in _cur.fetchall()}
                 _cur.close()
                 _conn.close()
-                context.log.info(
-                    f"🔎 {len(parent_keys)} clés parentes chargées pour {parent_table}.{parent_col}"
-                )
-                context.log.info(f"🔍🔍🔍 DEBUG: parent_keys type={type(parent_keys)}, len={len(parent_keys)}, sample={list(parent_keys)[:5] if parent_keys else []}")
+                context.log.info(f"INFO: Loaded {len(parent_keys)} parent keys from {parent_table}.{parent_col}")
             except Exception as fk_e:
-                context.log.error(
-                    f"❌ ERREUR CRITIQUE: Impossible de charger les clés parentes ({parent_table}.{parent_col}): {fk_e}"
-                )
-                context.log.error(f"   Type de fk_list: {type(fk_list)}, contenu: {fk_list}")
-                # Re-raise to fail fast instead of silently continuing
-                raise RuntimeError(
-                    f"Filtrage FK requis pour {table_name} mais échec du chargement des clés parentes. "
-                    f"Table parente: {parent_table}. Erreur: {fk_e}"
-                )
+                raise RuntimeError(f"Failed to load parent keys for FK filtering: {parent_table}.{parent_col}: {fk_e}")
 
         # ✅ BYPASS DLT - Use direct pagination to get actual lists
-        # Import our new direct iterator function
-        from hubeau_pipeline.sources.hubeau_csv_source import get_raw_data_iterator
+        # Import pagination functions directly (no wrapper)
+        from hubeau_pipeline.sources.hubeau_csv_source import _paginate_csv, _paginate_with_station_slicing, HubeauAPIClient
 
         # Build config dict for the raw iterator
         config_dict = {
@@ -418,81 +332,40 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             'pagination': yaml_config.get('pagination', {})
         }
 
-        # Add mode-specific parameters to extraction config
-        context.log.info("=" * 80)
-        context.log.info(f"🚨 AJOUT PARAMETRES DATE")
-        context.log.info(f"🚨 Evaluation: config.mode={config.mode}, config.year={config.year}")
-        context.log.info(f"🚨 Condition (config.mode == 'year' and config.year): {config.mode == 'year' and config.year}")
-
-        if config.mode == "year" and config.year:
-            context.log.info(f"✅ ENTREE DANS BLOC YEAR!")
-            context.log.info(f"🚨 resource_name={resource_name}")
-            context.log.info(f"🚨 DATE_PARAM_MAPPING.keys()={list(DATE_PARAM_MAPPING.keys())}")
-            context.log.info(f"🚨 resource_name in DATE_PARAM_MAPPING: {resource_name in DATE_PARAM_MAPPING}")
-
-            # ✅ Utiliser le mapping correct pour chaque resource
-            if resource_name in DATE_PARAM_MAPPING:
-                context.log.info(f"✅ Resource trouvée dans DATE_PARAM_MAPPING!")
-                param_min, param_max, use_year_only = DATE_PARAM_MAPPING[resource_name]
-                context.log.info(f"🚨 Params récupérés: param_min={param_min}, param_max={param_max}, use_year_only={use_year_only}")
-
-                if use_year_only:
-                    context.log.info(f"🚨 Branche use_year_only activée")
-                    # Cas spécial: prelevements_chroniques utilise "annee" directement
-                    config_dict['extraction']['default_params'] = {
-                        **config_dict['extraction'].get('default_params', {}),
-                        param_min: config.year
-                    }
-                    context.log.info(f"🗓️  Filtres API: {param_min}={config.year}")
-                else:
-                    context.log.info(f"🚨 Branche date range activée")
-                    # Cas général: date_min et date_max
-                    config_dict['extraction']['default_params'] = {
-                        **config_dict['extraction'].get('default_params', {}),
-                        param_min: f"{config.year}-01-01",
-                        param_max: f"{config.year}-12-31"
-                    }
-                    context.log.info(f"🗓️  Filtres API: {param_min}={config.year}-01-01, {param_max}={config.year}-12-31")
-
-                # 🚨 LOG CRITIQUE - Afficher les default_params FINAUX
-                context.log.info(f"✅ PARAMETRES DATE AJOUTES AVEC SUCCES!")
-                context.log.info(f"🚨 default_params FINAUX: {config_dict['extraction']['default_params']}")
+        # Ajouter paramètres date selon mode
+        if config.mode == "year" and config.year and resource_name in DATE_PARAM_MAPPING:
+            param_min, param_max, use_year_only = DATE_PARAM_MAPPING[resource_name]
+            if use_year_only:
+                config_dict['extraction']['default_params'] = {
+                    **config_dict['extraction'].get('default_params', {}),
+                    param_min: config.year
+                }
             else:
-                context.log.error(f"❌ {resource_name} PAS TROUVE dans DATE_PARAM_MAPPING!")
-                context.log.warning(f"⚠️  {resource_name} n'a pas de mapping de paramètres date défini!")
-        else:
-            # 🚨 Warning si mode n'est PAS year
-            context.log.warning(f"❌ BLOC YEAR NON EXECUTE!")
-            context.log.warning(f"🚨 ⚠️  Mode '{config.mode}' (year={config.year}) → AUCUN FILTRE DATE!")
-            context.log.warning(f"🚨 ⚠️  Toutes les données historiques seront chargées!")
+                config_dict['extraction']['default_params'] = {
+                    **config_dict['extraction'].get('default_params', {}),
+                    param_min: f"{config.year}-01-01",
+                    param_max: f"{config.year}-12-31"
+                }
+            context.log.info(f"INFO: Date filters applied for year {config.year}")
 
-        context.log.info("=" * 80)
-
-        if config.mode == "incremental":
-            # For INCREMENTAL mode, add date filters for last N days
+        elif config.mode == "incremental" and resource_name in DATE_PARAM_MAPPING:
             from datetime import datetime, timedelta
             today = datetime.now()
             start_date = today - timedelta(days=config.incremental_days)
+            param_min, param_max, use_year_only = DATE_PARAM_MAPPING[resource_name]
 
-            if resource_name in DATE_PARAM_MAPPING:
-                param_min, param_max, use_year_only = DATE_PARAM_MAPPING[resource_name]
-
-                if use_year_only:
-                    # Cas spécial: prelevements_chroniques - utiliser année courante
-                    config_dict['extraction']['default_params'] = {
-                        **config_dict['extraction'].get('default_params', {}),
-                        param_min: today.year
-                    }
-                    context.log.info(f"🗓️  Filtres API: {param_min}={today.year}")
-                else:
-                    config_dict['extraction']['default_params'] = {
-                        **config_dict['extraction'].get('default_params', {}),
-                        param_min: start_date.strftime("%Y-%m-%d"),
-                        param_max: today.strftime("%Y-%m-%d")
-                    }
-                    context.log.info(f"🗓️  Filtres API: {param_min}={start_date.strftime('%Y-%m-%d')}, {param_max}={today.strftime('%Y-%m-%d')}")
+            if use_year_only:
+                config_dict['extraction']['default_params'] = {
+                    **config_dict['extraction'].get('default_params', {}),
+                    param_min: today.year
+                }
             else:
-                context.log.warning(f"⚠️  {resource_name} n'a pas de mapping de paramètres date défini!")
+                config_dict['extraction']['default_params'] = {
+                    **config_dict['extraction'].get('default_params', {}),
+                    param_min: start_date.strftime("%Y-%m-%d"),
+                    param_max: today.strftime("%Y-%m-%d")
+                }
+            context.log.info(f"INFO: Incremental mode - last {config.incremental_days} days")
 
         # Add station slicing configuration if needed
         if use_station_slicing:
@@ -518,14 +391,49 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             # - YEAR/INCREMENTAL: merge (UPSERT via PK) - Met à jour sans doublons
             write_disposition = "replace" if config.mode == "full" else "merge"
 
-            context.log.info(f"📥 Streaming pages complètes (~5k records/page, disposition={write_disposition})...")
+            context.log.info(f"INFO: Loading data (disposition={write_disposition})")
 
             total_records = 0
             page_count = 0
-            is_first_write = True  # Track first write for TRUNCATE (si replace)
+            is_first_write = True
 
-            # ✅ Get raw data iterator - bypasses DLT wrapper
-            data_iterator = get_raw_data_iterator(config_dict)
+            # Choisir stratégie de fetching (parallèle vs séquentielle)
+            if config.mode in ["year", "full"] and resource_name not in ["piezometry_chroniques"]:
+                from hubeau_pipeline.sources.hubeau_csv_parallel import get_parallel_data_iterator
+                max_workers = yaml_config.get('performance', {}).get('parallelism', 5)
+                context.log.info(f"INFO: Parallel fetching ({max_workers} workers)")
+                data_iterator = get_parallel_data_iterator(config_dict, max_workers=max_workers)
+            else:
+                # Sequential fetching using direct pagination functions
+                context.log.info(f"INFO: Sequential fetching")
+
+                # Create HTTP client
+                client = HubeauAPIClient(
+                    base_url=yaml_config['resource']['base_url'],
+                    rate_limit=yaml_config['performance'].get('rate_limit', 2.0)
+                )
+
+                endpoint = yaml_config['resource']['endpoint']
+                params = config_dict['extraction'].get('default_params', {})
+
+                # Choose pagination strategy
+                if 'station_field' in config_dict.get('pagination', {}):
+                    # Station slicing (piezometry)
+                    data_iterator = _paginate_with_station_slicing(
+                        client=client,
+                        endpoint=endpoint,
+                        params=params,
+                        resource_name=resource_name,
+                        station_field=config_dict['pagination']['station_field']
+                    )
+                else:
+                    # Standard pagination
+                    data_iterator = _paginate_csv(
+                        client=client,
+                        endpoint=endpoint,
+                        params=params,
+                        resource_name=resource_name
+                    )
 
             # ✅ SIMPLE: Itérer sur les pages de l'API (~5k records)
             for page_records in data_iterator:
@@ -545,25 +453,15 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 else:
                     batch_write_disposition = write_disposition
 
-                # DEBUG: Log avant filtrage
-                context.log.info(f"🔍 DEBUG AVANT FILTRAGE PK: primary_keys={primary_keys}, len(page_records)={len(page_records)}")
-                if len(page_records) > 0:
-                    context.log.info(f"🔍 DEBUG PREMIER RECORD: {page_records[0]}")
-
-                # ✅ ÉTAPE 0: Normaliser les clés AVANT filtrage (case-insensitive)
+                # Normaliser clés (case-insensitive)
                 page_records = [
                     {key.lower(): value for key, value in record.items()}
                     for record in page_records
                 ]
 
-                # ============================================================================
-                # 🚨 MODIFICATION 3: Filtre NULL amélioré dans PRIMARY KEY
-                # ============================================================================
-                # Étape 1: Filtrer les records avec NULL dans les colonnes PRIMARY KEY
+                # Filtrer NULL dans PRIMARY KEY
                 if primary_keys:
-                    # Normaliser aussi les primary_keys pour matching
                     primary_keys_lower = [pk.lower() for pk in primary_keys]
-
                     before_pk_filter = len(page_records)
                     page_records = [
                         r for r in page_records
@@ -576,66 +474,46 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                     ]
                     dropped_pk = before_pk_filter - len(page_records)
                     if dropped_pk > 0:
-                        context.log.warning(
-                            f"🧹 Filtrage PK: {dropped_pk}/{before_pk_filter} enregistrements ignorés "
-                            f"(valeur NULL/vide dans PRIMARY KEY: {primary_keys_lower})"
-                        )
+                        context.log.warning(f"WARNING: Dropped {dropped_pk} records with NULL in PRIMARY KEY")
 
-                # Étape 2: Filtrer lignes orphelines si FK activée
-                context.log.info(f"🔍🔍🔍 DEBUG AVANT FILTRAGE FK: parent_keys is not None={parent_keys is not None}, fk_list={fk_list}, len(page_records)={len(page_records)}")
+                # Filtrer lignes orphelines FK
                 if parent_keys is not None and fk_list is not None and len(fk_list) > 0:
-                    context.log.info(f"🔍🔍🔍 DEBUG: ENTERING FK FILTERING BLOCK")
-                    # Note: child_col et parent_table déjà définis au niveau global
-                    if child_col is None or parent_table is None:
-                        context.log.error(f"❌ child_col ou parent_table est None! child_col={child_col}, parent_table={parent_table}")
                     before = len(page_records)
-                    page_records = [
-                        r for r in page_records
-                        if (r.get(child_col) is None) or (r.get(child_col) in parent_keys)
-                    ]
+                    import pandas as pd
+                    df = pd.DataFrame(page_records)
+                    mask = df[child_col].isna() | df[child_col].isin(parent_keys)
+                    df_filtered = df[mask]
+                    page_records = df_filtered.to_dict('records')
                     dropped = before - len(page_records)
                     if dropped > 0:
-                        context.log.warning(
-                            f"🧹 Filtrage FK: {dropped}/{before} enregistrements ignorés (clé parente {child_col} absente dans {parent_table})"
-                        )
-                    else:
-                        context.log.info(f"✅ Tous les {before} enregistrements ont une clé parente valide")
-                    context.log.info(f"🔍🔍🔍 DEBUG: FK filtering completed successfully, final len(page_records)={len(page_records)}")
-                else:
-                    context.log.warning(f"🔍🔍🔍 DEBUG: FK FILTERING SKIPPED! Conditions: parent_keys is None={parent_keys is None}, fk_list is None={fk_list is None}, len(fk_list)={len(fk_list) if fk_list else 0}")
+                        context.log.warning(f"WARNING: Dropped {dropped} orphan records (FK {child_col} missing in {parent_table})")
 
-                # Charger page complète en base
+                # Charger page en base
                 load_start = time.time()
-                context.log.info(f"🔍🔍🔍 DEBUG: About to call load_batch: len(page_records)={len(page_records)}, disposition={batch_write_disposition}")
-                context.log.info(f"🔍🔍🔍 CALLING load_batch with disposition={batch_write_disposition}, page={page_count}")
+                partition_year = config.year if config.mode == "year" else None
+
                 postgres_bulk_destination.load_batch(
                     table_name=table_name,
                     data=page_records,
                     write_disposition=batch_write_disposition,
                     primary_keys=primary_keys if primary_keys else None,
-                    column_mappings=None
+                    column_mappings=None,
+                    partition_year=partition_year
                 )
                 load_duration = time.time() - load_start
-
                 total_records += len(page_records)
-                throughput = len(page_records) / load_duration if load_duration > 0 else 0
 
-                # Log progression
-                context.log.info(
-                    f"📥 Page {page_count}: {len(page_records):,} records en {load_duration:.2f}s "
-                    f"({throughput:.0f} rec/s, total: {total_records:,})"
-                )
+                # Log progression toutes les 10 pages
+                if page_count % 10 == 0:
+                    context.log.info(f"INFO: Progress - {page_count} pages, {total_records:,} records loaded")
 
             elapsed = time.time() - start_time
 
             # Log résultats finaux
             if total_records > 0:
-                global_throughput = total_records / elapsed if elapsed > 0 else 0
-                context.log.info(f"✅ Extraction et chargement terminés en {elapsed:.2f}s")
-                context.log.info(f"📊 Total: {total_records:,} records en {page_count} pages")
-                context.log.info(f"⚡ Performance globale: {global_throughput:.0f} records/seconde")
+                context.log.info(f"INFO: Completed - {total_records:,} records in {page_count} pages ({elapsed:.2f}s)")
             else:
-                context.log.warning(f"⚠️  Table {table_name} vide après ingestion ! Vérifier: API Hub'Eau, filtres date, ou réseau.")
+                context.log.warning(f"WARNING: No records loaded for {table_name}")
 
             return Output(
                 value={"records": total_records, "pages": page_count},
@@ -651,7 +529,7 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             )
 
         except Exception as e:
-            context.log.error(f"❌ Erreur: {e}")
+            context.log.error(f"ERROR: {e}")
             raise
 
     return csv_asset

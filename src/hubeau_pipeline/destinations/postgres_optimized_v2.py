@@ -68,7 +68,7 @@ class PostgresBulkDestinationV2:
         self._cache_timestamps = {}
 
         self._initialized = True
-        logger.debug("✅ PostgresBulkDestinationV2 config loaded (lazy pool)")
+        logger.debug("INFO: PostgresBulkDestinationV2 config loaded (lazy pool)")
 
     def _ensure_pool_initialized(self):
         """Initialise le pool de connexions de manière lazy (thread-safe)"""
@@ -80,7 +80,7 @@ class PostgresBulkDestinationV2:
                     self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
                         2, 10, **self.conn_params
                     )
-                    logger.info("✅ PostgreSQL connection pool initialized")
+                    logger.info("INFO: PostgreSQL connection pool initialized")
 
     def _get_connection(self):
         """Obtenir une connexion depuis le pool (initialisation lazy)"""
@@ -184,7 +184,7 @@ class PostgresBulkDestinationV2:
         """
         import json
 
-        # ✅ Casting de types selon le schéma PostgreSQL
+        # INFO: Casting de types selon le schéma PostgreSQL
         if table_name and conn:
             try:
                 column_types = self._get_table_column_types(table_name, conn)
@@ -204,9 +204,9 @@ class PostgresBulkDestinationV2:
                                 df[col] = pd.to_numeric(df[col], errors='coerce')  # Convert to float, invalid → NaN
                                 df[col] = df[col].fillna(pd.NA)  # NaN → pandas NA
                                 df[col] = df[col].astype('Int64')  # Convert to nullable integer (handles NA)
-                                logger.debug(f"✅ Cast {col} to {pg_type} (vectorized)")
+                                logger.debug(f"INFO: Cast {col} to {pg_type} (vectorized)")
                             except (ValueError, TypeError) as e:
-                                logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
+                                logger.warning(f"WARNING: Failed to cast {col} to {pg_type}: {e}")
 
                     # Cast double precision / real
                     elif pg_type in ['double precision', 'real', 'numeric']:
@@ -224,11 +224,11 @@ class PostgresBulkDestinationV2:
                                 if originally_non_null > 0 and after_conversion_non_null < originally_non_null * 0.5:
                                     # More than 50% failed conversion - log warning
                                     # NOTE: No restore - let PostgreSQL handle error with clear message
-                                    logger.warning(f"⚠️ Column {col} typed as {pg_type} but contains non-numeric data ({after_conversion_non_null}/{originally_non_null} converted) - PostgreSQL will handle error")
+                                    logger.warning(f"WARNING: Column {col} typed as {pg_type} but contains non-numeric data ({after_conversion_non_null}/{originally_non_null} converted) - PostgreSQL will handle error")
                                 else:
-                                    logger.debug(f"✅ Cast {col} to {pg_type} (vectorized, {after_conversion_non_null}/{originally_non_null} valid values)")
+                                    logger.debug(f"INFO: Cast {col} to {pg_type} (vectorized, {after_conversion_non_null}/{originally_non_null} valid values)")
                             except (ValueError, TypeError) as e:
-                                logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
+                                logger.warning(f"WARNING: Failed to cast {col} to {pg_type}: {e}")
 
                     # Cast boolean
                     elif pg_type == 'boolean':
@@ -237,11 +237,11 @@ class PostgresBulkDestinationV2:
                                 df[col] = df[col].apply(
                                     lambda x: None if pd.isna(x) or x == '' else bool(x)
                                 )
-                                logger.debug(f"✅ Cast {col} to {pg_type}")
+                                logger.debug(f"INFO: Cast {col} to {pg_type}")
                             except (ValueError, TypeError) as e:
-                                logger.warning(f"⚠️ Failed to cast {col} to {pg_type}: {e}")
+                                logger.warning(f"WARNING: Failed to cast {col} to {pg_type}: {e}")
             except Exception as e:
-                logger.warning(f"⚠️ Could not retrieve column types for {table_name}: {e}")
+                logger.warning(f"WARNING: Could not retrieve column types for {table_name}: {e}")
 
         for col in df.columns:
             if df[col].dtype == 'object':
@@ -315,7 +315,7 @@ class PostgresBulkDestinationV2:
 
                 # Si table n'existe pas, lever une erreur explicite
                 if not target_columns:
-                    logger.error(f"❌ Table {table_name} n'existe pas!")
+                    logger.error(f"ERROR: Table {table_name} n'existe pas!")
                     logger.error(f"   La table doit être créée via scripts/schema/{table_name}.sql")
                     logger.error(f"   Ou relancer l'asset Dagster qui créera automatiquement la table")
                     raise ValueError(
@@ -324,7 +324,7 @@ class PostgresBulkDestinationV2:
                         f"If running manually, execute: scripts/schema/{table_name}.sql"
                     )
 
-                # ✅ FILTRAGE ROBUSTE: Gérer les différences de casse et colonnes inconnues
+                # INFO: FILTRAGE ROBUSTE: Gérer les différences de casse et colonnes inconnues
                 df_columns = df.columns.tolist()
                 
                 # Normalisation des noms (case-insensitive matching)
@@ -343,7 +343,7 @@ class PostgresBulkDestinationV2:
                         logger.debug(f"  Colonne ignorée: {df_col} (pas de mapping dans {table_name})")
 
                 if not common_columns:
-                    logger.error(f"❌ Aucune colonne commune entre DataFrame et table {table_name}")
+                    logger.error(f"ERROR: Aucune colonne commune entre DataFrame et table {table_name}")
                     logger.error(f"   DataFrame: {df_columns[:10]}...")
                     logger.error(f"   Table: {list(target_columns)[:10]}...")
                     raise ValueError(f"Aucune colonne commune entre DataFrame et table {table_name}")
@@ -400,7 +400,7 @@ class PostgresBulkDestinationV2:
                         logger.debug(f"  COPY progress: {rows_copied}/{total_rows} rows")
 
                 conn.commit()
-                logger.info(f"✅ COPY: {rows_copied} records → {table_name} (chunked)")
+                logger.info(f"INFO: COPY: {rows_copied} records → {table_name} (chunked)")
 
         except errors.InvalidTextRepresentation as e:
             conn.rollback()
@@ -423,7 +423,7 @@ class PostgresBulkDestinationV2:
                                 ALTER COLUMN {problematic_column} TYPE TEXT
                             """)
                             conn.commit()
-                            logger.info(f"✅ Colonne {problematic_column} convertie en TEXT")
+                            logger.info(f"INFO: Colonne {problematic_column} convertie en TEXT")
 
                         # Invalider le cache
                         cache_key = f"{self.schema_name}.{table_name}_types"
@@ -439,7 +439,7 @@ class PostgresBulkDestinationV2:
                                     output.seek(0)  # Reset buffer
                                     retry_cursor.copy_expert(copy_sql, output)
                                     conn.commit()
-                                    logger.info(f"✅ COPY réussi: {len(df)} records → {table_name}")
+                                    logger.info(f"INFO: COPY réussi: {len(df)} records → {table_name}")
                                     return  # Success!
                             except errors.InvalidTextRepresentation as retry_error:
                                 # ENCORE une autre colonne mal typée!
@@ -465,16 +465,16 @@ class PostgresBulkDestinationV2:
                         raise Exception(f"Trop de colonnes mal typées dans {table_name} (>{max_retries})")
 
                     except Exception as alter_error:
-                        logger.error(f"❌ Erreur lors de l'AUTO-FIX: {alter_error}")
+                        logger.error(f"ERROR: Erreur lors de l'AUTO-FIX: {alter_error}")
                         raise e  # Re-raise original error
 
             # Si pas une erreur de type connue, re-raise
-            logger.error(f"❌ Erreur COPY: {e}")
+            logger.error(f"ERROR: Erreur COPY: {e}")
             raise
 
         except Exception as e:
             conn.rollback()
-            logger.error(f"❌ Erreur COPY: {e}")
+            logger.error(f"ERROR: Erreur COPY: {e}")
             raise
         finally:
             if need_release:
@@ -496,13 +496,11 @@ class PostgresBulkDestinationV2:
         try:
             with conn.cursor() as cursor:
                 # Récupérer colonnes cibles (cache)
-                logger.info(f"🔍 DEBUG: Getting target columns for {table_name}...")
                 target_columns = self._get_target_columns(table_name, conn)
-                logger.info(f"🔍 DEBUG: target_columns = {target_columns[:10] if target_columns else 'EMPTY LIST'}")
 
                 # Si table n'existe pas, lever une erreur explicite
                 if not target_columns:
-                    logger.error(f"❌ Table {table_name} n'existe pas!")
+                    logger.error(f"ERROR: Table {table_name} n'existe pas!")
                     raise ValueError(
                         f"Table {table_name} does not exist. "
                         f"It should be created automatically by the Dagster asset."
@@ -510,13 +508,10 @@ class PostgresBulkDestinationV2:
 
                 # Filtrer colonnes
                 df_columns = df.columns.tolist()
-                logger.info(f"🔍 DEBUG: df_columns = {df_columns[:10]}")
 
                 common_columns = [col for col in df_columns if col in target_columns]
-                logger.info(f"🔍 DEBUG: common_columns = {common_columns[:10]}")
 
                 # Vérifier primary keys
-                logger.info(f"🔍 DEBUG: Checking primary_keys {primary_keys} in common_columns...")
                 missing_pks = [pk for pk in primary_keys if pk not in common_columns]
 
                 if missing_pks:
@@ -528,7 +523,6 @@ class PostgresBulkDestinationV2:
                     logger.error(f"  - missing_pks: {missing_pks}")
                     raise ValueError(f"Primary keys manquantes: {missing_pks}")
 
-                logger.info(f"✅ DEBUG: Primary keys validation passed!")
 
                 # Nettoyer DataFrame EN PLACE
                 if len(common_columns) < len(df_columns):
@@ -540,12 +534,13 @@ class PostgresBulkDestinationV2:
                 original_len = len(df)
 
                 # DEFENSIVE: Normaliser les primary_keys pour être sûr qu'ils matchent les colonnes du DataFrame
-                primary_keys_for_dedup = [pk.lower() for pk in primary_keys]
+                # FIX: Forcer conversion en liste au cas où c'est un tuple
+                primary_keys_for_dedup = [pk.lower() for pk in (list(primary_keys) if isinstance(primary_keys, tuple) else primary_keys)]
 
                 # Vérifier que TOUTES les primary keys existent dans le DataFrame AVANT deduplication
                 missing_for_dedup = [pk for pk in primary_keys_for_dedup if pk not in df.columns]
                 if missing_for_dedup:
-                    logger.error(f"❌ CRITICAL: Primary keys manquantes pour deduplication: {missing_for_dedup}")
+                    logger.error(f"ERROR: CRITICAL: Primary keys manquantes pour deduplication: {missing_for_dedup}")
                     logger.error(f"   DataFrame columns: {df.columns.tolist()}")
                     logger.error(f"   Primary keys: {primary_keys_for_dedup}")
                     raise ValueError(f"Cannot deduplicate: primary keys {missing_for_dedup} not in DataFrame")
@@ -554,7 +549,7 @@ class PostgresBulkDestinationV2:
                 df = df.drop_duplicates(subset=primary_keys_for_dedup, keep='last')
 
                 if len(df) < original_len:
-                    logger.warning(f"⚠️ Deduplication: removed {original_len - len(df)} duplicate rows from {table_name}")
+                    logger.warning(f"WARNING: Deduplication: removed {original_len - len(df)} duplicate rows from {table_name}")
                 else:
                     logger.info(f"✓ No duplicates found in batch for {table_name} ({original_len} rows checked)")
 
@@ -664,11 +659,11 @@ class PostgresBulkDestinationV2:
                 cursor.execute(f"DROP TABLE IF EXISTS {staging_table}")
 
                 conn.commit()
-                logger.info(f"✅ UPSERT: {affected}/{len(df)} records modifiés")
+                logger.info(f"INFO: UPSERT: {affected}/{len(df)} records modifiés")
 
         except Exception as e:
             conn.rollback()
-            logger.error(f"❌ Erreur UPSERT: {e}")
+            logger.error(f"ERROR: Erreur UPSERT: {e}")
             raise
         finally:
             self._release_connection(conn)
@@ -691,9 +686,9 @@ class PostgresBulkDestinationV2:
                 if table_exists:
                     cursor.execute(f"TRUNCATE TABLE {self.schema_name}.{table_name} CASCADE")
                     conn.commit()
-                    logger.info(f"✅ TRUNCATE CASCADE: {table_name}")
+                    logger.info(f"INFO: TRUNCATE CASCADE: {table_name}")
                 else:
-                    logger.warning(f"⚠️ Table {self.schema_name}.{table_name} n'existe pas - skip TRUNCATE")
+                    logger.warning(f"WARNING: Table {self.schema_name}.{table_name} n'existe pas - skip TRUNCATE")
                     # Table will be created by first COPY operation
         finally:
             self._release_connection(conn)
@@ -704,13 +699,14 @@ class PostgresBulkDestinationV2:
         data: List[Dict[str, Any]],
         write_disposition: str,
         primary_keys: Optional[List[str]] = None,
-        column_mappings: Optional[Dict[str, str]] = None
+        column_mappings: Optional[Dict[str, str]] = None,
+        partition_year: Optional[int] = None
     ):
         """Point d'entrée principal optimisé"""
         logger.info(f"🔍 DEBUG load_batch START: table={table_name}, disposition={write_disposition}, primary_keys={primary_keys}, data_count={len(data) if data else 0}")
 
         if not data:
-            logger.warning(f"⚠️ Pas de données pour {table_name}")
+            logger.warning(f"WARNING: Pas de données pour {table_name}")
             return
 
         # Log les premières colonnes des données
@@ -731,18 +727,69 @@ class PostgresBulkDestinationV2:
         df.columns = [col.lower() for col in df.columns]
 
         # NOUVEAU : Normaliser aussi les primary_keys pour cohérence
+        # FIX: Forcer conversion en liste au cas où c'est un tuple
         if primary_keys:
+            if isinstance(primary_keys, tuple):
+                primary_keys = list(primary_keys)
             original_pks = primary_keys.copy()
             primary_keys = [pk.lower() for pk in primary_keys]
-            if original_pks != primary_keys:
-                logger.info(f"🔍 DEBUG: Normalized primary_keys from {original_pks} to {primary_keys}")
 
         if column_mappings:
             df = df.rename(columns=column_mappings)
             if primary_keys:
                 primary_keys = [column_mappings.get(pk, pk) for pk in primary_keys]
 
-        logger.info(f"🚀 Chargement {len(df)} records → {table_name} ({write_disposition})")
+        logger.info(f"INFO: Loading {len(df)} records → {table_name} ({write_disposition})")
+
+        # OPTIMIZATION: Use DELETE+COPY for year-based partitions instead of row-by-row UPSERT
+        if partition_year and write_disposition == "merge":
+            logger.info(f"INFO: DELETE+COPY optimization for year {partition_year}")
+
+            # Find the date column for this table
+            date_column = None
+            for col in df.columns:
+                if 'date' in col.lower():
+                    date_column = col
+                    break
+
+            if date_column:
+                logger.info(f"  Using date column: {date_column}")
+
+                # Delete existing data for this year
+                conn = self._get_connection()
+                try:
+                    with conn.cursor() as cursor:
+                        # Check if table exists first
+                        cursor.execute(f"""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables
+                                WHERE table_schema = %s AND table_name = %s
+                            )
+                        """, (self.schema_name, table_name))
+
+                        if cursor.fetchone()[0]:
+                            # Table exists, delete year data
+                            delete_sql = f"""
+                                DELETE FROM {self.schema_name}.{table_name}
+                                WHERE EXTRACT(YEAR FROM {date_column}) = %s
+                            """
+                            cursor.execute(delete_sql, (partition_year,))
+                            deleted = cursor.rowcount
+                            conn.commit()
+                            logger.info(f"  Deleted {deleted} existing records for year {partition_year}")
+                        else:
+                            logger.info(f"  Table doesn't exist yet, will be created by COPY")
+
+                    # Now use COPY to insert all data at once (much faster than UPSERT)
+                    self._copy_from_dataframe(df, table_name, conn)
+
+                finally:
+                    self._release_connection(conn)
+
+                # Skip the normal merge logic
+                return
+            else:
+                logger.warning(f"WARNING: No date column found for DELETE+COPY optimization, falling back to UPSERT")
 
         if write_disposition == "replace":
             self._truncate_cascade(table_name)
@@ -760,9 +807,7 @@ class PostgresBulkDestinationV2:
             try:
                 self._upsert_dataframe(df, table_name, primary_keys)
             except Exception as e:
-                logger.error(f"❌ Erreur UPSERT: {str(e)}")
-                logger.error(f"🔍 DEBUG: Exception type: {type(e).__name__}")
-                logger.error(f"🔍 DEBUG: Full traceback:", exc_info=True)
+                logger.error(f"ERROR: Erreur UPSERT: {str(e)}")
                 raise
         elif write_disposition == "append":
             self._copy_from_dataframe(df, table_name)

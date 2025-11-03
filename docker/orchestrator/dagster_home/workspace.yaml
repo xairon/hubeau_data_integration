@@ -1,0 +1,10 @@
+# Dagster Workspace Configuration
+# Configuration GRPC pour architecture distribuée (orchestrator + workers)
+
+load_from:
+  # Code server distant via GRPC
+  # L'orchestrator se connecte aux workers via GRPC
+  - grpc_server:
+      host: dlt_worker  # Nom du service Docker
+      port: 4000
+      location_name: hubeau_pipeline

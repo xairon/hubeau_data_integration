@@ -1,0 +1,31 @@
+# Configuration Dagster pour Hub'Eau
+# Configuration avec limitations pour protéger les APIs externes ET la RAM
+
+storage:
+  postgres:
+    postgres_db:
+      hostname:
+        env: DAGSTER_PG_HOST
+      port:
+        env: DAGSTER_PG_PORT
+      db_name:
+        env: DAGSTER_PG_DB
+      username:
+        env: DAGSTER_PG_USER
+      password:
+        env: DAGSTER_PG_PASSWORD
+
+# Limitation des exécutions concurrentes pour éviter de surcharger Hub'Eau ET éviter OOM (SIGKILL)
+# OPTIMISÉ: Augmentation du parallélisme pour profiter du rate_limit réduit (0.3s)
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 4  # ✅ Maximum 4 runs en parallèle (optimisé avec rate_limit 0.3s)
+    tag_concurrency_limits:
+      - key: "api"
+        value: "hubeau"
+        limit: 3  # ✅ 3 exécutions Hub'Eau simultanées (optimisé)
+
+telemetry:
+  enabled: false

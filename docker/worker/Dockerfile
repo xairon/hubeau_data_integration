@@ -33,8 +33,9 @@ COPY src /app/src
 # Install dependencies using uv (100x faster than pip!)
 # --no-cache: Don't cache packages (smaller image)
 # --system: Install to system Python (not venv)
+# -e: Editable install (symlink to /app/src for hot reload)
 # .[worker]: Install with worker extra dependencies
-RUN uv pip install --no-cache --system ".[worker]"
+RUN uv pip install --no-cache --system -e ".[worker]"
 
 # Prevent Python from writing bytecode
 ENV PYTHONDONTWRITEBYTECODE=1

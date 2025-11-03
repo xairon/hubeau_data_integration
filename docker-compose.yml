@@ -75,7 +75,9 @@ services:
       DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST}
       DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT}
     volumes:
-      # Note: src/ is NOT mounted in CI/CD (code is baked into image)
+      # DEVELOPMENT: Mount source code for hot reload (no rebuild needed)
+      # For production/CI, remove this line to use code baked into image
+      - ./src:/app/src:ro
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
       - ./dagster_home:/app/dagster_home:ro
