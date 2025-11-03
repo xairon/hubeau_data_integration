@@ -647,7 +647,8 @@ class PostgresBulkDestinationV2:
         write_disposition: str,
         primary_keys: Optional[List[str]] = None,
         column_mappings: Optional[Dict[str, str]] = None,
-        partition_year: Optional[int] = None
+        partition_year: Optional[int] = None,
+        is_first_batch: bool = False
     ):
         """Point d'entrée principal optimisé"""
         logger.info(f"🔍 DEBUG load_batch START: table={table_name}, disposition={write_disposition}, primary_keys={primary_keys}, data_count={len(data) if data else 0}")
@@ -686,10 +687,11 @@ class PostgresBulkDestinationV2:
             if primary_keys:
                 primary_keys = [column_mappings.get(pk, pk) for pk in primary_keys]
 
-        logger.info(f"INFO: Loading {len(df)} records → {table_name} ({write_disposition})")
+        logger.info(f"INFO: Loading {len(df)} records → {table_name} ({write_disposition}, first_batch={is_first_batch})")
 
         # OPTIMIZATION: Use DELETE+COPY for year-based partitions instead of row-by-row UPSERT
-        if partition_year and write_disposition == "merge":
+        # CRITICAL: Only DELETE on FIRST batch, then APPEND remaining batches
+        if partition_year and write_disposition == "merge" and is_first_batch:
             logger.info(f"INFO: DELETE+COPY optimization for year {partition_year}")
 
             # Find the date column for this table
@@ -745,6 +747,23 @@ class PostgresBulkDestinationV2:
                 return
             else:
                 logger.warning(f"WARNING: No date column found for DELETE+COPY optimization, falling back to UPSERT")
+
+        # ✅ FIX: For subsequent batches with partition_year (is_first_batch=False),
+        # use APPEND mode to accumulate pages without UPSERT overhead
+        if partition_year and write_disposition == "merge" and not is_first_batch:
+            logger.info(f"INFO: Appending batch for year {partition_year} (batch #{2}+)")
+
+            # Deduplicate within this page before APPEND
+            if primary_keys:
+                pk_lower = [pk.lower() for pk in primary_keys]
+                original_len = len(df)
+                df = df.drop_duplicates(subset=pk_lower, keep='last')
+                if len(df) < original_len:
+                    logger.warning(f"WARNING: Removed {original_len - len(df)} duplicate rows within page before APPEND")
+
+            # APPEND this page's data (no DELETE, no UPSERT)
+            self._copy_from_dataframe(df, table_name)
+            return
 
         if write_disposition == "replace":
             self._truncate_cascade(table_name)

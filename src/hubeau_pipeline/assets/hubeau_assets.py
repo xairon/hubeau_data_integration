@@ -396,6 +396,7 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             total_records = 0
             page_count = 0
             is_first_write = True
+            is_first_batch = True  # ✅ Track first batch for DELETE+COPY optimization
 
             # Choisir stratégie de fetching (parallèle vs séquentielle)
             if config.mode in ["year", "full"] and resource_name not in ["piezometry_chroniques"]:
@@ -498,10 +499,15 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                     write_disposition=batch_write_disposition,
                     primary_keys=primary_keys if primary_keys else None,
                     column_mappings=None,
-                    partition_year=partition_year
+                    partition_year=partition_year,
+                    is_first_batch=is_first_batch  # ✅ Pass first batch flag for DELETE+COPY optimization
                 )
                 load_duration = time.time() - load_start
                 total_records += len(page_records)
+
+                # ✅ Mark that first batch is done
+                if is_first_batch:
+                    is_first_batch = False
 
                 # Log progression toutes les 10 pages
                 if page_count % 10 == 0:
