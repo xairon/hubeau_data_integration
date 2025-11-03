@@ -62,11 +62,6 @@ class PostgresBulkDestinationV2:
         # Pool créé en lazy (None au démarrage)
         self.connection_pool = None
 
-        # Cache pour métadonnées de tables (colonnes)
-        self._table_columns_cache = {}
-        self._cache_ttl = 3600  # 1 heure
-        self._cache_timestamps = {}
-
         self._initialized = True
         logger.debug("INFO: PostgresBulkDestinationV2 config loaded (lazy pool)")
 
@@ -93,21 +88,7 @@ class PostgresBulkDestinationV2:
             self.connection_pool.putconn(conn)
 
     def _get_target_columns(self, table_name: str, conn=None) -> List[str]:
-        """
-        Récupère les colonnes de la table avec CACHE
-        Évite les requêtes répétées sur information_schema
-        """
-        # Vérifier le cache
-        cache_key = f"{self.schema_name}.{table_name}"
-        now = time.time()
-
-        if (cache_key in self._table_columns_cache and
-            cache_key in self._cache_timestamps and
-            now - self._cache_timestamps[cache_key] < self._cache_ttl):
-            logger.debug(f"📦 Cache hit pour {cache_key}")
-            return self._table_columns_cache[cache_key]
-
-        # Si pas en cache ou expiré, requêter
+        """Récupère les colonnes de la table depuis information_schema"""
         need_release = False
         if conn is None:
             conn = self._get_connection()
@@ -121,32 +102,13 @@ class PostgresBulkDestinationV2:
                     WHERE table_schema = %s AND table_name = %s
                     ORDER BY ordinal_position
                 """, (self.schema_name, table_name))
-                columns = [row[0] for row in cursor.fetchall()]
-
-                # Mettre en cache
-                self._table_columns_cache[cache_key] = columns
-                self._cache_timestamps[cache_key] = now
-                logger.debug(f"📝 Cache miss pour {cache_key} - mis en cache")
-
-                return columns
+                return [row[0] for row in cursor.fetchall()]
         finally:
             if need_release:
                 self._release_connection(conn)
 
     def _get_table_column_types(self, table_name: str, conn=None) -> Dict[str, str]:
-        """
-        Récupère les types des colonnes de la table avec CACHE
-        Utilisé pour le casting de types avant COPY
-        """
-        cache_key = f"{self.schema_name}.{table_name}_types"
-        now = time.time()
-
-        if (cache_key in self._table_columns_cache and
-            cache_key in self._cache_timestamps and
-            now - self._cache_timestamps[cache_key] < self._cache_ttl):
-            logger.debug(f"📦 Cache hit pour types {cache_key}")
-            return self._table_columns_cache[cache_key]
-
+        """Récupère les types des colonnes de la table (utilisé pour casting)"""
         need_release = False
         if conn is None:
             conn = self._get_connection()
@@ -160,14 +122,7 @@ class PostgresBulkDestinationV2:
                     WHERE table_schema = %s AND table_name = %s
                     ORDER BY ordinal_position
                 """, (self.schema_name, table_name))
-                type_map = {row[0]: row[1] for row in cursor.fetchall()}
-
-                # Mettre en cache
-                self._table_columns_cache[cache_key] = type_map
-                self._cache_timestamps[cache_key] = now
-                logger.debug(f"📝 Cache miss pour types {cache_key} - mis en cache")
-
-                return type_map
+                return {row[0]: row[1] for row in cursor.fetchall()}
         finally:
             if need_release:
                 self._release_connection(conn)
@@ -425,11 +380,6 @@ class PostgresBulkDestinationV2:
                             conn.commit()
                             logger.info(f"INFO: Colonne {problematic_column} convertie en TEXT")
 
-                        # Invalider le cache
-                        cache_key = f"{self.schema_name}.{table_name}_types"
-                        if cache_key in self._table_columns_cache:
-                            del self._table_columns_cache[cache_key]
-
                         # RETRY COPY avec NOUVEAU cursor - PEUT échouer sur AUTRE colonne
                         logger.info(f"🔄 Retry COPY après correction de schéma...")
                         max_retries = 10  # Max 10 colonnes à corriger
@@ -455,9 +405,6 @@ class PostgresBulkDestinationV2:
                                             ALTER COLUMN {next_column} TYPE TEXT
                                         """)
                                         conn.commit()
-                                    # Invalider cache et continuer la boucle
-                                    if cache_key in self._table_columns_cache:
-                                        del self._table_columns_cache[cache_key]
                                 else:
                                     raise retry_error  # Erreur différente
 
@@ -813,12 +760,6 @@ class PostgresBulkDestinationV2:
             self._copy_from_dataframe(df, table_name)
         else:
             raise ValueError(f"Disposition non supportée: {write_disposition}")
-
-    def clear_cache(self):
-        """Vider le cache manuellement si nécessaire"""
-        self._table_columns_cache.clear()
-        self._cache_timestamps.clear()
-        logger.info("📦 Cache vidé")
 
     def close_pool(self):
         """Fermer le pool proprement à la fin"""
