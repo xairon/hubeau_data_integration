@@ -88,6 +88,16 @@ class HubeauAPIClient:
 
         url = f"{self.base_url}{endpoint}"
 
+        # ============================================================================
+        # 🚨 MODIFICATION 5: LOG CRITIQUE - Afficher l'URL complète (page 1 seulement)
+        # ============================================================================
+        if params and params.get('page', 1) == 1:
+            from urllib.parse import urlencode
+            query_string = urlencode(params)
+            full_url = f"{url}?{query_string}"
+            logger.info(f"🌐 HTTP GET (page 1): {full_url}")
+            logger.info(f"🔍 Query params: {params}")
+
         try:
             response = self.session.get(url, params=params, timeout=timeout)
             response.raise_for_status()
@@ -236,10 +246,14 @@ def fetch_csv_page(
 
     while retry_count <= max_retries:
         try:
+            # Build final params with page
+            final_params = {**(params or {}), 'page': page}
+            logger.debug(f"📥 Page {page}: Appel API avec params={final_params}")
+            
             # Simple GET request
             response = client.get(
                 endpoint,
-                params={**(params or {}), 'page': page},
+                params=final_params,
                 timeout=180
             )
 
@@ -673,6 +687,17 @@ def get_raw_data_iterator(config_dict: Dict) -> Iterator[List[Dict]]:
     params = extraction_config.get('default_params', {})
 
     logger.info(f"🔧 {resource_name}: Direct iterator (bypass DLT), params={params}")
+
+    # ============================================================================
+    # 🚨 MODIFICATION 4: LOG CRITIQUE - Vérifier que les params de date sont présents
+    # ============================================================================
+    if any(key.endswith('_min') or key.endswith('_max') or key == 'annee' for key in params.keys()):
+        logger.info(f"✅ {resource_name}: Filtres de date détectés dans params: {params}")
+    else:
+        logger.warning(f"⚠️  {resource_name}: AUCUN filtre de date dans params! Mode FULL activé (toutes données historiques)")
+
+    if params:
+        logger.info(f"📋 {resource_name}: Paramètres API configurés: {list(params.keys())}")
 
     # Choose pagination method based on config
     if 'station_field' in pagination_config:

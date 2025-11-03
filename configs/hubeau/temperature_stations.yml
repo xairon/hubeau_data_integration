@@ -11,4 +11,4 @@ performance:
   batch_size: 5000
   retry_times: 5
   retry_delay: 2.0
-  rate_limit: 2.0
+  rate_limit: 0.3

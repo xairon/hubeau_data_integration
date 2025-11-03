@@ -1,4 +1,5 @@
-# DLT Worker - Image COMPLÈTE
+# DLT Worker - Image DÉVELOPPEMENT
+# Installation EDITABLE pour hot reload du code source
 # Responsabilités : Extraction, transformation, chargement
 # Taille cible : ~2GB (avec GDAL/GEOS)
 # Uses uv for ultra-fast dependency installation (100x faster than pip)
@@ -25,21 +26,25 @@ WORKDIR /app
 # Install uv (ultra-fast Python package installer)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy project files needed for installation
-# Cache bust: 2025-10-31-11:53
+# Copy ONLY pyproject.toml for dependency installation
 COPY pyproject.toml README.md /app/
-COPY src /app/src
 
-# Install dependencies using uv (100x faster than pip!)
-# --no-cache: Don't cache packages (smaller image)
-# --system: Install to system Python (not venv)
-# .[worker]: Install with worker extra dependencies
-RUN uv pip install --no-cache --system ".[worker]"
+# Create src directory structure (needed for editable install)
+RUN mkdir -p /app/src/hubeau_pipeline
+
+# Copy __init__.py to make it a valid package
+COPY src/hubeau_pipeline/__init__.py /app/src/hubeau_pipeline/
+
+# Install dependencies in EDITABLE mode (-e flag)
+# This creates symlinks instead of copying files
+# Changes in mounted /app/src will be immediately visible
+RUN uv pip install --no-cache --system -e ".[worker]"
 
 # Prevent Python from writing bytecode
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Copy remaining application code
+# Copy static files (configs, scripts)
+# Note: src/ will be mounted as volume for hot reload
 COPY configs /app/configs
 COPY scripts /app/scripts
 

@@ -298,123 +298,6 @@ class PostgresBulkDestinationV2:
 
         return df
 
-    def _create_table_from_dataframe(self, df: pd.DataFrame, table_name: str, conn):
-        """
-        Crée la table si elle n'existe pas avec types optimisés Hub'Eau
-
-        Utilise les type mappings de hubeau_type_mappings.py pour créer
-        directement les colonnes avec les bons types PostgreSQL.
-        Fallback vers TEXT pour les colonnes non mappées (sécurité).
-        """
-        # ALWAYS normalize DataFrame columns before creating table
-        # Force column normalization - don't use copy() as it may preserve references
-        original_cols = list(df.columns)
-        normalized_cols = [str(col).lower() for col in original_cols]
-
-        # Create completely new DataFrame with normalized columns
-        df = pd.DataFrame(df.values, columns=normalized_cols)
-
-        with conn.cursor() as cursor:
-            # ✅ STRATEGIE OPTIMISEE: Utiliser les type mappings Hub'Eau
-            table_schema = get_table_schema(table_name)
-
-            col_defs = []
-
-            for col in df.columns:
-                # Essayer d'abord le mapping Hub'Eau
-                if table_schema and col in table_schema:
-                    pg_type = table_schema[col]
-                    logger.debug(f"  {col} -> {pg_type} (mapping Hub'Eau)")
-                else:
-                    # Fallback: inférence basique mais robuste
-                    dtype = df[col].dtype
-                    if 'datetime' in str(dtype):
-                        pg_type = 'TIMESTAMP'
-                    elif 'int' in str(dtype):
-                        pg_type = 'BIGINT'
-                    elif 'float' in str(dtype):
-                        pg_type = 'DOUBLE PRECISION'
-                    else:
-                        pg_type = 'TEXT'  # Safe fallback
-                    logger.debug(f"  {col} -> {pg_type} (inférence, pas de mapping)")
-
-                col_defs.append(f'"{col.lower()}" {pg_type}')
-
-            # ✅ Ajouter PRIMARY KEY si défini dans TABLE_PK_MAPPING
-            primary_keys = get_primary_key(table_name)
-
-            # 🔍 DEBUG: Logs massifs pour comprendre le problème
-            logger.warning(f"🔍🔍🔍 DEBUG CREATE TABLE {table_name}:")
-            logger.warning(f"  - primary_keys from mapping: {primary_keys}")
-            logger.warning(f"  - df.columns ({len(df.columns)} total): {list(df.columns)[:20]}")
-
-            if primary_keys:
-                # IMPORTANT: Normaliser les primary_keys en lowercase pour matcher les colonnes du DataFrame
-                primary_keys_original = primary_keys.copy() if isinstance(primary_keys, list) else list(primary_keys)
-                primary_keys = [pk.lower() for pk in primary_keys]
-                logger.warning(f"  - primary_keys (normalized): {primary_keys}")
-                logger.warning(f"  - primary_keys (original): {primary_keys_original}")
-
-                # Vérifier que toutes les colonnes PK existent
-                pk_cols_exist = all(pk in df.columns for pk in primary_keys)
-                logger.warning(f"  - pk_cols_exist check: {pk_cols_exist}")
-
-                if not pk_cols_exist:
-                    missing_pks = [pk for pk in primary_keys if pk not in df.columns]
-                    present_pks = [pk for pk in primary_keys if pk in df.columns]
-                    logger.warning(f"  - missing PK columns: {missing_pks}")
-                    logger.warning(f"  - present PK columns: {present_pks}")
-                    # Check if columns exist with different case
-                    similar_cols = []
-                    for pk in missing_pks:
-                        for col in df.columns:
-                            if pk.lower() == col.lower():
-                                similar_cols.append((pk, col))
-                    if similar_cols:
-                        logger.warning(f"  - similar columns found (case mismatch?): {similar_cols}")
-
-                if pk_cols_exist:
-                    pk_constraint = f",\nPRIMARY KEY ({', '.join(primary_keys)})"
-                    logger.warning(f"✅✅✅ PRIMARY KEY WILL BE CREATED: {', '.join(primary_keys)}")
-                else:
-                    pk_constraint = ""
-                    logger.error(f"❌❌❌ PRIMARY KEY NOT CREATED - colonnes manquantes!")
-                    logger.error(f"    DataFrame columns: {list(df.columns)}")
-                    logger.error(f"    Required PK columns: {primary_keys}")
-                    logger.error(f"    Missing columns: {[pk for pk in primary_keys if pk not in df.columns]}")
-            else:
-                pk_constraint = ""
-                logger.warning(f"⚠️ No PRIMARY KEY defined in TABLE_PK_MAPPING for {table_name}")
-
-            create_sql = f"""
-                CREATE TABLE IF NOT EXISTS {self.schema_name}.{table_name} (
-                    {', '.join(col_defs)}{pk_constraint}
-                )
-            """
-
-            # 🔍 DEBUG: Logger le SQL exact
-            logger.warning(f"🔍🔍🔍 SQL CREATE TABLE for {table_name}:")
-            sql_lines = create_sql.strip().split('\n')
-            for i, line in enumerate(sql_lines[:15]):  # First 15 lines
-                logger.warning(f"    L{i+1}: {line}")
-            if len(sql_lines) > 15:
-                logger.warning(f"    ... ({len(sql_lines) - 15} more lines)")
-
-            cursor.execute(create_sql)
-            conn.commit()
-
-            # Log des informations utiles
-            mapped_cols = len([c for c in df.columns if table_schema and c in table_schema])
-            total_cols = len(df.columns)
-            logger.info(f"✅ Table {table_name} créée: {total_cols} colonnes ({mapped_cols} avec mapping Hub'Eau)")
-
-            # Invalider le cache pour forcer refresh
-            cache_key = f"{self.schema_name}.{table_name}"
-            if cache_key in self._table_columns_cache:
-                del self._table_columns_cache[cache_key]
-            if cache_key in self._cache_timestamps:
-                del self._cache_timestamps[cache_key]
-
     def _copy_from_dataframe(self, df: pd.DataFrame, table_name: str, conn=None):
         """
         COPY optimisé avec connexion réutilisable
@@ -430,11 +313,16 @@ class PostgresBulkDestinationV2:
                 # Récupérer colonnes (depuis cache si possible)
                 target_columns = self._get_target_columns(table_name, conn)
 
-                # Si table n'existe pas, la créer
+                # Si table n'existe pas, lever une erreur explicite
                 if not target_columns:
-                    logger.warning(f"⚠️ Table {table_name} n'existe pas - création automatique")
-                    self._create_table_from_dataframe(df, table_name, conn)
-                    target_columns = self._get_target_columns(table_name, conn)
+                    logger.error(f"❌ Table {table_name} n'existe pas!")
+                    logger.error(f"   La table doit être créée via scripts/schema/{table_name}.sql")
+                    logger.error(f"   Ou relancer l'asset Dagster qui créera automatiquement la table")
+                    raise ValueError(
+                        f"Table {table_name} does not exist. "
+                        f"It should be created automatically by the Dagster asset. "
+                        f"If running manually, execute: scripts/schema/{table_name}.sql"
+                    )
 
                 # ✅ FILTRAGE ROBUSTE: Gérer les différences de casse et colonnes inconnues
                 df_columns = df.columns.tolist()
@@ -612,13 +500,13 @@ class PostgresBulkDestinationV2:
                 target_columns = self._get_target_columns(table_name, conn)
                 logger.info(f"🔍 DEBUG: target_columns = {target_columns[:10] if target_columns else 'EMPTY LIST'}")
 
-                # Si table n'existe pas, la créer (comme dans _copy_from_dataframe)
+                # Si table n'existe pas, lever une erreur explicite
                 if not target_columns:
-                    logger.warning(f"⚠️ Table {table_name} n'existe pas - création automatique pour UPSERT")
-                    logger.info(f"🔍 DEBUG: Creating table from DataFrame...")
-                    self._create_table_from_dataframe(df, table_name, conn)
-                    target_columns = self._get_target_columns(table_name, conn)
-                    logger.info(f"🔍 DEBUG: After creation, target_columns = {target_columns[:10] if target_columns else 'STILL EMPTY!'}")
+                    logger.error(f"❌ Table {table_name} n'existe pas!")
+                    raise ValueError(
+                        f"Table {table_name} does not exist. "
+                        f"It should be created automatically by the Dagster asset."
+                    )
 
                 # Filtrer colonnes
                 df_columns = df.columns.tolist()

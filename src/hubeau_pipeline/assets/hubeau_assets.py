@@ -36,6 +36,8 @@ from typing import Optional, Literal, Dict, Any
 from hubeau_pipeline.sources.hubeau_csv_source import hubeau_csv_source, IngestionMode
 from hubeau_pipeline.destinations.postgres_optimized_v2 import get_postgres_destination
 from hubeau_pipeline.resources import PostgreSQLResource
+from hubeau_pipeline.utils.schema_loader import ensure_table_exists
+from hubeau_pipeline.schema.hubeau_type_mappings import TABLE_FK_MAPPING
 
 
 # ============================================================================
@@ -59,6 +61,26 @@ MODE_PARTITIONS = StaticPartitionsDefinition([
 
 
 # ============================================================================
+# MAPPING PARAMÈTRES API PAR RESOURCE
+# ============================================================================
+# Chaque endpoint Hub'Eau a ses propres noms de paramètres pour filtrer par date
+# Format: resource_name → (nom_param_min, nom_param_max, utilise_annee_seule)
+DATE_PARAM_MAPPING = {
+    "ecoulement_observations": ("date_observation_min", "date_observation_max", False),
+    "piezometry_chroniques": ("date_debut_mesure", "date_fin_mesure", False),
+    "hydrometry_obs_elab": ("date_debut_obs_elab", "date_fin_obs_elab", False),
+    "quality_groundwater_analyses": ("date_debut_prelevement", "date_fin_prelevement", False),
+    "quality_rivers_analyses": ("date_debut_prelevement", "date_fin_prelevement", False),  # ✅ CORRECTION: date_debut/fin au lieu de _min/_max
+    "quality_rivers_conditions": ("date_debut_prelevement", "date_fin_prelevement", False),  # ✅ CORRECTION: date_debut/fin au lieu de _min/_max
+    "quality_rivers_operations": ("date_debut_prelevement", "date_fin_prelevement", False),  # ✅ CORRECTION: date_debut/fin au lieu de _min/_max
+    "temperature_chroniques": ("date_debut_mesure", "date_fin_mesure", False),  # ✅ CORRECTION: date_debut_mesure au lieu de date_mesure_temp_min
+    "hydrobio_indices": ("date_debut_prelevement", "date_fin_prelevement", False),  # ✅ CORRECTION: date_debut/fin au lieu de _min/_max
+    "hydrobio_taxons": ("date_debut_prelevement", "date_fin_prelevement", False),  # ✅ CORRECTION: date_debut/fin au lieu de _min/_max
+    "prelevements_chroniques": ("annee", None, True),  # Cas spécial: utilise année uniquement
+}
+
+
+# ============================================================================
 # ASSET DEPENDENCIES
 # ============================================================================
 # Mapping resource_name → assets stations dont il dépend
@@ -76,6 +98,8 @@ ASSET_DEPENDENCIES = {
 
     # Hydrometry (dépend de sites ET stations)
     "hydrometry_obs_elab": ["hydrometry_sites_csv", "hydrometry_stations_csv"],
+    # Assurer que les stations ne chargent qu'après les sites (FK code_site)
+    "hydrometry_stations": ["hydrometry_sites_csv"],
 
     # Temperature
     "temperature_chroniques": ["temperature_stations_csv"],
@@ -89,6 +113,8 @@ ASSET_DEPENDENCIES = {
 
     # Prelevements (dépend de ouvrages ET points)
     "prelevements_chroniques": ["prelevements_ouvrages_csv", "prelevements_points_csv"],
+    # Assurer que les points sont chargés après les ouvrages (FK code_ouvrage)
+    "prelevements_points": ["prelevements_ouvrages_csv"],
 }
 
 
@@ -202,36 +228,90 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         - INCREMENTAL : Derniers N jours
         """
 
+        # ============================================================================
+        # 🚨 DIAGNOSTIC PARTITION - LOGS ULTRA VERBEUX
+        # ============================================================================
+        context.log.info("=" * 80)
+        context.log.info(f"🚨🚨🚨 DEMARRAGE ASSET: {resource_name}")
+        context.log.info(f"🚨 Config initial - mode: {config.mode}, year: {config.year}, incremental_days: {config.incremental_days}")
+        context.log.info(f"🚨 Context.has_partition_key: {context.has_partition_key}")
+        context.log.info(f"🚨 Context.partition_key (raw): {getattr(context, 'partition_key', 'ATTRIBUTE NOT FOUND')}")
+        context.log.info(f"🚨 Context type: {type(context)}")
+        context.log.info(f"🚨 Context.run_config: {context.run_config}")
+
+        if context.has_partition_key:
+            partition_key_value = context.partition_key
+            context.log.info(f"✅ PARTITION DETECTEE: '{partition_key_value}' (type: {type(partition_key_value)})")
+        else:
+            context.log.warning(f"⚠️⚠️⚠️ AUCUNE PARTITION DETECTEE!")
+            context.log.warning(f"⚠️⚠️⚠️ Mode par défaut: {config.mode} - TOUTES les données historiques seront chargées!")
+        context.log.info("=" * 80)
+
+        # Étape 1: S'assurer que la table existe (créer via SQL si nécessaire)
+        table_name = resource_name
+        conn_params = {
+            "host": os.getenv("PG_HOST", "postgres"),
+            "port": int(os.getenv("PG_PORT", "5432")),
+            "database": os.getenv("PG_DB", "postgres"),
+            "user": os.getenv("PG_USER", "postgres"),
+            "password": os.getenv("PG_PASSWORD", ""),
+        }
+
+        try:
+            ensure_table_exists(table_name, conn_params)
+            context.log.info(f"✅ Table hubeau.{table_name} prête")
+        except RuntimeError as e:
+            context.log.error(f"❌ Impossible de créer la table: {e}")
+            raise
+
         # ✨ Détecter le mode depuis la partition si disponible
         # NOTE: Config est frozen (Pydantic), on doit créer un NOUVEL objet au lieu de muter
+        context.log.info("=" * 80)
+        context.log.info(f"🚨 CONVERSION PARTITION → CONFIG")
+        context.log.info(f"🚨 Config AVANT conversion - mode: {config.mode}, year: {config.year}")
+
         if context.has_partition_key:
             partition = context.partition_key
-            context.log.info(f"📋 Partition sélectionnée: {partition}")
+            context.log.info(f"✅ Partition détectée: '{partition}'")
+            context.log.info(f"🚨 Conversion de partition '{partition}' en IngestionConfig...")
 
             if partition == "full":
+                context.log.info(f"🚨 Branche 'full' activée")
                 config = IngestionConfig(
                     mode="full",
                     year=None,
                     incremental_days=config.incremental_days
                 )
+                context.log.info(f"🚨 Config créé: mode={config.mode}, year={config.year}")
             elif partition == "incremental":
+                context.log.info(f"🚨 Branche 'incremental' activée")
                 config = IngestionConfig(
                     mode="incremental",
                     year=None,
                     incremental_days=config.incremental_days
                 )
+                context.log.info(f"🚨 Config créé: mode={config.mode}, year={config.year}")
             else:
                 # C'est une année (2024, 2023, etc.)
+                context.log.info(f"🚨 Branche 'year' activée - Tentative de conversion '{partition}' en int")
                 try:
                     year_value = int(partition)
+                    context.log.info(f"🚨 Conversion réussie: year_value={year_value}")
                     config = IngestionConfig(
                         mode="year",
                         year=year_value,
                         incremental_days=config.incremental_days
                     )
-                except ValueError:
+                    context.log.info(f"✅ Config créé: mode={config.mode}, year={config.year}")
+                except ValueError as ve:
                     context.log.error(f"❌ Partition invalide: {partition} (attendu: full, incremental, ou YYYY)")
+                    context.log.error(f"❌ ValueError: {ve}")
                     raise ValueError(f"Partition invalide: {partition}")
+        else:
+            context.log.warning(f"⚠️  Aucune partition - config par défaut utilisé: mode={config.mode}, year={config.year}")
+
+        context.log.info(f"🚨 Config APRES conversion - mode: {config.mode}, year: {config.year}")
+        context.log.info("=" * 80)
 
         # Validation
         if config.mode == "year" and not config.year:
@@ -279,6 +359,53 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             full_refresh=False
         )
 
+        # Préparer filtre FK si applicable (éviter orphelins)
+        parent_keys: Optional[set] = None
+        parent_table: Optional[str] = None  # Définir au niveau global pour scope dans boucle
+        child_col: Optional[str] = None      # Définir au niveau global pour scope dans boucle
+        fk_list = TABLE_FK_MAPPING.get(resource_name)
+
+        context.log.info(f"🔍🔍🔍 DEBUG FK MAPPING: resource_name={resource_name}, fk_list={fk_list}")
+
+        # TABLE_FK_MAPPING format: Dict[str, List[Tuple[child_col, parent_table, parent_col]]]
+        # For now, we only support filtering on the FIRST FK (multiple FK filtering = future enhancement)
+        if fk_list is not None and len(fk_list) > 0:
+            import psycopg2
+
+            context.log.info(f"🔍🔍🔍 DEBUG: FK list found, loading parent keys...")
+
+            # Extract first FK tuple
+            child_col, parent_table, parent_col = fk_list[0]
+
+            context.log.info(f"🔍🔍🔍 DEBUG: FK tuple unpacked: child_col={child_col}, parent_table={parent_table}, parent_col={parent_col}")
+
+            context.log.info(
+                f"🔎 FK filter activé: {table_name}.{child_col} → {parent_table}.{parent_col}"
+            )
+            try:
+                _conn = psycopg2.connect(**conn_params)
+                _cur = _conn.cursor()
+                _cur.execute(
+                    f"SELECT {parent_col} FROM hubeau.{parent_table}"
+                )
+                parent_keys = {row[0] for row in _cur.fetchall()}
+                _cur.close()
+                _conn.close()
+                context.log.info(
+                    f"🔎 {len(parent_keys)} clés parentes chargées pour {parent_table}.{parent_col}"
+                )
+                context.log.info(f"🔍🔍🔍 DEBUG: parent_keys type={type(parent_keys)}, len={len(parent_keys)}, sample={list(parent_keys)[:5] if parent_keys else []}")
+            except Exception as fk_e:
+                context.log.error(
+                    f"❌ ERREUR CRITIQUE: Impossible de charger les clés parentes ({parent_table}.{parent_col}): {fk_e}"
+                )
+                context.log.error(f"   Type de fk_list: {type(fk_list)}, contenu: {fk_list}")
+                # Re-raise to fail fast instead of silently continuing
+                raise RuntimeError(
+                    f"Filtrage FK requis pour {table_name} mais échec du chargement des clés parentes. "
+                    f"Table parente: {parent_table}. Erreur: {fk_e}"
+                )
+
         # ✅ BYPASS DLT - Use direct pagination to get actual lists
         # Import our new direct iterator function
         from hubeau_pipeline.sources.hubeau_csv_source import get_raw_data_iterator
@@ -292,25 +419,80 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
         }
 
         # Add mode-specific parameters to extraction config
+        context.log.info("=" * 80)
+        context.log.info(f"🚨 AJOUT PARAMETRES DATE")
+        context.log.info(f"🚨 Evaluation: config.mode={config.mode}, config.year={config.year}")
+        context.log.info(f"🚨 Condition (config.mode == 'year' and config.year): {config.mode == 'year' and config.year}")
+
         if config.mode == "year" and config.year:
-            # For YEAR mode, add date filters
-            date_field = 'mesure' if 'chronique' in resource_name or 'observation' in resource_name else 'prelevement'
-            config_dict['extraction']['default_params'] = {
-                **config_dict['extraction'].get('default_params', {}),
-                f'date_debut_{date_field}': f"{config.year}-01-01",
-                f'date_fin_{date_field}': f"{config.year}-12-31"
-            }
-        elif config.mode == "incremental":
+            context.log.info(f"✅ ENTREE DANS BLOC YEAR!")
+            context.log.info(f"🚨 resource_name={resource_name}")
+            context.log.info(f"🚨 DATE_PARAM_MAPPING.keys()={list(DATE_PARAM_MAPPING.keys())}")
+            context.log.info(f"🚨 resource_name in DATE_PARAM_MAPPING: {resource_name in DATE_PARAM_MAPPING}")
+
+            # ✅ Utiliser le mapping correct pour chaque resource
+            if resource_name in DATE_PARAM_MAPPING:
+                context.log.info(f"✅ Resource trouvée dans DATE_PARAM_MAPPING!")
+                param_min, param_max, use_year_only = DATE_PARAM_MAPPING[resource_name]
+                context.log.info(f"🚨 Params récupérés: param_min={param_min}, param_max={param_max}, use_year_only={use_year_only}")
+
+                if use_year_only:
+                    context.log.info(f"🚨 Branche use_year_only activée")
+                    # Cas spécial: prelevements_chroniques utilise "annee" directement
+                    config_dict['extraction']['default_params'] = {
+                        **config_dict['extraction'].get('default_params', {}),
+                        param_min: config.year
+                    }
+                    context.log.info(f"🗓️  Filtres API: {param_min}={config.year}")
+                else:
+                    context.log.info(f"🚨 Branche date range activée")
+                    # Cas général: date_min et date_max
+                    config_dict['extraction']['default_params'] = {
+                        **config_dict['extraction'].get('default_params', {}),
+                        param_min: f"{config.year}-01-01",
+                        param_max: f"{config.year}-12-31"
+                    }
+                    context.log.info(f"🗓️  Filtres API: {param_min}={config.year}-01-01, {param_max}={config.year}-12-31")
+
+                # 🚨 LOG CRITIQUE - Afficher les default_params FINAUX
+                context.log.info(f"✅ PARAMETRES DATE AJOUTES AVEC SUCCES!")
+                context.log.info(f"🚨 default_params FINAUX: {config_dict['extraction']['default_params']}")
+            else:
+                context.log.error(f"❌ {resource_name} PAS TROUVE dans DATE_PARAM_MAPPING!")
+                context.log.warning(f"⚠️  {resource_name} n'a pas de mapping de paramètres date défini!")
+        else:
+            # 🚨 Warning si mode n'est PAS year
+            context.log.warning(f"❌ BLOC YEAR NON EXECUTE!")
+            context.log.warning(f"🚨 ⚠️  Mode '{config.mode}' (year={config.year}) → AUCUN FILTRE DATE!")
+            context.log.warning(f"🚨 ⚠️  Toutes les données historiques seront chargées!")
+
+        context.log.info("=" * 80)
+
+        if config.mode == "incremental":
             # For INCREMENTAL mode, add date filters for last N days
             from datetime import datetime, timedelta
             today = datetime.now()
             start_date = today - timedelta(days=config.incremental_days)
-            date_field = 'mesure' if 'chronique' in resource_name or 'observation' in resource_name else 'prelevement'
-            config_dict['extraction']['default_params'] = {
-                **config_dict['extraction'].get('default_params', {}),
-                f'date_debut_{date_field}': start_date.strftime("%Y-%m-%d"),
-                f'date_fin_{date_field}': today.strftime("%Y-%m-%d")
-            }
+
+            if resource_name in DATE_PARAM_MAPPING:
+                param_min, param_max, use_year_only = DATE_PARAM_MAPPING[resource_name]
+
+                if use_year_only:
+                    # Cas spécial: prelevements_chroniques - utiliser année courante
+                    config_dict['extraction']['default_params'] = {
+                        **config_dict['extraction'].get('default_params', {}),
+                        param_min: today.year
+                    }
+                    context.log.info(f"🗓️  Filtres API: {param_min}={today.year}")
+                else:
+                    config_dict['extraction']['default_params'] = {
+                        **config_dict['extraction'].get('default_params', {}),
+                        param_min: start_date.strftime("%Y-%m-%d"),
+                        param_max: today.strftime("%Y-%m-%d")
+                    }
+                    context.log.info(f"🗓️  Filtres API: {param_min}={start_date.strftime('%Y-%m-%d')}, {param_max}={today.strftime('%Y-%m-%d')}")
+            else:
+                context.log.warning(f"⚠️  {resource_name} n'a pas de mapping de paramètres date défini!")
 
         # Add station slicing configuration if needed
         if use_station_slicing:
@@ -363,8 +545,68 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 else:
                     batch_write_disposition = write_disposition
 
+                # DEBUG: Log avant filtrage
+                context.log.info(f"🔍 DEBUG AVANT FILTRAGE PK: primary_keys={primary_keys}, len(page_records)={len(page_records)}")
+                if len(page_records) > 0:
+                    context.log.info(f"🔍 DEBUG PREMIER RECORD: {page_records[0]}")
+
+                # ✅ ÉTAPE 0: Normaliser les clés AVANT filtrage (case-insensitive)
+                page_records = [
+                    {key.lower(): value for key, value in record.items()}
+                    for record in page_records
+                ]
+
+                # ============================================================================
+                # 🚨 MODIFICATION 3: Filtre NULL amélioré dans PRIMARY KEY
+                # ============================================================================
+                # Étape 1: Filtrer les records avec NULL dans les colonnes PRIMARY KEY
+                if primary_keys:
+                    # Normaliser aussi les primary_keys pour matching
+                    primary_keys_lower = [pk.lower() for pk in primary_keys]
+
+                    before_pk_filter = len(page_records)
+                    page_records = [
+                        r for r in page_records
+                        if all(
+                            r.get(pk) is not None
+                            and r.get(pk) != ''
+                            and str(r.get(pk)).strip().lower() not in ('null', 'none', 'nan', 'n/a')
+                            for pk in primary_keys_lower
+                        )
+                    ]
+                    dropped_pk = before_pk_filter - len(page_records)
+                    if dropped_pk > 0:
+                        context.log.warning(
+                            f"🧹 Filtrage PK: {dropped_pk}/{before_pk_filter} enregistrements ignorés "
+                            f"(valeur NULL/vide dans PRIMARY KEY: {primary_keys_lower})"
+                        )
+
+                # Étape 2: Filtrer lignes orphelines si FK activée
+                context.log.info(f"🔍🔍🔍 DEBUG AVANT FILTRAGE FK: parent_keys is not None={parent_keys is not None}, fk_list={fk_list}, len(page_records)={len(page_records)}")
+                if parent_keys is not None and fk_list is not None and len(fk_list) > 0:
+                    context.log.info(f"🔍🔍🔍 DEBUG: ENTERING FK FILTERING BLOCK")
+                    # Note: child_col et parent_table déjà définis au niveau global
+                    if child_col is None or parent_table is None:
+                        context.log.error(f"❌ child_col ou parent_table est None! child_col={child_col}, parent_table={parent_table}")
+                    before = len(page_records)
+                    page_records = [
+                        r for r in page_records
+                        if (r.get(child_col) is None) or (r.get(child_col) in parent_keys)
+                    ]
+                    dropped = before - len(page_records)
+                    if dropped > 0:
+                        context.log.warning(
+                            f"🧹 Filtrage FK: {dropped}/{before} enregistrements ignorés (clé parente {child_col} absente dans {parent_table})"
+                        )
+                    else:
+                        context.log.info(f"✅ Tous les {before} enregistrements ont une clé parente valide")
+                    context.log.info(f"🔍🔍🔍 DEBUG: FK filtering completed successfully, final len(page_records)={len(page_records)}")
+                else:
+                    context.log.warning(f"🔍🔍🔍 DEBUG: FK FILTERING SKIPPED! Conditions: parent_keys is None={parent_keys is None}, fk_list is None={fk_list is None}, len(fk_list)={len(fk_list) if fk_list else 0}")
+
                 # Charger page complète en base
                 load_start = time.time()
+                context.log.info(f"🔍🔍🔍 DEBUG: About to call load_batch: len(page_records)={len(page_records)}, disposition={batch_write_disposition}")
                 context.log.info(f"🔍🔍🔍 CALLING load_batch with disposition={batch_write_disposition}, page={page_count}")
                 postgres_bulk_destination.load_batch(
                     table_name=table_name,

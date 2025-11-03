@@ -12,6 +12,7 @@ from .hubeau_type_mappings import (
     TABLE_PK_MAPPING,
     TABLE_FK_MAPPING,
     GEOMETRY_COLUMNS,
+    COLUMN_TYPE_OVERRIDES,
 )
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "TABLE_PK_MAPPING",
     "TABLE_FK_MAPPING",
     "GEOMETRY_COLUMNS",
+    "COLUMN_TYPE_OVERRIDES",
 ]
 

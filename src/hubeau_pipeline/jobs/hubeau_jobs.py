@@ -7,19 +7,31 @@ Chaque job contient les assets d'une API spécifique:
 """
 
 from dagster import define_asset_job, AssetSelection, AssetKey, schedule, RunRequest
+from ..assets.hubeau_assets import MODE_PARTITIONS
 
 
 # ====================================
-# CONFIGURATION GLOBALE - EXECUTION SEQUENTIELLE
+# CONFIGURATION GLOBALE - EXECUTION PARALLELE
 # ====================================
-# Force l'exécution séquentielle (1 asset à la fois) pour éviter OOM/SIGKILL
+# OPTIMISÉ: 3 assets en parallèle pour profiter du rate_limit réduit (0.3s)
 # VPS: 8GB RAM, dlt_worker: 3GB limit
-# Avec 11 assets stations en parallèle → 5.5GB+ → SIGKILL
+# 3 assets en parallèle → ~1.5GB → Safe
+PARALLEL_EXECUTION_CONFIG = {
+    "execution": {
+        "config": {
+            "multiprocess": {
+                "max_concurrent": 3  # ✅ 3 assets en parallèle (optimisé)
+            }
+        }
+    }
+}
+
+# Config séquentielle conservée pour jobs spécifiques si besoin
 SEQUENTIAL_EXECUTION_CONFIG = {
     "execution": {
         "config": {
             "multiprocess": {
-                "max_concurrent": 1  # 1 asset à la fois, jamais de parallélisme
+                "max_concurrent": 1  # 1 asset à la fois
             }
         }
     }
@@ -38,7 +50,8 @@ piezometry_job = define_asset_job(
         AssetKey("piezometry_stations_csv"),
         AssetKey("piezometry_chroniques_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # QUALITY RIVERS: Stations + Analyses + Conditions + Operations
@@ -51,7 +64,8 @@ quality_rivers_job = define_asset_job(
         AssetKey("quality_rivers_conditions_csv"),
         AssetKey("quality_rivers_operations_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # QUALITY GROUNDWATER: Stations + Analyses
@@ -62,7 +76,8 @@ quality_groundwater_job = define_asset_job(
         AssetKey("quality_groundwater_stations_csv"),
         AssetKey("quality_groundwater_analyses_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # HYDROMETRY: Sites + Stations + Observations
@@ -74,7 +89,8 @@ hydrometry_job = define_asset_job(
         AssetKey("hydrometry_stations_csv"),
         AssetKey("hydrometry_obs_elab_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # TEMPERATURE: Stations + Chroniques
@@ -85,7 +101,8 @@ temperature_job = define_asset_job(
         AssetKey("temperature_stations_csv"),
         AssetKey("temperature_chroniques_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # HYDROBIO: Stations + Indices + Taxons
@@ -97,7 +114,8 @@ hydrobio_job = define_asset_job(
         AssetKey("hydrobio_indices_csv"),
         AssetKey("hydrobio_taxons_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # ECOULEMENT: Stations + Campagnes + Observations
@@ -109,7 +127,8 @@ ecoulement_job = define_asset_job(
         AssetKey("ecoulement_campagnes_csv"),
         AssetKey("ecoulement_observations_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 # PRELEVEMENTS: Ouvrages + Points + Chroniques
@@ -121,7 +140,8 @@ prelevements_job = define_asset_job(
         AssetKey("prelevements_points_csv"),
         AssetKey("prelevements_chroniques_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=SEQUENTIAL_EXECUTION_CONFIG,
+    partitions_def=MODE_PARTITIONS
 )
 
 
@@ -132,7 +152,7 @@ prelevements_job = define_asset_job(
 # Job pour TOUTES les stations/référentiels
 all_stations_job = define_asset_job(
     name="all_stations",
-    description="Toutes les stations/référentiels CSV (séquentiel pour éviter OOM)",
+    description="Toutes les stations/référentiels CSV (3 assets en parallèle)",
     selection=AssetSelection.keys(
         # Stations
         AssetKey("piezometry_stations_csv"),
@@ -147,13 +167,13 @@ all_stations_job = define_asset_job(
         AssetKey("prelevements_ouvrages_csv"),
         AssetKey("prelevements_points_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=PARALLEL_EXECUTION_CONFIG  # ✅ 3 assets en parallèle
 )
 
 # Job pour TOUTES les chroniques/analyses/observations
 all_chroniques_job = define_asset_job(
     name="all_chroniques",
-    description="Toutes les chroniques/analyses/observations CSV (séquentiel pour éviter OOM)",
+    description="Toutes les chroniques/analyses/observations CSV (3 assets en parallèle)",
     selection=AssetSelection.keys(
         # Chroniques/Observations
         AssetKey("piezometry_chroniques_csv"),
@@ -168,15 +188,17 @@ all_chroniques_job = define_asset_job(
         AssetKey("ecoulement_observations_csv"),
         AssetKey("prelevements_chroniques_csv")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=PARALLEL_EXECUTION_CONFIG,  # ✅ 3 assets en parallèle
+    partitions_def=MODE_PARTITIONS
 )
 
 # Job COMPLET (tout)
 all_hubeau_job = define_asset_job(
     name="all_hubeau",
-    description="Toutes les données Hub'Eau - stations + chroniques (séquentiel pour éviter OOM)",
+    description="Toutes les données Hub'Eau - stations + chroniques (3 assets en parallèle)",
     selection=AssetSelection.all(),
-    config=SEQUENTIAL_EXECUTION_CONFIG
+    config=PARALLEL_EXECUTION_CONFIG,  # ✅ 3 assets en parallèle
+    partitions_def=MODE_PARTITIONS
 )
 
 

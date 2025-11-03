@@ -22,14 +22,14 @@ from .resources import RESOURCES
 # ============================================================================
 # EXECUTOR CONFIG - Limite parallélisme pour économiser RAM
 # ============================================================================
-# Limite à 2 assets en parallèle (au lieu de 4 par défaut)
-# Impact : Divise RAM peak par 2 (évite SIGKILL / OOM)
+# Limite à 3 assets en parallèle (optimisé avec rate_limit 0.3s)
+# Impact : Balance performance/RAM (évite SIGKILL / OOM)
 # ============================================================================
 
 # ✅ CHANGEMENT #4: Executor limité PAR DÉFAUT pour TOUS les runs
 # Configuration globale de l'executor pour limiter le parallélisme
 limited_executor = multiprocess_executor.configured({
-    "max_concurrent": 2  # ✅ Max 2 assets en parallèle (au lieu de 4 par défaut)
+    "max_concurrent": 3  # ✅ Max 3 assets en parallèle (optimisé avec rate_limit 0.3s)
 })
 
 # Définitions centrales

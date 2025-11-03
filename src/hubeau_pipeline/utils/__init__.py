@@ -1,11 +1,10 @@
 """Utilities for HubEau pipeline."""
 
-from .station_postgres import (
-    extract_station_codes_from_postgres,
-    filter_active_stations_for_period
-)
+from .postgres_helpers import PostgresHelper
+from .schema_loader import ensure_table_exists, get_schema_sql_path
 
 __all__ = [
-    "extract_station_codes_from_postgres",
-    "filter_active_stations_for_period"
+    "PostgresHelper",
+    "ensure_table_exists",
+    "get_schema_sql_path"
 ]

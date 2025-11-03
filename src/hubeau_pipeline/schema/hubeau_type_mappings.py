@@ -776,9 +776,9 @@ HUBEAU_FIELD_TYPES: Dict[str, Dict[str, str]] = {
     "temperature_chroniques": {
         "code_commune": "TEXT",
         "code_cours_eau": "TEXT",
-        "code_parametre": "TEXT",
+        "code_parametre": "BIGINT",
         "code_qualification": "TEXT",
-        "code_station": "TEXT",
+        "code_station": "BIGINT",
         "code_unite": "TEXT",
         "date_mesure_temp": "TIMESTAMP",
         "heure_mesure_temp": "TEXT",
@@ -804,7 +804,7 @@ HUBEAU_FIELD_TYPES: Dict[str, Dict[str, str]] = {
         "code_masse_eau": "TEXT",
         "code_region": "TEXT",
         "code_sous_bassin": "TEXT",
-        "code_station": "TEXT",
+        "code_station": "BIGINT",
         "code_troncon_hydro": "TEXT",
         "code_type_projection": "TEXT",
         "coordonnee_x": "DOUBLE PRECISION",
@@ -847,7 +847,7 @@ TABLE_PK_MAPPING: Dict[str, List[str]] = {
     "quality_rivers_operations": ["code_operation"],
     "quality_rivers_conditions": ["code_operation_cep"],
     "temperature_stations": ["code_station"],
-    "temperature_chroniques": ["code_station", "date_mesure_temp"],
+    "temperature_chroniques": ["code_station", "date_mesure_temp", "heure_mesure_temp"],
     "hydrobio_stations": ["code_station_hydrobio"],
     "hydrobio_indices": ["code_station_hydrobio", "date_prelevement", "code_indice"],
     "hydrobio_taxons": ["code_station_hydrobio", "date_prelevement", "code_support", "code_appel_taxon"],
@@ -873,6 +873,44 @@ TABLE_FK_MAPPING: Dict[str, List[Tuple[str, str, str]]] = {
     "quality_rivers_analyses": [("code_station", "quality_rivers_stations", "code_station")],
     "temperature_chroniques": [("code_station", "temperature_stations", "code_station")],
     "prelevements_points": [("code_ouvrage", "prelevements_ouvrages", "code_ouvrage")],
+}
+
+
+# ============================================================================
+# TYPE OVERRIDES - Colonnes qui doivent être BIGINT/INTEGER au lieu de TEXT
+# ============================================================================
+#
+# Ces overrides forcent le bon type PostgreSQL pour les colonnes qui sont:
+# - Des identifiants numériques (code_station, code_bss, etc.)
+# - Des codes INSEE (code_commune)
+# - D'autres identifiants système
+#
+# IMPORTANT: Sans ces overrides, les FK filtering échouent car l'API retourne
+#            des integers mais la BDD attend du texte.
+
+COLUMN_TYPE_OVERRIDES: Dict[str, str] = {
+    # Station/Site codes - Identifiants numériques
+    "code_station": "BIGINT",
+    "code_site": "TEXT",  # Peut contenir des lettres (ex: "A123")
+    "code_bss": "TEXT",   # BSS peut avoir format "01234X5678" (avec lettres)
+
+    # Geographic codes - Codes INSEE
+    "code_commune": "TEXT",  # INSEE codes can have leading zeros (ex: "01234")
+    "code_commune_insee": "TEXT",
+    "code_departement": "TEXT",  # Can have leading zeros (ex: "01", "2A", "2B")
+
+    # Parameter/Analysis codes
+    "code_parametre": "BIGINT",
+    "code_param": "BIGINT",
+
+    # Operation codes
+    "code_operation": "TEXT",  # May be alphanumeric
+    "code_operation_cep": "TEXT",
+    "code_operation_prelevement": "TEXT",
+
+    # Ouvrage codes (water extraction facilities)
+    "code_ouvrage": "TEXT",  # May be alphanumeric
+    "code_point_prelevement": "TEXT",
 }
 
 
