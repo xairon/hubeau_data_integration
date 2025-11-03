@@ -727,6 +727,14 @@ class PostgresBulkDestinationV2:
                         else:
                             logger.info(f"  Table doesn't exist yet, will be created by COPY")
 
+                    # Deduplicate before COPY (Hub'Eau API may return duplicates within page)
+                    if primary_keys:
+                        pk_lower = [pk.lower() for pk in primary_keys]
+                        original_len = len(df)
+                        df = df.drop_duplicates(subset=pk_lower, keep='last')
+                        if len(df) < original_len:
+                            logger.warning(f"WARNING: Removed {original_len - len(df)} duplicate rows before COPY (year {partition_year})")
+
                     # Now use COPY to insert all data at once (much faster than UPSERT)
                     self._copy_from_dataframe(df, table_name, conn)
 
