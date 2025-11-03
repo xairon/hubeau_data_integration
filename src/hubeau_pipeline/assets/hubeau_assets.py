@@ -396,7 +396,12 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
             total_records = 0
             page_count = 0
             is_first_write = True
-            is_first_batch = True  # ✅ Track first batch for DELETE+COPY optimization
+
+            # ✅ CRITICAL: Thread-safe first_batch flag for parallel fetching
+            # Without this, ALL parallel workers think they're first and do DELETE
+            from threading import Lock
+            first_batch_lock = Lock()
+            first_batch_done = [False]  # Mutable container to share state across threads
 
             # Choisir stratégie de fetching (parallèle vs séquentielle)
             if config.mode in ["year", "full"] and resource_name not in ["piezometry_chroniques"]:
@@ -493,6 +498,15 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 load_start = time.time()
                 partition_year = config.year if config.mode == "year" else None
 
+                # ✅ CRITICAL: Thread-safe check for first batch
+                # ONLY one thread should do DELETE+COPY, rest should UPSERT
+                is_first_batch = False
+                if partition_year and batch_write_disposition == "merge":
+                    with first_batch_lock:
+                        if not first_batch_done[0]:
+                            is_first_batch = True
+                            first_batch_done[0] = True
+
                 postgres_bulk_destination.load_batch(
                     table_name=table_name,
                     data=page_records,
@@ -504,10 +518,6 @@ def create_csv_asset(resource_name: str, supports_date_filter: bool = True, use_
                 )
                 load_duration = time.time() - load_start
                 total_records += len(page_records)
-
-                # ✅ Mark that first batch is done
-                if is_first_batch:
-                    is_first_batch = False
 
                 # Log progression toutes les 10 pages
                 if page_count % 10 == 0:
