@@ -43,6 +43,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Copy remaining application code
 COPY configs /app/configs
 COPY scripts /app/scripts
+COPY .dlt /app/.dlt
 
 # Make entrypoint executable
 RUN chmod +x /app/scripts/worker_entrypoint.sh

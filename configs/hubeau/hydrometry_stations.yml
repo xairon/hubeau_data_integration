@@ -1,13 +1,13 @@
 resource:
-  name: hydrometry_stations
+  name: hydrometry_stations_raw
   endpoint: /referentiel/stations.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
-  primary_key:
-  - code_station
+  # Bronze layer: no PK/FK constraints, duplicates allowed
+  primary_key: null
 extraction:
   default_params: {}
 performance:
-  parallelism: 5
+  parallelism: 1
   batch_size: 5000
   retry_times: 3
   retry_delay: 2.0

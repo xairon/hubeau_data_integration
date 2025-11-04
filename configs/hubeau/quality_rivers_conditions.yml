@@ -1,15 +1,13 @@
 resource:
-  name: quality_rivers_conditions
+  name: quality_rivers_conditions_raw
   endpoint: /condition_environnementale_pc.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/qualite_rivieres
-  primary_key:
-  - code_station
-  - date_prelevement
-  - code_parametre
+  # Bronze layer: no PK/FK constraints, duplicates allowed
+  primary_key: null
 extraction:
   default_params: {}
 performance:
-  parallelism: 3
+  parallelism: 1
   batch_size: 5000
   retry_times: 3
   retry_delay: 2.0

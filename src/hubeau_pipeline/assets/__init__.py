@@ -1,97 +1,116 @@
 """
-Assets Hub'Eau - Ingestion directe PostgreSQL avec type mappings
+Assets Hub'Eau - Bronze Layer Only
 
 Structure:
-- hubeau_assets.py      : Ingestion des données Hub'Eau avec types corrects dès la création
-- monitoring/           : Monitoring qualité données
+- bronze/      : Bronze Layer - Raw data ingestion with DLT standard (22 assets)
+- monitoring/  : Monitoring qualité données (1 asset)
 
-NOTE: Schema optimization assets supprimés - types mappés dès la création via hubeau_type_mappings.py
+Total: 23 assets
 """
 
-from .hubeau_assets import (
-    # Chroniques/Observations (avec filtres date)
-    piezometry_chroniques_csv,
-    quality_groundwater_analyses_csv,
-    quality_rivers_analyses_csv,
-    quality_rivers_conditions_csv,
-    quality_rivers_operations_csv,
-    temperature_chroniques_csv,
-    hydrometry_obs_elab_csv,
-    hydrobio_indices_csv,
-    hydrobio_taxons_csv,
-    ecoulement_observations_csv,
-    prelevements_chroniques_csv,
-    # Stations/Référentiels (sans filtres date)
-    piezometry_stations_csv,
-    quality_groundwater_stations_csv,
-    quality_rivers_stations_csv,
-    temperature_stations_csv,
-    hydrometry_sites_csv,
-    hydrometry_stations_csv,
-    hydrobio_stations_csv,
-    ecoulement_stations_csv,
-    ecoulement_campagnes_csv,
-    prelevements_points_csv,
-    prelevements_ouvrages_csv,
+# ============================================================================
+# BRONZE LAYER ASSETS (DLT Standard)
+# ============================================================================
+from .bronze import (
+    # Temperature (2)
+    temperature_stations_raw,
+    temperature_chroniques_raw,
+    # Piezometry (2)
+    piezometry_stations_raw,
+    piezometry_chroniques_raw,
+    # Hydrometry (3)
+    hydrometry_sites_raw,
+    hydrometry_stations_raw,
+    hydrometry_obs_elab_raw,
+    # Hydrobiology (3)
+    hydrobio_stations_raw,
+    hydrobio_indices_raw,
+    hydrobio_taxons_raw,
+    # Quality Rivers (4)
+    quality_rivers_stations_raw,
+    quality_rivers_analyses_raw,
+    quality_rivers_conditions_raw,
+    quality_rivers_operations_raw,
+    # Quality Groundwater (2)
+    quality_groundwater_stations_raw,
+    quality_groundwater_analyses_raw,
+    # Ecoulement (3)
+    ecoulement_stations_raw,
+    ecoulement_campagnes_raw,
+    ecoulement_observations_raw,
+    # Prelevements (3)
+    prelevements_ouvrages_raw,
+    prelevements_points_raw,
+    prelevements_chroniques_raw,
 )
+
+# Monitoring assets
 from .monitoring import all_monitoring_assets
 
-# Tous les assets Hub'Eau
-all_hubeau_assets = [
-    # Chroniques/Observations
-    piezometry_chroniques_csv,
-    quality_groundwater_analyses_csv,
-    quality_rivers_analyses_csv,
-    quality_rivers_conditions_csv,
-    quality_rivers_operations_csv,
-    temperature_chroniques_csv,
-    hydrometry_obs_elab_csv,
-    hydrobio_indices_csv,
-    hydrobio_taxons_csv,
-    ecoulement_observations_csv,
-    prelevements_chroniques_csv,
-    # Stations/Référentiels
-    piezometry_stations_csv,
-    quality_groundwater_stations_csv,
-    quality_rivers_stations_csv,
-    temperature_stations_csv,
-    hydrometry_sites_csv,
-    hydrometry_stations_csv,
-    hydrobio_stations_csv,
-    ecoulement_stations_csv,
-    ecoulement_campagnes_csv,
-    prelevements_points_csv,
-    prelevements_ouvrages_csv,
+# ============================================================================
+# ALL ASSETS
+# ============================================================================
+all_bronze_assets = [
+    # Temperature (2)
+    temperature_stations_raw,
+    temperature_chroniques_raw,
+    # Piezometry (2)
+    piezometry_stations_raw,
+    piezometry_chroniques_raw,
+    # Hydrometry (3)
+    hydrometry_sites_raw,
+    hydrometry_stations_raw,
+    hydrometry_obs_elab_raw,
+    # Hydrobiology (3)
+    hydrobio_stations_raw,
+    hydrobio_indices_raw,
+    hydrobio_taxons_raw,
+    # Quality Rivers (4)
+    quality_rivers_stations_raw,
+    quality_rivers_analyses_raw,
+    quality_rivers_conditions_raw,
+    quality_rivers_operations_raw,
+    # Quality Groundwater (2)
+    quality_groundwater_stations_raw,
+    quality_groundwater_analyses_raw,
+    # Ecoulement (3)
+    ecoulement_stations_raw,
+    ecoulement_campagnes_raw,
+    ecoulement_observations_raw,
+    # Prelevements (3)
+    prelevements_ouvrages_raw,
+    prelevements_points_raw,
+    prelevements_chroniques_raw,
 ]
 
-# Tous les assets du pipeline (schema optimization assets supprimés)
-all_assets = all_hubeau_assets + all_monitoring_assets
+# All assets (Bronze + Monitoring)
+all_assets = all_bronze_assets + all_monitoring_assets
 
 __all__ = [
     "all_assets",
-    "all_hubeau_assets",
+    "all_bronze_assets",
     "all_monitoring_assets",
-    # Individual assets
-    "piezometry_chroniques_csv",
-    "quality_groundwater_analyses_csv",
-    "quality_rivers_analyses_csv",
-    "quality_rivers_conditions_csv",
-    "quality_rivers_operations_csv",
-    "temperature_chroniques_csv",
-    "hydrometry_obs_elab_csv",
-    "hydrobio_indices_csv",
-    "hydrobio_taxons_csv",
-    "ecoulement_observations_csv",
-    "prelevements_chroniques_csv",
-    "piezometry_stations_csv",
-    "quality_groundwater_stations_csv",
-    "quality_rivers_stations_csv",
-    "temperature_stations_csv",
-    "hydrometry_sites_csv",
-    "hydrometry_stations_csv",
-    "hydrobio_stations_csv",
-    "ecoulement_stations_csv",
-    "ecoulement_campagnes_csv",
-    "prelevements_points_csv",
-    "prelevements_ouvrages_csv",
+    # Bronze Layer Assets
+    "temperature_stations_raw",
+    "temperature_chroniques_raw",
+    "piezometry_stations_raw",
+    "piezometry_chroniques_raw",
+    "hydrometry_sites_raw",
+    "hydrometry_stations_raw",
+    "hydrometry_obs_elab_raw",
+    "hydrobio_stations_raw",
+    "hydrobio_indices_raw",
+    "hydrobio_taxons_raw",
+    "quality_rivers_stations_raw",
+    "quality_rivers_analyses_raw",
+    "quality_rivers_conditions_raw",
+    "quality_rivers_operations_raw",
+    "quality_groundwater_stations_raw",
+    "quality_groundwater_analyses_raw",
+    "ecoulement_stations_raw",
+    "ecoulement_campagnes_raw",
+    "ecoulement_observations_raw",
+    "prelevements_ouvrages_raw",
+    "prelevements_points_raw",
+    "prelevements_chroniques_raw",
 ]

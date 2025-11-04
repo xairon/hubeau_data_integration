@@ -1,287 +1,254 @@
 """
-Jobs Hub'Eau - Un job par API
+Jobs Hub'Eau - Bronze Layer
 
-Chaque job contient les assets d'une API spécifique:
-- Stations/référentiels
-- Chroniques/analyses/observations
+Jobs for Bronze layer assets:
+- Stations: FULL load (no partitions)
+- Chroniques: MODE partitioned load ("full" for all data, or specific year)
+
+Bronze layer uses DLT standard with simple materialization.
+
+CRITICAL FIX: All jobs have concurrency tags to prevent multiple runs
+of the same job from executing simultaneously (prevents DLT file conflicts).
+
+ARCHITECTURE: Jobs are separated by type:
+- *_stations jobs: FULL load only (no partitions)
+- *_chroniques jobs: Partitioned load (MODE_PARTITIONS)
+This prevents mixing partitioned and non-partitioned assets in the same job.
 """
 
-from dagster import define_asset_job, AssetSelection, AssetKey, schedule, RunRequest
-from ..assets.hubeau_assets import MODE_PARTITIONS
+from dagster import define_asset_job, AssetSelection, AssetKey
+from ..assets.bronze.dlt_assets import MODE_PARTITIONS
 
 
 # ====================================
-# CONFIGURATION GLOBALE - EXECUTION PARALLELE
-# ====================================
-# OPTIMISÉ: 3 assets en parallèle pour profiter du rate_limit réduit (0.3s)
-# VPS: 8GB RAM, dlt_worker: 3GB limit
-# 3 assets en parallèle → ~1.5GB → Safe
-PARALLEL_EXECUTION_CONFIG = {
-    "execution": {
-        "config": {
-            "multiprocess": {
-                "max_concurrent": 3  # ✅ 3 assets en parallèle (optimisé)
-            }
-        }
-    }
-}
-
-# Config séquentielle conservée pour jobs spécifiques si besoin
-SEQUENTIAL_EXECUTION_CONFIG = {
-    "execution": {
-        "config": {
-            "multiprocess": {
-                "max_concurrent": 1  # 1 asset à la fois
-            }
-        }
-    }
-}
-
-
-# ====================================
-# JOBS PAR API
+# JOBS PAR API - STATIONS ONLY (no partitions)
 # ====================================
 
-# PIEZOMETRY: Stations + Chroniques
-piezometry_job = define_asset_job(
-    name="piezometry",
-    description="Piézométrie: Stations → Chroniques",
+# PIEZOMETRY: Stations only
+piezometry_stations_job = define_asset_job(
+    name="piezometry_stations_bronze",
+    description="Bronze: Piezometry stations (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("piezometry_stations_csv"),
-        AssetKey("piezometry_chroniques_csv")
+        AssetKey("piezometry_stations_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "piezometry_stations_bronze"}
 )
 
-# QUALITY RIVERS: Stations + Analyses + Conditions + Operations
-quality_rivers_job = define_asset_job(
-    name="quality_rivers",
-    description="Qualité Cours d'Eau : Stations → Analyses/Conditions/Operations",
+# QUALITY RIVERS: Stations only
+quality_rivers_stations_job = define_asset_job(
+    name="quality_rivers_stations_bronze",
+    description="Bronze: Quality rivers stations (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("quality_rivers_stations_csv"),
-        AssetKey("quality_rivers_analyses_csv"),
-        AssetKey("quality_rivers_conditions_csv"),
-        AssetKey("quality_rivers_operations_csv")
+        AssetKey("quality_rivers_stations_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "quality_rivers_stations_bronze"}
 )
 
-# QUALITY GROUNDWATER: Stations + Analyses
-quality_groundwater_job = define_asset_job(
-    name="quality_groundwater",
-    description="Qualité Nappes : Stations → Analyses",
+# QUALITY GROUNDWATER: Stations only
+quality_groundwater_stations_job = define_asset_job(
+    name="quality_groundwater_stations_bronze",
+    description="Bronze: Quality groundwater stations (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("quality_groundwater_stations_csv"),
-        AssetKey("quality_groundwater_analyses_csv")
+        AssetKey("quality_groundwater_stations_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "quality_groundwater_stations_bronze"}
 )
 
-# HYDROMETRY: Sites + Stations + Observations
-hydrometry_job = define_asset_job(
-    name="hydrometry",
-    description="Hydrométrie : Sites + Stations → Observations",
+# HYDROMETRY: Sites + Stations only
+hydrometry_stations_job = define_asset_job(
+    name="hydrometry_stations_bronze",
+    description="Bronze: Hydrometry sites + stations (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("hydrometry_sites_csv"),
-        AssetKey("hydrometry_stations_csv"),
-        AssetKey("hydrometry_obs_elab_csv")
+        AssetKey("hydrometry_sites_raw"),
+        AssetKey("hydrometry_stations_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "hydrometry_stations_bronze"}
 )
 
-# TEMPERATURE: Stations + Chroniques
-temperature_job = define_asset_job(
-    name="temperature",
-    description="Température : Stations → Chroniques",
+# TEMPERATURE: Stations only
+temperature_stations_job = define_asset_job(
+    name="temperature_stations_bronze",
+    description="Bronze: Temperature stations (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("temperature_stations_csv"),
-        AssetKey("temperature_chroniques_csv")
+        AssetKey("temperature_stations_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "temperature_stations_bronze"}
 )
 
-# HYDROBIO: Stations + Indices + Taxons
-hydrobio_job = define_asset_job(
-    name="hydrobio",
-    description="Hydrobiologie : Stations → Indices/Taxons",
+# HYDROBIO: Stations only
+hydrobio_stations_job = define_asset_job(
+    name="hydrobio_stations_bronze",
+    description="Bronze: Hydrobiology stations (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("hydrobio_stations_csv"),
-        AssetKey("hydrobio_indices_csv"),
-        AssetKey("hydrobio_taxons_csv")
+        AssetKey("hydrobio_stations_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "hydrobio_stations_bronze"}
 )
 
-# ECOULEMENT: Stations + Campagnes + Observations
-ecoulement_job = define_asset_job(
-    name="ecoulement",
-    description="Écoulement : Stations + Campagnes → Observations",
+# ECOULEMENT: Stations + Campagnes only
+ecoulement_stations_job = define_asset_job(
+    name="ecoulement_stations_bronze",
+    description="Bronze: Ecoulement stations + campagnes (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("ecoulement_stations_csv"),
-        AssetKey("ecoulement_campagnes_csv"),
-        AssetKey("ecoulement_observations_csv")
+        AssetKey("ecoulement_stations_raw"),
+        AssetKey("ecoulement_campagnes_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "ecoulement_stations_bronze"}
 )
 
-# PRELEVEMENTS: Ouvrages + Points + Chroniques
-prelevements_job = define_asset_job(
-    name="prelevements",
-    description="Prélèvements : Ouvrages + Points → Chroniques",
+# PRELEVEMENTS: Ouvrages + Points only
+prelevements_stations_job = define_asset_job(
+    name="prelevements_stations_bronze",
+    description="Bronze: Prelevements ouvrages + points (FULL load, no partition)",
     selection=AssetSelection.keys(
-        AssetKey("prelevements_ouvrages_csv"),
-        AssetKey("prelevements_points_csv"),
-        AssetKey("prelevements_chroniques_csv")
+        AssetKey("prelevements_ouvrages_raw"),
+        AssetKey("prelevements_points_raw")
     ),
-    config=SEQUENTIAL_EXECUTION_CONFIG,
-    partitions_def=MODE_PARTITIONS
+    tags={"dagster/concurrency_key": "prelevements_stations_bronze"}
 )
 
 
 # ====================================
-# JOBS GLOBAUX
+# JOBS PAR API - CHRONIQUES ONLY (partitioned)
 # ====================================
 
-# Job pour TOUTES les stations/référentiels
+# PIEZOMETRY: Chroniques only
+piezometry_chroniques_job = define_asset_job(
+    name="piezometry_chroniques_bronze",
+    description="Bronze: Piezometry chroniques (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("piezometry_chroniques_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "piezometry_chroniques_bronze"}
+)
+
+# QUALITY RIVERS: Analyses + Conditions + Operations
+quality_rivers_chroniques_job = define_asset_job(
+    name="quality_rivers_chroniques_bronze",
+    description="Bronze: Quality rivers analyses + conditions + operations (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("quality_rivers_analyses_raw"),
+        AssetKey("quality_rivers_conditions_raw"),
+        AssetKey("quality_rivers_operations_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "quality_rivers_chroniques_bronze"}
+)
+
+# QUALITY GROUNDWATER: Analyses only
+quality_groundwater_chroniques_job = define_asset_job(
+    name="quality_groundwater_chroniques_bronze",
+    description="Bronze: Quality groundwater analyses (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("quality_groundwater_analyses_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "quality_groundwater_chroniques_bronze"}
+)
+
+# HYDROMETRY: Observations only
+hydrometry_chroniques_job = define_asset_job(
+    name="hydrometry_chroniques_bronze",
+    description="Bronze: Hydrometry observations (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("hydrometry_obs_elab_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "hydrometry_chroniques_bronze"}
+)
+
+# TEMPERATURE: Chroniques only
+temperature_chroniques_job = define_asset_job(
+    name="temperature_chroniques_bronze",
+    description="Bronze: Temperature chroniques (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("temperature_chroniques_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "temperature_chroniques_bronze"}
+)
+
+# HYDROBIO: Indices + Taxons
+hydrobio_chroniques_job = define_asset_job(
+    name="hydrobio_chroniques_bronze",
+    description="Bronze: Hydrobiology indices + taxons (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("hydrobio_indices_raw"),
+        AssetKey("hydrobio_taxons_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "hydrobio_chroniques_bronze"}
+)
+
+# ECOULEMENT: Observations only
+ecoulement_chroniques_job = define_asset_job(
+    name="ecoulement_chroniques_bronze",
+    description="Bronze: Ecoulement observations (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("ecoulement_observations_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "ecoulement_chroniques_bronze"}
+)
+
+# PRELEVEMENTS: Chroniques only
+prelevements_chroniques_job = define_asset_job(
+    name="prelevements_chroniques_bronze",
+    description="Bronze: Prelevements chroniques (partitioned: full or year)",
+    selection=AssetSelection.keys(
+        AssetKey("prelevements_chroniques_raw")
+    ),
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "prelevements_chroniques_bronze"}
+)
+
+
+# ====================================
+# JOBS GLOBAUX - Bronze Layer
+# ====================================
+
+# Job pour TOUTES les stations/référentiels (FULL load - NO PARTITIONS)
 all_stations_job = define_asset_job(
-    name="all_stations",
-    description="Toutes les stations/référentiels CSV (3 assets en parallèle)",
+    name="all_stations_bronze",
+    description="Bronze: ALL stations/referentiels (FULL load, no partition)",
     selection=AssetSelection.keys(
         # Stations
-        AssetKey("piezometry_stations_csv"),
-        AssetKey("quality_rivers_stations_csv"),
-        AssetKey("quality_groundwater_stations_csv"),
-        AssetKey("hydrometry_sites_csv"),
-        AssetKey("hydrometry_stations_csv"),
-        AssetKey("temperature_stations_csv"),
-        AssetKey("hydrobio_stations_csv"),
-        AssetKey("ecoulement_stations_csv"),
-        AssetKey("ecoulement_campagnes_csv"),
-        AssetKey("prelevements_ouvrages_csv"),
-        AssetKey("prelevements_points_csv")
+        AssetKey("piezometry_stations_raw"),
+        AssetKey("quality_rivers_stations_raw"),
+        AssetKey("quality_groundwater_stations_raw"),
+        AssetKey("hydrometry_sites_raw"),
+        AssetKey("hydrometry_stations_raw"),
+        AssetKey("temperature_stations_raw"),
+        AssetKey("hydrobio_stations_raw"),
+        AssetKey("ecoulement_stations_raw"),
+        AssetKey("ecoulement_campagnes_raw"),
+        AssetKey("prelevements_ouvrages_raw"),
+        AssetKey("prelevements_points_raw")
     ),
-    config=PARALLEL_EXECUTION_CONFIG  # ✅ 3 assets en parallèle
+    tags={"dagster/concurrency_key": "all_stations_bronze"}  # NO partitions_def - this is FULL load
 )
 
-# Job pour TOUTES les chroniques/analyses/observations
+# Job pour TOUTES les chroniques/analyses/observations (MODE partitioned)
 all_chroniques_job = define_asset_job(
-    name="all_chroniques",
-    description="Toutes les chroniques/analyses/observations CSV (3 assets en parallèle)",
+    name="all_chroniques_bronze",
+    description="Bronze: ALL chroniques/analyses/observations (partitioned: full or year)",
     selection=AssetSelection.keys(
-        # Chroniques/Observations
-        AssetKey("piezometry_chroniques_csv"),
-        AssetKey("quality_rivers_analyses_csv"),
-        AssetKey("quality_rivers_conditions_csv"),
-        AssetKey("quality_rivers_operations_csv"),
-        AssetKey("quality_groundwater_analyses_csv"),
-        AssetKey("hydrometry_obs_elab_csv"),
-        AssetKey("temperature_chroniques_csv"),
-        AssetKey("hydrobio_indices_csv"),
-        AssetKey("hydrobio_taxons_csv"),
-        AssetKey("ecoulement_observations_csv"),
-        AssetKey("prelevements_chroniques_csv")
+        # Chroniques/Observations ONLY (no stations/referentiels)
+        AssetKey("piezometry_chroniques_raw"),
+        AssetKey("quality_rivers_analyses_raw"),
+        AssetKey("quality_rivers_conditions_raw"),
+        AssetKey("quality_rivers_operations_raw"),
+        AssetKey("quality_groundwater_analyses_raw"),
+        AssetKey("hydrometry_obs_elab_raw"),
+        AssetKey("temperature_chroniques_raw"),
+        AssetKey("hydrobio_indices_raw"),
+        AssetKey("hydrobio_taxons_raw"),
+        AssetKey("ecoulement_observations_raw"),
+        AssetKey("prelevements_chroniques_raw")
+        # NOTE: ecoulement_campagnes_raw, prelevements_ouvrages_raw, prelevements_points_raw
+        # are in all_stations_job (they are referentiels, not chroniques)
     ),
-    config=PARALLEL_EXECUTION_CONFIG,  # ✅ 3 assets en parallèle
-    partitions_def=MODE_PARTITIONS
+    partitions_def=MODE_PARTITIONS,
+    tags={"dagster/concurrency_key": "all_chroniques_bronze"}
 )
-
-# Job COMPLET (tout)
-all_hubeau_job = define_asset_job(
-    name="all_hubeau",
-    description="Toutes les données Hub'Eau - stations + chroniques (3 assets en parallèle)",
-    selection=AssetSelection.all(),
-    config=PARALLEL_EXECUTION_CONFIG,  # ✅ 3 assets en parallèle
-    partitions_def=MODE_PARTITIONS
-)
-
-
-# ====================================
-# SCHEDULES
-# ====================================
-
-# Schedule pour refresh hebdomadaire des stations
-@schedule(
-    job=all_stations_job,
-    cron_schedule="0 3 * * 0",  # Dimanche 03h00
-    name="weekly_stations_refresh"
-)
-def weekly_stations_schedule(context):
-    """
-    Refresh hebdomadaire des stations/référentiels
-    Mode FULL car les référentiels changent rarement
-    """
-    # Config pour chaque station asset
-    station_assets = [
-        "piezometry_stations_csv",
-        "quality_rivers_stations_csv",
-        "quality_groundwater_stations_csv",
-        "hydrometry_sites_csv",
-        "hydrometry_stations_csv",
-        "temperature_stations_csv",
-        "hydrobio_stations_csv",
-        "ecoulement_stations_csv",
-        "ecoulement_campagnes_csv",
-        "prelevements_ouvrages_csv",
-        "prelevements_points_csv"
-    ]
-
-    ops_config = {
-        asset: {"config": {"mode": "full"}}
-        for asset in station_assets
-    }
-
-    return RunRequest(
-        run_key=f"weekly_stations_{context.scheduled_execution_time.strftime('%Y%m%d')}",
-        run_config={"ops": ops_config},
-        tags={"mode": "full", "type": "stations", "scheduled": "true"}
-    )
-
-
-# Schedule pour refresh quotidien des chroniques
-@schedule(
-    job=all_chroniques_job,
-    cron_schedule="0 2 * * *",  # Tous les jours 02h00
-    name="daily_chroniques_refresh"
-)
-def daily_chroniques_schedule(context):
-    """
-    Refresh quotidien des chroniques/analyses
-    Mode INCREMENTAL: derniers 2 jours avec overlap
-    """
-    # Config pour chaque chroniques asset
-    chroniques_assets = [
-        "piezometry_chroniques_csv",
-        "quality_rivers_analyses_csv",
-        "quality_rivers_conditions_csv",
-        "quality_rivers_operations_csv",
-        "quality_groundwater_analyses_csv",
-        "hydrometry_obs_elab_csv",
-        "temperature_chroniques_csv",
-        "hydrobio_indices_csv",
-        "hydrobio_taxons_csv",
-        "ecoulement_observations_csv",
-        "prelevements_chroniques_csv"
-    ]
-
-    ops_config = {
-        asset: {
-            "config": {
-                "mode": "incremental",
-                "incremental_days": 2
-            }
-        }
-        for asset in chroniques_assets
-    }
-
-    return RunRequest(
-        run_key=f"daily_chroniques_{context.scheduled_execution_time.strftime('%Y%m%d')}",
-        run_config={"ops": ops_config},
-        tags={"mode": "incremental", "type": "chroniques", "scheduled": "true"}
-    )

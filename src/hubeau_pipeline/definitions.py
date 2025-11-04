@@ -7,14 +7,11 @@ from dagster import Definitions, define_asset_job, AssetSelection, multiprocess_
 # Import des assets
 from .assets import all_assets
 
-# Import des jobs et schedules
-from .jobs import all_jobs, all_schedules as hubeau_schedules
+# Import des jobs
+from .jobs import all_jobs
 
 # Import des schedules (vide actuellement - pour extensions futures)
 from .schedules import all_schedules
-
-# Import des capteurs
-from .sensors import all_sensors
 
 # Import des resources
 from .resources import RESOURCES
@@ -35,11 +32,10 @@ limited_executor = multiprocess_executor.configured({
 # Définitions centrales
 defs = Definitions(
     assets=all_assets,
-    jobs=all_jobs,  # 12 jobs : 8 par API + 2 globaux + 2 tests
-    schedules=all_schedules + hubeau_schedules,  # Schedules génériques + schedules Hub'Eau
+    jobs=all_jobs,  # 18 jobs: 8 stations + 8 chroniques + 2 globaux (Bronze layer)
+    schedules=all_schedules,  # Empty - schedules removed, manual materialization only
     resources=RESOURCES,
-    sensors=all_sensors,
-    # ✅ Executor limité comme défaut global (max 2 assets parallèles)
+    # Executor limité comme défaut global (max 3 assets parallèles)
     # Tous les jobs utilisent cet executor sauf override explicite
     executor=limited_executor,
 )

@@ -1,13 +1,13 @@
 resource:
-  name: ecoulement_campagnes
+  name: ecoulement_campagnes_raw
   endpoint: /campagnes.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/ecoulement
-  primary_key:
-  - code_campagne
+  # Bronze layer: no PK/FK constraints, duplicates allowed
+  primary_key: null
 extraction:
   default_params: {}
 performance:
-  parallelism: 5
+  parallelism: 1
   batch_size: 5000
   retry_times: 3
   retry_delay: 2.0

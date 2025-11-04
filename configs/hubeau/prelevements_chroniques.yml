@@ -1,15 +1,13 @@
 resource:
-  name: prelevements_chroniques
+  name: prelevements_chroniques_raw
   endpoint: /chroniques.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/prelevements
-  primary_key:
-  - code_ouvrage
-  - annee
-  - code_usage
+  # Bronze layer: no PK/FK constraints, duplicates allowed
+  primary_key: null
 extraction:
   default_params: {}
 performance:
-  parallelism: 5
+  parallelism: 1
   batch_size: 5000
   retry_times: 3
   retry_delay: 2.0
