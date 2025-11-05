@@ -47,6 +47,9 @@ from .bronze import (
 # Monitoring assets
 from .monitoring import all_monitoring_assets
 
+# CSV assets
+from .piezometers_csv import piezometers_csv_data
+
 # ============================================================================
 # ALL ASSETS
 # ============================================================================
@@ -83,13 +86,20 @@ all_bronze_assets = [
     prelevements_chroniques_raw,
 ]
 
-# All assets (Bronze + Monitoring)
-all_assets = all_bronze_assets + all_monitoring_assets
+# CSV assets
+all_csv_assets = [
+    piezometers_csv_data,
+]
+
+# All assets (Bronze + Monitoring + CSV)
+all_assets = all_bronze_assets + all_monitoring_assets + all_csv_assets
 
 __all__ = [
     "all_assets",
     "all_bronze_assets",
     "all_monitoring_assets",
+    "all_csv_assets",
+    "piezometers_csv_data",
     # Bronze Layer Assets
     "temperature_stations_raw",
     "temperature_chroniques_raw",

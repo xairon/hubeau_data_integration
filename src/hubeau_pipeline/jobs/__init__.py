@@ -8,6 +8,8 @@ ARCHITECTURE:
 - *_chroniques jobs: Partitioned load (MODE_PARTITIONS: "full", "2024", etc.)
 """
 
+from .piezometers_job import piezometers_csv_job
+
 from .hubeau_jobs import (
     # Jobs STATIONS (no partitions)
     piezometry_stations_job,
@@ -33,6 +35,8 @@ from .hubeau_jobs import (
 )
 
 all_jobs = [
+    # Jobs CSV
+    piezometers_csv_job,
     # Jobs STATIONS (no partitions)
     piezometry_stations_job,
     quality_rivers_stations_job,
@@ -57,6 +61,8 @@ all_jobs = [
 ]
 
 __all__ = [
+    # Jobs CSV
+    "piezometers_csv_job",
     # Jobs STATIONS (no partitions)
     "piezometry_stations_job",
     "quality_rivers_stations_job",
