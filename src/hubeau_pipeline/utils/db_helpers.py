@@ -30,7 +30,7 @@ def delete_year_data(
     table_name: str,
     year: str,
     date_column: str,
-    schema: str = "hubeau"
+    schema: str = "staging"
 ) -> int:
     """
     Delete all data for a specific year from a table (or TRUNCATE for "full" mode)
@@ -40,7 +40,7 @@ def delete_year_data(
         table_name: Name of the table (e.g., "temperature_chroniques_raw")
         year: Year to delete (e.g., "2024") or "full" to truncate entire table
         date_column: Name of the date column (e.g., "date_mesure_temp")
-        schema: Schema name (default: "hubeau")
+        schema: Schema name (default: "staging")
 
     Returns:
         Number of rows deleted
@@ -106,7 +106,7 @@ def delete_year_data(
 def get_max_date(
     table_name: str,
     date_column: str,
-    schema: str = "hubeau"
+    schema: str = "staging"
 ) -> Optional[str]:
     """
     Get the maximum date from a table for incremental loading
@@ -114,7 +114,7 @@ def get_max_date(
     Args:
         table_name: Name of the table
         date_column: Name of the date column
-        schema: Schema name (default: "hubeau")
+        schema: Schema name (default: "staging")
 
     Returns:
         Maximum date as string (YYYY-MM-DD) or None if table is empty
@@ -162,13 +162,13 @@ def get_max_date(
         conn.close()
 
 
-def table_exists(table_name: str, schema: str = "hubeau") -> bool:
+def table_exists(table_name: str, schema: str = "staging") -> bool:
     """
     Check if a table exists in the database
 
     Args:
         table_name: Name of the table
-        schema: Schema name (default: "hubeau")
+        schema: Schema name (default: "staging")
 
     Returns:
         True if table exists, False otherwise

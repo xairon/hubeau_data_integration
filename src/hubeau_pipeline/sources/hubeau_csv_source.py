@@ -149,6 +149,34 @@ def get_total_pages(
         raise
 
 
+def detect_delimiter_from_sample(sample: str) -> str:
+    """
+    Detect CSV delimiter from sample text.
+    Hub'Eau typically uses ';' but we auto-detect for robustness.
+    """
+    import csv
+    delimiters = [';', ',', '\t', '|']
+    
+    try:
+        sniffer = csv.Sniffer()
+        detected = sniffer.sniff(sample, delimiters=''.join(delimiters))
+        return detected.delimiter
+    except (csv.Error, AttributeError):
+        # Fallback: count occurrences
+        delimiter_counts = {}
+        for delim in delimiters:
+            lines = sample.split('\n')[:5]
+            counts = [line.count(delim) for line in lines if line.strip()]
+            if counts:
+                delimiter_counts[delim] = sum(counts) / len(counts)
+        
+        if delimiter_counts:
+            return max(delimiter_counts, key=delimiter_counts.get)
+    
+    # Default for Hub'Eau
+    return ';'
+
+
 def fetch_page(
     client: HubeauAPIClient,
     endpoint: str,
@@ -156,7 +184,14 @@ def fetch_page(
     params: Dict = None
 ) -> List[Dict]:
     """
-    Fetch single page from Hub'Eau API
+    Fetch single page from Hub'Eau API with robust CSV parsing.
+    
+    DLT FEATURES:
+    - Auto-detects delimiter (typically ';' for Hub'Eau)
+    - Handles encoding issues gracefully
+    - Skips bad lines instead of failing
+    - Normalizes column names
+    
     Returns list of records (dicts)
     """
     final_params = {**(params or {}), 'page': page}
@@ -168,23 +203,105 @@ def fetch_page(
             logger.warning(f"Page {page}: Empty response")
             return []
 
-        # Parse CSV
-        df = pd.read_csv(
-            io.StringIO(response.text),
-            sep=';',
-            quotechar='"',
-            low_memory=False,
-            on_bad_lines='skip'
-        )
+        # Auto-detect delimiter from first few lines
+        sample = response.text[:1024] if len(response.text) > 1024 else response.text
+        delimiter = detect_delimiter_from_sample(sample)
+        
+        # Note: response.text is already decoded by requests library
+        # No need to specify encoding for StringIO
+
+        # Parse CSV with robust error handling
+        try:
+            df = pd.read_csv(
+                io.StringIO(response.text),
+                sep=delimiter,
+                quotechar='"',
+                low_memory=False,
+                on_bad_lines='skip'  # Skip bad lines instead of failing
+            )
+        except Exception as parse_error:
+            # Fallback: try with default Hub'Eau delimiter
+            logger.warning(f"Page {page}: Parse error with delimiter '{delimiter}', trying ';': {parse_error}")
+            df = pd.read_csv(
+                io.StringIO(response.text),
+                sep=';',
+                quotechar='"',
+                low_memory=False,
+                on_bad_lines='skip'
+            )
 
         if df.empty:
             return []
+
+        # Normalize column names (DLT also does this, but pre-processing ensures consistency)
+        # Convert to lowercase and replace spaces/special chars
+        df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('[^\w]', '_', regex=True)
+        
+        # Replace NaN with None for DLT
+        df = df.where(pd.notnull(df), None)
 
         return df.to_dict('records')
 
     except Exception as e:
         logger.warning(f"Page {page} error: {e}")
         return []
+
+
+# ==============================================================================
+# STATION SLICING HELPERS
+# ==============================================================================
+
+def get_station_codes(
+    base_url: str,
+    stations_endpoint: str,
+    station_param: str,
+    rate_limit: float = 0.3
+) -> List[str]:
+    """
+    Fetch list of station codes from stations endpoint.
+
+    Args:
+        base_url: Base API URL
+        stations_endpoint: Endpoint to fetch stations (e.g., /stations.csv)
+        station_param: Name of station code field (e.g., code_bss)
+        rate_limit: Rate limit for requests
+
+    Returns:
+        List of station codes
+    """
+    client = HubeauAPIClient(base_url, rate_limit=rate_limit)
+
+    logger.info(f"🔍 Fetching station list from {stations_endpoint}...")
+
+    # Get total pages for stations
+    total_pages, total_count = get_total_pages(client, stations_endpoint)
+
+    if total_count == 0:
+        logger.warning(f"No stations found at {stations_endpoint}")
+        return []
+
+    logger.info(f"Found {total_count:,} stations across {total_pages} pages")
+
+    # Fetch all stations
+    all_stations = []
+    for page_num in range(1, total_pages + 1):
+        records = fetch_page(client, stations_endpoint, page_num)
+        if records:
+            all_stations.extend(records)
+
+    # Extract station codes
+    station_codes = []
+    for station in all_stations:
+        # Try normalized key (lowercase with underscores)
+        code = station.get(station_param.lower().replace('-', '_'))
+        if not code:
+            # Try original key
+            code = station.get(station_param)
+        if code:
+            station_codes.append(str(code))
+
+    logger.info(f"✅ Extracted {len(station_codes):,} station codes")
+    return station_codes
 
 
 # ==============================================================================
@@ -270,6 +387,11 @@ def hubeau_chroniques_year(
     endpoint = config["resource"]["endpoint"]
     rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
 
+    # Get date filter parameter names from config (with fallback to defaults)
+    date_filter_params = config.get("extraction", {}).get("date_filter_params", {})
+    param_date_debut = date_filter_params.get("date_debut", "date_debut_mesure")
+    param_date_fin = date_filter_params.get("date_fin", "date_fin_mesure")
+
     client = HubeauAPIClient(base_url, rate_limit=rate_limit)
 
     # Date filters based on partition mode
@@ -279,42 +401,122 @@ def hubeau_chroniques_year(
         mode_label = "FULL LOAD MODE (ALL HISTORICAL DATA)"
     else:
         # YEAR MODE: Load specific year
-        date_debut = f"{year}-01-01"
-        date_fin = f"{year}-12-31"
-        params = {
-            "date_debut_mesure": date_debut,
-            "date_fin_mesure": date_fin
-        }
         mode_label = f"YEAR PARTITION LOAD: {year}"
 
-    # Get pagination info
-    total_pages, total_count = get_total_pages(client, endpoint, params)
+        # Check if this is a single-param API (like prelevements with 'annee')
+        if param_date_fin is None or param_date_fin == "null":
+            # Single parameter: just the year as integer (e.g., annee=2020)
+            params = {
+                param_date_debut: year
+            }
+            logger.info(f"Using single year parameter: {param_date_debut}={year}")
+        else:
+            # Date range parameters (e.g., date_debut_mesure=2020-01-01, date_fin_mesure=2020-12-31)
+            date_debut = f"{year}-01-01"
+            date_fin = f"{year}-12-31"
+            params = {
+                param_date_debut: date_debut,
+                param_date_fin: date_fin
+            }
+            logger.info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
 
-    if total_count == 0:
-        logger.warning(f"No data found for partition: {year}")
-        return
+    # Check if station slicing is required (e.g., piezometry API)
+    station_slicing_config = config.get("extraction", {}).get("station_slicing", {})
+    if station_slicing_config.get("enabled", False):
+        logger.info("⚡ STATION BATCHING MODE ENABLED")
 
-    logger.info(f"=== {mode_label} ===")
-    logger.info(f"Total records: {total_count:,}")
-    logger.info(f"Total pages: {total_pages}")
-    logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
-    logger.info(f"Rate limit: {rate_limit}s per request")
-    logger.info(f"Batch writes: every 10,000 records")
+        # Get configuration
+        station_param = station_slicing_config.get("station_param")
+        stations_endpoint = station_slicing_config.get("stations_endpoint")
+        batch_size = station_slicing_config.get("batch_size", 50)
 
-    # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
-    records_yielded = 0
-    for page_num in range(1, total_pages + 1):
-        records = fetch_page(client, endpoint, page_num, params)
-        if records:
-            records_yielded += len(records)
-            yield records
+        # Fetch list of station codes
+        station_codes = get_station_codes(base_url, stations_endpoint, station_param, rate_limit)
 
-        # Log progress every 10 pages
-        if page_num % 10 == 0:
-            progress_pct = (page_num / total_pages) * 100
-            logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records")
+        if len(station_codes) == 0:
+            logger.warning("No stations found - cannot proceed")
+            return
 
-    logger.info(f"=== {mode_label} COMPLETE === Total: {records_yielded:,} records")
+        total_stations = len(station_codes)
+        total_chunks = (total_stations + batch_size - 1) // batch_size
+
+        logger.info(f"=== {mode_label} (STATION BATCHING) ===")
+        logger.info(f"Total stations: {total_stations:,}")
+        logger.info(f"Batch size: {batch_size} stations per chunk")
+        logger.info(f"Total chunks: {total_chunks}")
+        logger.info(f"Mode: Batching stations with comma-separated codes")
+        logger.info(f"Rate limit: {rate_limit}s per request")
+
+        # Process stations in batches
+        total_records_yielded = 0
+        for chunk_index in range(0, total_stations, batch_size):
+            chunk_stations = station_codes[chunk_index:chunk_index + batch_size]
+            chunk_num = (chunk_index // batch_size) + 1
+
+            logger.info(f"📦 Chunk {chunk_num}/{total_chunks}: {len(chunk_stations)} stations")
+            logger.info(f"   Stations: {', '.join(chunk_stations[:5])}{'...' if len(chunk_stations) > 5 else ''}")
+
+            # Build params with comma-separated station codes
+            chunk_params = {
+                **params,
+                station_param: ','.join(chunk_stations)
+            }
+
+            try:
+                # Get pagination info for this chunk
+                total_pages, total_count = get_total_pages(client, endpoint, chunk_params)
+
+                if total_count == 0:
+                    logger.info(f"  No data for chunk {chunk_num}")
+                    continue
+
+                logger.info(f"  Found {total_count:,} records across {total_pages} pages")
+
+                # Fetch all pages for this chunk
+                for page_num in range(1, total_pages + 1):
+                    records = fetch_page(client, endpoint, page_num, chunk_params)
+                    if records:
+                        total_records_yielded += len(records)
+                        yield records
+
+                logger.info(f"✅ Chunk {chunk_num}/{total_chunks} complete: {total_count:,} records")
+
+            except Exception as e:
+                logger.error(f"  Error processing chunk {chunk_num}: {e}")
+                continue
+
+        logger.info(f"=== {mode_label} COMPLETE === Total: {total_records_yielded:,} records from {total_stations} stations in {total_chunks} chunks")
+
+    else:
+        # Standard mode (no station slicing)
+        # Get pagination info
+        total_pages, total_count = get_total_pages(client, endpoint, params)
+
+        if total_count == 0:
+            logger.warning(f"No data found for partition: {year}")
+            return
+
+        logger.info(f"=== {mode_label} ===")
+        logger.info(f"Total records: {total_count:,}")
+        logger.info(f"Total pages: {total_pages}")
+        logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+        logger.info(f"Rate limit: {rate_limit}s per request")
+        logger.info(f"Batch writes: every 10,000 records")
+
+        # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
+        records_yielded = 0
+        for page_num in range(1, total_pages + 1):
+            records = fetch_page(client, endpoint, page_num, params)
+            if records:
+                records_yielded += len(records)
+                yield records
+
+            # Log progress every 10 pages
+            if page_num % 10 == 0:
+                progress_pct = (page_num / total_pages) * 100
+                logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records")
+
+        logger.info(f"=== {mode_label} COMPLETE === Total: {records_yielded:,} records")
 
 
 @dlt.resource(
@@ -342,6 +544,11 @@ def hubeau_chroniques_incremental(
     endpoint = config["resource"]["endpoint"]
     rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
 
+    # Get date filter parameter names from config (with fallback to defaults)
+    date_filter_params = config.get("extraction", {}).get("date_filter_params", {})
+    param_date_debut = date_filter_params.get("date_debut", "date_debut_mesure")
+    param_date_fin = date_filter_params.get("date_fin", "date_fin_mesure")
+
     client = HubeauAPIClient(base_url, rate_limit=rate_limit)
 
     # Determine date range
@@ -356,10 +563,22 @@ def hubeau_chroniques_incremental(
 
     date_fin = datetime.now().strftime("%Y-%m-%d")
 
-    params = {
-        "date_debut_mesure": date_debut,
-        "date_fin_mesure": date_fin
-    }
+    # Use API-specific parameter names from config
+    # Check if this is a single-param API (like prelevements with 'annee')
+    if param_date_fin is None or param_date_fin == "null":
+        # Single parameter: extract year from date_debut (e.g., annee=2024)
+        year = date_debut[:4]  # Extract YYYY from YYYY-MM-DD
+        params = {
+            param_date_debut: year
+        }
+        logger.info(f"Using single year parameter: {param_date_debut}={year}")
+    else:
+        # Date range parameters (standard case)
+        params = {
+            param_date_debut: date_debut,
+            param_date_fin: date_fin
+        }
+        logger.info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
 
     # Get pagination info
     total_pages, total_count = get_total_pages(client, endpoint, params)

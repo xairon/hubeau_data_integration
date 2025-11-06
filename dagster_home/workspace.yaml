@@ -4,6 +4,8 @@
 load_from:
   # Code server distant via GRPC
   # L'orchestrator se connecte aux workers via GRPC
+  # HOT RELOAD: Manual reload via Dagster UI "Reload definitions" button
+  # (auto-reload not supported in this Dagster version)
   - grpc_server:
       host: dlt_worker  # Nom du service Docker
       port: 4000

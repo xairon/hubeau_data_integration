@@ -2,6 +2,16 @@
 # Utilise des variables d'environnement fournies par le CI/CD
 # Pour le développement local, utilisez: docker-compose.local.yml
 # Usage CI/CD: docker compose up -d
+#
+# Configuration conforme à: https://docs.dagster.io/deployment/oss/deployment-options/docker
+#
+# DIFFÉRENCES AVEC L'EXEMPLE DAGSTER (toutes justifiées):
+# 1. ❌ Pas de /var/run/docker.sock monté → Pas nécessaire (QueuedRunCoordinator, pas DockerRunLauncher)
+# 2. ❌ Pas de DAGSTER_CURRENT_IMAGE → Pas nécessaire (runs s'exécutent dans worker existant)
+# 3. ❌ Pas de /tmp/io_manager_storage → Pas nécessaire (resources custom, pas d'IO manager filesystem)
+# 4. ⚠️  Pas de réseau explicite → Fonctionne (Docker Compose crée brgm_default automatiquement)
+# 5. ✅ AMÉLIORATIONS: restart policies, health checks, volumes persistence, depends_on conditions
+# 6. ✅ AMÉLIORATION: "dagster code-server start" au lieu de "dagster api grpc" pour hot reload automatique
 
 services:
   # Base de données métadonnées Dagster
@@ -54,6 +64,7 @@ services:
     environment:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
+      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
       # Database credentials
       PG_HOST: ${PG_HOST}
       PG_PORT: ${PG_PORT}
@@ -77,11 +88,21 @@ services:
     volumes:
       # DEVELOPMENT: Mount source code for hot reload (no rebuild needed)
       # For production/CI, remove this line to use code baked into image
-      - ./src:/app/src:ro
-      - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
-      - ./dagster_home:/app/dagster_home:ro
-    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline"]
+      - ./src:/app/src
+      - ./configs:/app/configs
+      - ./scripts:/app/scripts
+      - ./dagster_home:/app/dagster_home
+      # CSV ingestion: drop CSVs here for auto-ingestion
+      - ./data/csv_inbox:/app/data/csv_inbox
+      - ./data/csv_archive:/app/data/csv_archive
+    # CODE RELOAD BEHAVIOR:
+    # - Using "dagster code-server start" instead of "dagster api grpc"
+    # - This runs user code in a SUBPROCESS (not main process)
+    # - Clicking "Reload definitions" in UI automatically restarts the subprocess
+    # - Fresh Python interpreter on each reload = no cached modules!
+    # - Hot reload workflow: Edit code → Save → Reload in UI → Done ✅
+    # Reference: https://github.com/dagster-io/dagster/discussions/14709
+    command: ["dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-f", "/app/src/hubeau_pipeline/grpc_server.py"]
     expose:
       - "4000"  # GRPC API (internal)
     healthcheck:
@@ -106,6 +127,7 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
+      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST}
       DAGSTER_PG_PORT: ${DAGSTER_PG_PORT}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB}
@@ -123,6 +145,9 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
+      # CSV ingestion (read-only for webserver)
+      - ./data/csv_inbox:/app/data/csv_inbox:ro
+      - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
     ports:
       - "8080:3000"
@@ -145,6 +170,7 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
+      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST}
       DAGSTER_PG_PORT: ${DAGSTER_PG_PORT}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB}
@@ -162,6 +188,9 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
+      # CSV ingestion (read-only for daemon)
+      - ./data/csv_inbox:/app/data/csv_inbox:ro
+      - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-daemon","run"]
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]

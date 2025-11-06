@@ -64,7 +64,7 @@ def ensure_table_exists(table_name: str, conn_params: dict) -> None:
         cursor.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables
-                WHERE table_schema = 'hubeau'
+                WHERE table_schema = 'staging'
                 AND table_name = %s
             )
         """, (table_name,))
@@ -72,12 +72,12 @@ def ensure_table_exists(table_name: str, conn_params: dict) -> None:
         cursor.close()
 
         if exists:
-            logger.debug(f"✓ Table hubeau.{table_name} existe déjà")
+            logger.debug(f"✓ Table staging.{table_name} existe déjà")
             conn.close()
             return
 
         # Table n'existe pas - charger le schéma SQL
-        logger.warning(f"⚠️  Table hubeau.{table_name} n'existe pas - création automatique")
+        logger.warning(f"⚠️  Table staging.{table_name} n'existe pas - création automatique")
 
         schema_path = get_schema_sql_path(table_name)
 
@@ -121,7 +121,7 @@ def ensure_table_exists(table_name: str, conn_params: dict) -> None:
         cursor.close()
         conn.close()
 
-        logger.info(f"✅ Schéma chargé: hubeau.{table_name}")
+        logger.info(f"✅ Schéma chargé: staging.{table_name}")
 
     except psycopg2.Error as e:
         logger.error(f"❌ Erreur SQL lors de la création de {table_name}: {e}")

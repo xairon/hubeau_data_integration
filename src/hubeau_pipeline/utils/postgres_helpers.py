@@ -25,7 +25,7 @@ class PostgresHelper:
         )
 
     @staticmethod
-    def get_table_count(table_name: str, schema: str = "hubeau") -> int:
+    def get_table_count(table_name: str, schema: str = "staging") -> int:
         """Compte les records dans une table"""
         conn = PostgresHelper._get_connection()
         try:
@@ -42,7 +42,7 @@ class PostgresHelper:
     def get_max_date(
         table_name: str,
         date_column: str,
-        schema: str = "hubeau"
+        schema: str = "staging"
     ) -> Optional[str]:
         """Récupère la date max pour chargement incrémental"""
         conn = PostgresHelper._get_connection()
@@ -65,7 +65,7 @@ class PostgresHelper:
             conn.close()
 
     @staticmethod
-    def table_exists(table_name: str, schema: str = "hubeau") -> bool:
+    def table_exists(table_name: str, schema: str = "staging") -> bool:
         """Vérifie si une table existe"""
         conn = PostgresHelper._get_connection()
         try:
@@ -90,7 +90,7 @@ class PostgresHelper:
     def should_refresh_reference_table(
         table_name: str,
         api_count: int,
-        schema: str = "hubeau",
+        schema: str = "staging",
         tolerance: int = 10
     ) -> bool:
         """
@@ -128,7 +128,7 @@ class PostgresHelper:
     def get_partitions_to_load(
         table_name: str,
         date_column: str,
-        schema: str = "hubeau",
+        schema: str = "staging",
         start_year: int = 2010
     ) -> list:
         """

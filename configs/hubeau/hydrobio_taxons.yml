@@ -6,6 +6,10 @@ resource:
   primary_key: null
 extraction:
   default_params: {}
+  # Date filter parameter names for this API
+  date_filter_params:
+    date_debut: date_debut_prelevement  # Start date parameter name
+    date_fin: date_fin_prelevement      # End date parameter name
 performance:
   parallelism: 1
   batch_size: 5000

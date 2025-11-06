@@ -47,8 +47,14 @@ from .bronze import (
 # Monitoring assets
 from .monitoring import all_monitoring_assets
 
-# CSV assets
-from .piezometers_csv import piezometers_csv_data
+# CSV Ingestion: Universal asset (recommended - always available)
+from .csv_universal import ingest_all_csvs_asset
+
+# CSV Ingestion: Generic assets (config-driven - optional)
+from .csv_assets import csv_assets
+
+# Legacy CSV assets (deprecated)
+# from .piezometers_csv import piezometers_csv_data
 
 # ============================================================================
 # ALL ASSETS
@@ -86,10 +92,11 @@ all_bronze_assets = [
     prelevements_chroniques_raw,
 ]
 
-# CSV assets
-all_csv_assets = [
-    piezometers_csv_data,
-]
+# Universal CSV ingestion asset (always available)
+universal_csv_asset = [ingest_all_csvs_asset]
+
+# Generic CSV ingestion assets (dynamically generated from configs)
+all_csv_assets = universal_csv_asset + csv_assets
 
 # All assets (Bronze + Monitoring + CSV)
 all_assets = all_bronze_assets + all_monitoring_assets + all_csv_assets
@@ -99,7 +106,8 @@ __all__ = [
     "all_bronze_assets",
     "all_monitoring_assets",
     "all_csv_assets",
-    "piezometers_csv_data",
+    "ingest_all_csvs_asset",
+    "csv_assets",
     # Bronze Layer Assets
     "temperature_stations_raw",
     "temperature_chroniques_raw",

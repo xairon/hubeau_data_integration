@@ -42,11 +42,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Copy remaining application code
 COPY configs /app/configs
-COPY scripts /app/scripts
 COPY .dlt /app/.dlt
-
-# Make entrypoint executable
-RUN chmod +x /app/scripts/worker_entrypoint.sh
 
 ENV PYTHONPATH=/app/src:/app
 ENV DAGSTER_HOME=/app/dagster_home
@@ -57,5 +53,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
 
 EXPOSE 4000 9091
 
-# Start worker with metrics server
-CMD ["/app/scripts/worker_entrypoint.sh"]
+# Command is defined in docker-compose.yml for flexibility
+# (allows hot reload with --watch flag in development)

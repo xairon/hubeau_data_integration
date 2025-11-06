@@ -19,6 +19,8 @@ Hub'Eau APIs → DLT → PostgreSQL → Dagster (orchestration)
 - ✅ **8 APIs Hub'Eau** : Piézométrie, Hydrométrie, Qualité, Température, etc.
 - ✅ **28 endpoints** configurés
 - ✅ **3 modes d'ingestion** : FULL, YEAR, INCREMENTAL
+- ✅ **Generic CSV Ingestion** : Ingestion config-driven sans code
+- ✅ **Hot Reload** : Modifier le code sans rebuild (2-3 secondes)
 - ✅ **Déduplication automatique** (MERGE/UPSERT)
 - ✅ **Monitoring qualité** données
 - ✅ **CI/CD GitLab** automatique
@@ -34,7 +36,12 @@ brgm/
 │   ├── destinations/         # PostgreSQL
 │   └── definitions.py        # Point d'entrée Dagster
 │
-├── configs/hubeau/           # 28 configurations YAML
+├── configs/
+│   ├── hubeau/               # 28 configurations YAML (APIs)
+│   └── csv_ingestion/        # Configs CSV (ingestion générique)
+├── data/
+│   ├── csv_inbox/            # Drop-zone pour CSVs
+│   └── csv_archive/          # CSVs archivés
 ├── docker/                   # Dockerfiles
 ├── dagster_home/             # Config Dagster
 ├── docs/                     # Documentation
@@ -88,13 +95,28 @@ Voir [Documentation complète](docs/MODES_INGESTION.md)
 
 ## Documentation
 
+### Ingestion Hub'Eau
 - [Modes d'ingestion](docs/MODES_INGESTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Schéma base de données](docs/SCHEMA_BDD.md)
 - [Création automatique de schéma](docs/AUTO_SCHEMA_CREATION.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [APIs Hub'Eau](docs/APIS_HUBEAU.md)
-- [Projet JUNON](docs/PROJET_JUNON_VISION.md)
+
+### Ingestion CSV ⭐ Nouveau !
+- **[Solution Finale - Asset Universel](CSV_FINAL_SOLUTION.md)** ← Commencer ici !
+- [Quick Start - Upload un CSV](QUICKSTART_CSV.md)
+- [Asset Universel (recommandé)](docs/CSV_UNIVERSAL_ASSET.md)
+- [Comment uploader un CSV](docs/CSV_UPLOAD_GUIDE.md)
+- [Système config-driven (optionnel)](docs/CSV_INGESTION_SYSTEM.md)
+- [Migration depuis ancien système](MIGRATION_CSV.md)
+
+### Développement 🔥 Nouveau !
+- **[Hot Reload Fix](HOT_RELOAD_FIX.md)** ← Modifier code sans rebuild !
+- [Guide Hot Reload complet](docs/HOT_RELOAD_GUIDE.md)
+
+### Projet
+- [Vision Projet JUNON](docs/PROJET_JUNON_VISION.md)
 
 ## Troubleshooting
 
