@@ -38,6 +38,13 @@ from .hubeau_jobs import (
     all_chroniques_job,
 )
 
+# Jobs REFERENCE DATA (SANDRE & BD-LISA)
+from .reference_jobs import (
+    sandre_full_load_job,
+    bdlisa_spatial_load_job,
+    reference_data_full_load_job,
+)
+
 all_jobs = [
     # Jobs CSV - removed legacy piezometers_csv_job
     # Now using universal CSV ingestion asset (no dedicated job needed)
@@ -62,6 +69,10 @@ all_jobs = [
     # Jobs GLOBAUX
     all_stations_job,
     all_chroniques_job,
+    # Jobs REFERENCE DATA
+    sandre_full_load_job,
+    bdlisa_spatial_load_job,
+    reference_data_full_load_job,
 ]
 
 __all__ = [
@@ -87,6 +98,10 @@ __all__ = [
     # Jobs GLOBAUX
     "all_stations_job",
     "all_chroniques_job",
+    # Jobs REFERENCE DATA
+    "sandre_full_load_job",
+    "bdlisa_spatial_load_job",
+    "reference_data_full_load_job",
     # Collections
     "all_jobs",
 ]

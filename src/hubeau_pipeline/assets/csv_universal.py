@@ -44,68 +44,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from hubeau_pipeline.utils.dlt_batching import (
+    create_dlt_pipeline,
+    run_dlt_resource,
+)
+
 
 def _create_dlt_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
-    """
-    Create optimized DLT pipeline for CSV ingestion with advanced features.
+    """Compatibilité avec les autres assets via `create_dlt_pipeline`."""
 
-    DLT FEATURES ENABLED:
-    - Automatic schema detection and evolution
-    - Progress logging and monitoring
-    - Error handling and retry mechanisms
-    - Efficient batch processing
-    - Schema normalization
-
-    Args:
-        pipeline_name: Base name of the DLT pipeline
-        context: Dagster context (optional) - used for logging and isolation
-
-    Returns:
-        Configured DLT pipeline instance
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    # Create unique pipeline name per run to avoid conflicts
-    if context and hasattr(context, 'run_id'):
-        unique_pipeline_name = f"{pipeline_name}_{context.run_id[:8]}"
-        logger.info(f"Creating DLT pipeline: {unique_pipeline_name} (run: {context.run_id[:8]})")
-    else:
-        unique_pipeline_name = pipeline_name
-        logger.info(f"Creating DLT pipeline: {unique_pipeline_name}")
-
-    from dlt.destinations import postgres
-
-    # Create PostgreSQL destination with credentials
-    destination = postgres(
-        credentials={
-            "database": os.getenv("PG_DB", "postgres"),
-            "username": os.getenv("PG_USER", "postgres"),
-            "password": os.getenv("PG_PASSWORD"),
-            "host": os.getenv("PG_HOST", "localhost"),
-            "port": int(os.getenv("PG_PORT", "5432"))
-        }
-    )
-
-    # Create pipeline with enhanced configuration
-    pipeline = dlt.pipeline(
-        pipeline_name=unique_pipeline_name,
-        destination=destination,
+    return create_dlt_pipeline(
+        pipeline_name,
+        context=context,
         dataset_name="staging",
-        progress="log",  # Enable progress logging
-        # DLT automatically handles:
-        # - Schema detection and evolution
-        # - Type inference
-        # - Column normalization
-        # - Error handling
-        # - Batch optimization
+        progress="log",
     )
-
-    # Optional: Add hooks for custom logging/monitoring
-    # DLT supports hooks for on_start, on_end, on_load_start, on_load_end, etc.
-    # This can be used for custom metrics, alerts, etc.
-
-    return pipeline
 
 
 def detect_delimiter(csv_path: Path, sample_size: int = 1024) -> str:
@@ -344,50 +297,29 @@ def ingest_single_csv(
     # Create pipeline with enhanced configuration
     pipeline = _create_dlt_pipeline(f"csv_{table_name}", context)
     
-    # Run pipeline - DLT handles:
-    # - Schema detection and evolution
-    # - Type inference
-    # - Error handling and retries
-    # - Progress tracking
+    # Run pipeline - DLT handles schema detection, retries, etc.
     try:
-        load_info = pipeline.run(csv_data())
+        metrics = run_dlt_resource(
+            pipeline=pipeline,
+            resource=csv_data(),
+            context=context,
+            table_name=full_table_name,
+            write_disposition=write_disposition,
+            extra_metadata={
+                "columns_count": len(df.columns),
+                "source_file": csv_filename,
+                "schema": "staging",
+            },
+        )
     except Exception as e:
         context.log.error(f"DLT pipeline failed for {csv_filename}: {e}")
         raise
 
-    # Extract comprehensive metrics from DLT load_info
-    rows_loaded = 0
-    try:
-        # DLT provides detailed metrics in load_info
-        for package in load_info.load_packages:
-            if package.jobs:
-                for job in package.jobs:
-                    # Get items count (rows loaded)
-                    items = job.metrics.get("items", 0)
-                    if isinstance(items, (int, float)):
-                        rows_loaded += int(items)
-                    
-                    # Log additional DLT metrics
-                    context.log.info(f"DLT Job metrics: {job.metrics}")
-    except Exception as e:
-        context.log.warning(f"Could not extract detailed metrics: {e}, using DataFrame row count")
-        rows_loaded = total_rows
+    rows_loaded = metrics.get("rows_loaded", total_rows or 0)
 
-    # Ensure rows_loaded is an integer
-    if not isinstance(rows_loaded, int):
-        rows_loaded = total_rows if total_rows > 0 else 0
-
-    # Log schema information from DLT
-    try:
-        schema = pipeline.default_schema
-        context.log.info(f"DLT Schema: {len(schema.tables)} tables detected")
-        if full_table_name in schema.tables:
-            table_schema = schema.tables[full_table_name]
-            context.log.info(f"Table schema: {len(table_schema.get('columns', {}))} columns")
-    except Exception as e:
-        context.log.debug(f"Could not extract schema info: {e}")
-
-    context.log.info(f"✅ Ingested {csv_filename}: {rows_loaded:,} rows → staging.{full_table_name}")
+    context.log.info(
+        f"✅ Ingested {csv_filename}: {rows_loaded:,} rows → staging.{full_table_name}"
+    )
 
     return {
         "filename": csv_filename,
@@ -395,7 +327,7 @@ def ingest_single_csv(
         "table_name": full_table_name,
         "write_disposition": write_disposition,
         "columns_count": len(df.columns),
-        "status": "success"
+        "status": metrics.get("status", "success"),
     }
 
 

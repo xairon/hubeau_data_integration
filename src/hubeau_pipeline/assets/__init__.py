@@ -1,11 +1,12 @@
 """
-Assets Hub'Eau - Bronze Layer Only
+Assets Hub'Eau - Bronze Layer + Reference Data
 
 Structure:
 - bronze/      : Bronze Layer - Raw data ingestion with DLT standard (22 assets)
 - monitoring/  : Monitoring qualité données (1 asset)
+- reference/   : SANDRE & BD-LISA reference data (17 assets)
 
-Total: 23 assets
+Total: 40+ assets
 """
 
 # ============================================================================
@@ -57,6 +58,21 @@ from .csv_assets import csv_assets
 # from .piezometers_csv import piezometers_csv_data
 
 # ============================================================================
+# REFERENCE DATA ASSETS (SANDRE & BD-LISA)
+# ============================================================================
+from .bronze.sandre_raw_assets import (
+    sandre_analysis_refs,
+    sandre_territorial_refs,
+    sandre_hydro_refs,
+    sandre_intervenants,
+)
+
+from .bronze.bdlisa_raw_assets import (
+    bdlisa_entites,
+    bdlisa_stats,
+)
+
+# ============================================================================
 # ALL ASSETS
 # ============================================================================
 all_bronze_assets = [
@@ -98,14 +114,27 @@ universal_csv_asset = [ingest_all_csvs_asset]
 # Generic CSV ingestion assets (dynamically generated from configs)
 all_csv_assets = universal_csv_asset + csv_assets
 
-# All assets (Bronze + Monitoring + CSV)
-all_assets = all_bronze_assets + all_monitoring_assets + all_csv_assets
+# Reference data assets (SANDRE + BD-LISA)
+all_reference_assets = [
+    # SANDRE (4 multi-assets)
+    sandre_analysis_refs,
+    sandre_territorial_refs,
+    sandre_hydro_refs,
+    sandre_intervenants,
+    # BD-LISA (2 assets)
+    bdlisa_entites,
+    bdlisa_stats,
+]
+
+# All assets (Bronze + Monitoring + CSV + Reference)
+all_assets = all_bronze_assets + all_monitoring_assets + all_csv_assets + all_reference_assets
 
 __all__ = [
     "all_assets",
     "all_bronze_assets",
     "all_monitoring_assets",
     "all_csv_assets",
+    "all_reference_assets",
     "ingest_all_csvs_asset",
     "csv_assets",
     # Bronze Layer Assets
@@ -131,4 +160,11 @@ __all__ = [
     "prelevements_ouvrages_raw",
     "prelevements_points_raw",
     "prelevements_chroniques_raw",
+    # Reference Data Assets
+    "sandre_analysis_refs",
+    "sandre_territorial_refs",
+    "sandre_hydro_refs",
+    "sandre_intervenants",
+    "bdlisa_entites",
+    "bdlisa_stats",
 ]

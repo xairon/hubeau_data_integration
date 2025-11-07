@@ -37,7 +37,7 @@ limited_executor = multiprocess_executor.configured({
 # Définitions centrales
 defs = Definitions(
     assets=all_assets,
-    jobs=all_jobs,  # 18 jobs: 8 stations + 8 chroniques + 2 globaux (Bronze layer)
+    jobs=all_jobs,  # 21 jobs: 8 stations + 8 chroniques + 2 globaux (Bronze layer) + 3 reference data
     schedules=all_schedules,  # Empty - schedules removed, manual materialization only
     sensors=all_sensors,  # CSV auto-ingestion sensors
     resources={
