@@ -1,12 +1,10 @@
 """
-Assets Hub'Eau - Bronze Layer + Reference Data
+Hub'Eau Assets - Bronze Layer + CSV Ingestion + Reference Data
 
-Structure:
-- bronze/      : Bronze Layer - Raw data ingestion with DLT standard (22 assets)
-- monitoring/  : Monitoring qualité données (1 asset)
-- reference/   : SANDRE & BD-LISA reference data (17 assets)
-
-Total: 40+ assets
+Bronze: 22 Hub'Eau API assets (stations + chroniques)
+CSV: Universal CSV ingestion + config-driven assets
+Reference: SANDRE & BD-LISA reference data
+Monitoring: Data quality checks
 """
 
 # ============================================================================

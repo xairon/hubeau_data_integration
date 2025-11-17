@@ -1,176 +1,255 @@
 # Hub'Eau Data Pipeline
 
-Pipeline simple d'ingestion des données hydrologiques françaises depuis les APIs Hub'Eau vers PostgreSQL.
+Pipeline d'ingestion de données hydrologiques françaises depuis les APIs Hub'Eau vers PostgreSQL, orchestré par Dagster.
 
-## Architecture
+## Aperçu
 
-```
-Hub'Eau APIs → DLT → PostgreSQL → Dagster (orchestration)
-```
+Ce projet ingère automatiquement les données de 8 APIs Hub'Eau (piézométrie, hydrométrie, qualité des eaux, etc.) dans PostgreSQL pour analyse et exploitation. Il supporte également l'ingestion de fichiers CSV et de données de référence (SANDRE, BD-LISA).
 
-**Technologies** :
-- **Orchestration** : Dagster
-- **Ingestion** : DLT (Data Load Tool)
-- **Base de données** : PostgreSQL
-- **Déploiement** : Docker + GitLab CI/CD
+**Architecture:** Hub'Eau APIs → DLT → PostgreSQL (orchestré par Dagster)
 
 ## Fonctionnalités
 
-- ✅ **8 APIs Hub'Eau** : Piézométrie, Hydrométrie, Qualité, Température, etc.
-- ✅ **28 endpoints** configurés
-- ✅ **3 modes d'ingestion** : FULL, YEAR, INCREMENTAL
-- ✅ **Generic CSV Ingestion** : Ingestion config-driven sans code
-- ✅ **Hot Reload** : Modifier le code sans rebuild (2-3 secondes)
-- ✅ **Déduplication automatique** (MERGE/UPSERT)
-- ✅ **Monitoring qualité** données
-- ✅ **CI/CD GitLab** automatique
+- **8 APIs Hub'Eau** : 22 endpoints configurés (stations + chroniques)
+- **Modes d'ingestion** : FULL, YEAR (2020-2025), INCREMENTAL
+- **CSV Ingestion** : Système config-driven sans code
+- **Données de référence** : SANDRE & BD-LISA
+- **Hot Reload** : Modification code en 2-3 secondes (sans rebuild Docker)
+- **Déduplication** : MERGE/UPSERT automatique
+- **CI/CD** : Déploiement automatique via GitLab
+
+## Démarrage Rapide
+
+### Prérequis
+
+- Docker & Docker Compose
+- 4 GB RAM minimum
+
+### Installation
+
+```bash
+# 1. Cloner le projet
+git clone <repository-url>
+cd brgm
+
+# 2. Configuration
+cp .env.example .env
+# Éditer .env avec vos credentials PostgreSQL
+
+# 3. Démarrage
+docker compose up -d
+
+# 4. Accès Web UI
+open http://localhost:8080
+```
+
+**Interfaces disponibles:**
+- Dagster UI : http://localhost:8080
+- Adminer (PostgreSQL) : http://localhost:8081
+- Portainer (Docker) : http://localhost:9000
+
+### Premier Pipeline
+
+Dans l'interface Dagster (http://localhost:8080) :
+
+1. Aller dans **Assets**
+2. Sélectionner un asset (ex: `piezometry_stations_raw`)
+3. Cliquer **Materialize**
 
 ## Structure du Projet
 
 ```
 brgm/
-├── src/hubeau_pipeline/      # Code source
-│   ├── assets/               # Assets Dagster
-│   ├── jobs/                 # Jobs d'orchestration
-│   ├── sensors/              # Monitoring
-│   ├── destinations/         # PostgreSQL
-│   └── definitions.py        # Point d'entrée Dagster
+├── src/hubeau_pipeline/          # Code source
+│   ├── assets/                   # Assets Dagster (Bronze layer)
+│   │   ├── bronze/               # Hub'Eau APIs assets (22)
+│   │   ├── csv_universal.py      # CSV ingestion
+│   │   └── monitoring/           # Data quality
+│   ├── jobs/                     # Jobs d'orchestration
+│   ├── sensors/                  # Sensors (CSV auto-detect)
+│   ├── sources/                  # DLT sources
+│   └── definitions.py            # Point d'entrée Dagster
 │
-├── configs/
-│   ├── hubeau/               # 28 configurations YAML (APIs)
-│   └── csv_ingestion/        # Configs CSV (ingestion générique)
-├── data/
-│   ├── csv_inbox/            # Drop-zone pour CSVs
-│   └── csv_archive/          # CSVs archivés
-├── docker/                   # Dockerfiles
-├── dagster_home/             # Config Dagster
-├── docs/                     # Documentation
-└── scripts/                  # Scripts maintenance
+├── configs/                      # Configuration YAML
+│   ├── hubeau/                   # 22 configs Hub'Eau
+│   └── csv_ingestion/            # Configs CSV
+│
+├── data/                         # Données
+│   ├── csv_inbox/                # Dépôt CSV (auto-ingestion)
+│   └── csv_archive/              # CSV archivés
+│
+├── docker/                       # Dockerfiles
+├── docs/                         # Documentation
+└── scripts/                      # Scripts maintenance
 ```
-
-## Démarrage Rapide
-
-### Développement Local
-
-```bash
-# 1. Configuration
-cp .env.example .env
-# Éditer .env avec vos credentials PostgreSQL
-
-# 2. Démarrage
-docker-compose up -d
-
-# 3. Accès Dagster UI
-open http://localhost:8080
-```
-
-### Production
-
-Le déploiement se fait automatiquement via GitLab CI/CD sur push vers `main`.
-
-## Modes d'Ingestion
-
-Chaque asset peut être exécuté en 3 modes :
-
-| Mode | Description | Usage |
-|------|-------------|-------|
-| **FULL** | Tout l'historique | Première installation |
-| **YEAR** | Année spécifique | Backfill ciblé |
-| **INCREMENTAL** | Derniers N jours | Mise à jour quotidienne |
-
-**Configuration** : Via Dagster UI Launchpad ou CLI
-
-Voir [Documentation complète](docs/MODES_INGESTION.md)
 
 ## APIs Hub'Eau Supportées
 
-- **Piézométrie** : Niveaux nappes phréatiques
-- **Hydrométrie** : Hauteur et débit cours d'eau
-- **Qualité rivières** : Analyses physicochimiques
-- **Qualité nappes** : Analyses eaux souterraines
-- **Température** : Température cours d'eau
-- **Écoulements** : État cours d'eau (assec, etc.)
-- **Hydrobiologie** : Indices biologiques
-- **Prélèvements** : Volumes prélevés
+| API | Stations | Chroniques | Description |
+|-----|----------|------------|-------------|
+| Piézométrie | ✓ | ✓ | Niveaux nappes phréatiques |
+| Hydrométrie | ✓ | ✓ | Hauteur/débit cours d'eau |
+| Température | ✓ | ✓ | Température cours d'eau |
+| Qualité rivières | ✓ | ✓ | Analyses physicochimiques |
+| Qualité nappes | ✓ | ✓ | Analyses eaux souterraines |
+| Hydrobiologie | ✓ | ✓ | Indices biologiques |
+| Écoulements | ✓ | ✓ | État cours d'eau (assec) |
+| Prélèvements | ✓ | ✓ | Volumes prélevés |
 
-## Documentation
+**Total : 22 assets** (11 stations + 11 chroniques)
 
-### Ingestion Hub'Eau
-- [Modes d'ingestion](docs/MODES_INGESTION.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Schéma base de données](docs/SCHEMA_BDD.md)
-- [Création automatique de schéma](docs/AUTO_SCHEMA_CREATION.md)
-- [Configuration](docs/CONFIGURATION.md)
-- [APIs Hub'Eau](docs/APIS_HUBEAU.md)
+## Modes d'Ingestion
 
-### Ingestion CSV ⭐ Nouveau !
-- **[Solution Finale - Asset Universel](CSV_FINAL_SOLUTION.md)** ← Commencer ici !
-- [Quick Start - Upload un CSV](QUICKSTART_CSV.md)
-- [Asset Universel (recommandé)](docs/CSV_UNIVERSAL_ASSET.md)
-- [Comment uploader un CSV](docs/CSV_UPLOAD_GUIDE.md)
-- [Système config-driven (optionnel)](docs/CSV_INGESTION_SYSTEM.md)
-- [Migration depuis ancien système](MIGRATION_CSV.md)
+### 1. Stations (FULL)
 
-### Développement 🔥 Nouveau !
-- **[Hot Reload Fix](HOT_RELOAD_FIX.md)** ← Modifier code sans rebuild !
-- [Guide Hot Reload complet](docs/HOT_RELOAD_GUIDE.md)
+Remplace toutes les données à chaque exécution.
 
-### Projet
-- [Vision Projet JUNON](docs/PROJET_JUNON_VISION.md)
+```yaml
+# Exemple : piezometry_stations_raw
+Mode: FULL
+Partitions: Non
+Usage: Première installation, refresh complet
+```
+
+### 2. Chroniques (Partitioned)
+
+3 modes disponibles via partitions :
+
+| Partition | Description | Usage |
+|-----------|-------------|-------|
+| **full** | Tout l'historique | Installation initiale |
+| **2020-2025** | Année spécifique | Backfill ciblé |
+| *(sans partition)* | Incremental (N derniers jours) | MAJ quotidienne |
+
+**Configuration dans Dagster UI :** Launchpad → Partition → Sélectionner
+
+## Ingestion CSV
+
+### Quick Start
+
+```yaml
+# 1. Créer configs/csv_ingestion/mon_fichier.yml
+source:
+  file_pattern: "mon_fichier*.csv"
+destination:
+  table_name: mon_fichier
+  write_disposition: replace
+  primary_key: [id]
+```
+
+```bash
+# 2. Déposer le CSV
+docker cp mon_fichier.csv brgm-dlt-worker:/app/data/csv_inbox/
+
+# 3. Matérialiser l'asset "csv_mon_fichier" dans Dagster UI
+```
+
+**Asset automatiquement généré** : `csv_mon_fichier` → Table : `staging.staging_mon_fichier`
+
+Voir [configs/csv_ingestion/README.md](configs/csv_ingestion/README.md) pour plus de détails.
+
+## Développement
+
+### Hot Reload
+
+Modifiez le code sans rebuild Docker :
+
+1. Éditer `src/hubeau_pipeline/**/*.py`
+2. Sauvegarder
+3. Dans Dagster UI : cliquer **Reload definitions** (en haut à droite)
+4. **Prêt en 2-3 secondes** ✓
+
+### Structure d'un Asset
+
+```python
+# src/hubeau_pipeline/assets/bronze/dlt_assets.py
+@asset(compute_kind="dlt", group_name="piezometry")
+def piezometry_stations_raw(context):
+    """Piezometry stations - FULL load"""
+    config = yaml.safe_load(open("configs/hubeau/piezometry_stations.yml"))
+    pipeline = create_dlt_pipeline("hubeau_piezometry_stations", context)
+    return run_dlt_resource(pipeline, hubeau_stations(config), context)
+```
+
+### Ajouter une API Hub'Eau
+
+1. Créer `configs/hubeau/nouvelle_api.yml` (copier un exemple existant)
+2. Ajouter asset dans `src/hubeau_pipeline/assets/bronze/dlt_assets.py`
+3. Ajouter job dans `src/hubeau_pipeline/jobs/hubeau_jobs.py`
+4. Reload dans Dagster UI
+
+## Production
+
+### Déploiement CI/CD
+
+Le déploiement est automatique via GitLab CI sur push vers `main`.
+
+**Variables GitLab CI à configurer** (Settings → CI/CD → Variables) :
+- `PG_HOST`, `PG_DB`, `PG_USER`, `PG_PASSWORD`
+- `DAGSTER_PG_PASSWORD`
+
+Voir [docs/GITLAB_CI_VARIABLES_SETUP.md](docs/GITLAB_CI_VARIABLES_SETUP.md)
+
+### Déploiement Manuel
+
+```bash
+# Build
+docker compose build
+
+# Démarrage
+docker compose up -d
+
+# Vérification
+docker compose ps
+docker compose logs -f dlt_worker
+```
 
 ## Troubleshooting
 
 ### "Database directory appears to contain a database"
 
-✅ **Ce n'est PAS une erreur !**
-
-Ce message PostgreSQL est **normal** et signifie que la base existe déjà. PostgreSQL skip l'init, c'est attendu.
-
-**Actions** :
-- Si les conteneurs démarrent → Tout va bien, ignorer le message
-- Si le worker `brgm-dlt-worker` est unhealthy → Vérifier les logs : `docker compose logs dlt_worker`
+**Ce n'est PAS une erreur.** Message normal de PostgreSQL au démarrage quand la DB existe déjà. Si les conteneurs démarrent, tout va bien.
 
 ### Container `dlt_worker` unhealthy
 
-**Causes possibles** :
-1. Port 4000 déjà utilisé
-2. Erreur Python au démarrage
-3. PostgreSQL pas accessible
-
-**Diagnostic** :
 ```bash
+# Diagnostic
 docker compose logs dlt_worker
-docker compose ps
+
+# Solution
+docker compose restart dlt_worker
 ```
 
-**Solution** :
+### Reset complet
+
+**ATTENTION : Supprime toutes les données**
+
 ```bash
-docker compose down
+docker compose down -v
 docker compose up -d
 ```
 
-### Reset complet de la base
+## Documentation
 
-**ATTENTION** : Supprime toutes les données !
+- [Architecture](docs/ARCHITECTURE.md) - Architecture détaillée
+- [Configuration](docs/CONFIGURATION.md) - Variables d'environnement
+- [APIs Hub'Eau](docs/APIS_HUBEAU.md) - Liste complète des endpoints
+- [Schéma BDD](docs/SCHEMA_BDD.md) - Structure PostgreSQL
+- [CSV Ingestion](configs/csv_ingestion/README.md) - Guide CSV complet
+- [GitLab CI/CD](docs/GITLAB_CI_VARIABLES_SETUP.md) - Configuration CI/CD
 
-```bash
-docker compose down -v  # Supprime volumes Docker
-docker compose up -d    # Recréation complète
-```
+## Technologies
 
-### Vérification santé services
+- **Orchestration** : Dagster 1.11.14
+- **Ingestion** : DLT 0.4.12 (Data Load Tool)
+- **Base de données** : PostgreSQL 16 + PostGIS
+- **Conteneurisation** : Docker + Docker Compose
+- **CI/CD** : GitLab CI/CD
 
-```bash
-# Script automatique
-./scripts/check_services.sh
-
-# Manuel
-docker compose ps
-
-# Logs d'un service
-docker compose logs -f dlt_worker
-```
-
-## License
+## Licence
 
 Propriétaire - BRGM
+
+---
+
+**Besoin d'aide ?** Voir [docs/](docs/) pour la documentation complète.

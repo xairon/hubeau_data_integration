@@ -1,18 +1,10 @@
 """
-Jobs Dagster - Bronze Layer
+Dagster Jobs - Hub'Eau Bronze Layer + Reference Data
 
-Jobs for Hub'Eau Bronze layer assets
-
-ARCHITECTURE:
-- *_stations jobs: FULL load (no partitions)
-- *_chroniques jobs: Partitioned load (MODE_PARTITIONS: "full", "2024", etc.)
-
-NOTE: Legacy CSV job removed - replaced by universal CSV ingestion asset
-      See: assets/csv_universal.py (ingest_all_csvs_asset)
+Stations jobs: FULL load (no partitions)
+Chroniques jobs: Partitioned load (full, 2020-2025)
+Reference jobs: SANDRE & BD-LISA data
 """
-
-# Legacy CSV job removed - now using universal CSV ingestion
-# from .piezometers_job import piezometers_csv_job
 
 from .hubeau_jobs import (
     # Jobs STATIONS (no partitions)
@@ -46,8 +38,6 @@ from .reference_jobs import (
 )
 
 all_jobs = [
-    # Jobs CSV - removed legacy piezometers_csv_job
-    # Now using universal CSV ingestion asset (no dedicated job needed)
     # Jobs STATIONS (no partitions)
     piezometry_stations_job,
     quality_rivers_stations_job,
@@ -76,7 +66,6 @@ all_jobs = [
 ]
 
 __all__ = [
-    # Jobs CSV - removed (using universal CSV asset)
     # Jobs STATIONS (no partitions)
     "piezometry_stations_job",
     "quality_rivers_stations_job",

@@ -2,7 +2,7 @@
 
 ## Vue d'Ensemble
 
-Pipeline simple d'ingestion des données Hub'Eau vers PostgreSQL avec orchestration Dagster.
+Pipeline d'ingestion des données Hub'Eau vers PostgreSQL avec orchestration Dagster.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -13,27 +13,27 @@ Pipeline simple d'ingestion des données Hub'Eau vers PostgreSQL avec orchestrat
                    ▼
 ┌─────────────────────────────────────────────┐
 │              DLT (Ingestion)                │
-│  - Format CSV                               │
-│  - Déduplication (MERGE)                    │
+│  - Extraction API → CSV                     │
+│  - Déduplication (MERGE/UPSERT)             │
 │  - Retry automatique                        │
+│  - 3 modes: FULL / YEAR / INCREMENTAL       │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
 │           PostgreSQL Database               │
-│  Schema: hubeau                             │
-│  - Tables stations (9)                      │
-│  - Tables chroniques (11)                   │
-│  - Métadonnées DLT (3)                      │
+│  Schema: staging (par défaut)               │
+│  - 22 tables Hub'Eau                        │
+│  - Tables référence (SANDRE, BD-LISA)       │
+│  - Métadonnées DLT (_dlt_*)                 │
 └──────────────────┬──────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
 │        Dagster (Orchestration)              │
 │  - UI Web (port 8080)                       │
-│  - Jobs par API                             │
-│  - Sensors monitoring                       │
-│  - Schedules automatiques                   │
+│  - 21 jobs (16 Hub'Eau + 3 référence + 2)   │
+│  - 2 sensors (CSV auto-ingestion)           │
 └─────────────────────────────────────────────┘
 ```
 
@@ -50,53 +50,69 @@ Pipeline simple d'ingestion des données Hub'Eau vers PostgreSQL avec orchestrat
 - Rate limiting
 - 3 modes : FULL / YEAR / INCREMENTAL
 
-**Configuration** : 28 fichiers YAML dans `configs/hubeau/`
+**Configuration** : 22 fichiers YAML dans `configs/hubeau/`
 
 ### 2. PostgreSQL - Stockage
 
 **Rôle** : Base de données unique
 
 **Structure** :
-- Schema `hubeau` avec toutes les données
-- Tables pré-créées via script SQL
-- Index optimisés (temporels, géographiques)
-- Métadonnées DLT (_dlt_loads, _dlt_pipeline_state)
+- Schema `staging` (par défaut) pour données Hub'Eau
+- 22 tables Hub'Eau (11 stations + 11 chroniques)
+- Tables référence : SANDRE + BD-LISA
+- Métadonnées DLT : `_dlt_loads`, `_dlt_pipeline_state`, `_dlt_version`
+- PostGIS activé pour données spatiales
 
-**Initialisation** : Script `/docker/init-scripts/postgres/01_create_schema.sql`
+**Initialisation** : Script `/docker/init-scripts/postgres/01_init_minimal.sql`
+
+**Tables créées automatiquement** par DLT au premier run (pas de script SQL requis)
 
 ### 3. Dagster - Orchestration
 
 **Rôle** : Planification et monitoring
 
 **Composants** :
-- Webserver UI (http://localhost:8080)
-- Daemon (exécution jobs/sensors)
-- Jobs par API (11 jobs)
-- Sensors (alertes, monitoring)
+- **Webserver UI** : http://localhost:8080
+- **Daemon** : Exécution jobs et sensors
+- **Worker** : Exécution des pipelines DLT
 
-**Base métadonnées** : PostgreSQL Dagster (séparée)
+**Jobs définis** : 21 jobs
+- 8 jobs stations (par API) : FULL load
+- 8 jobs chroniques (par API) : Partitioned (full, 2020-2025)
+- 2 jobs globaux : `all_stations_bronze`, `all_chroniques_bronze`
+- 3 jobs référence : SANDRE, BD-LISA, full load
+
+**Sensors** : 2 sensors
+- `csv_file_watcher_sensor` : Détection nouveaux CSV dans inbox
+- `csv_archive_cleaner_sensor` : Archivage CSV traités
+
+**Base métadonnées** : PostgreSQL séparé (dagster_postgres)
 
 ### 4. Docker - Déploiement
 
 **Services** :
 ```yaml
-- postgres           # Base données Hub'Eau
+- postgres           # Base Hub'Eau (PostGIS, port 5432)
 - dagster_postgres   # Base métadonnées Dagster
-- dagster_webserver  # UI Dagster
-- dagster_daemon     # Daemon Dagster
-- worker             # Worker DLT
+- dlt_worker         # Worker DLT (exécution pipelines)
+- dagster_webserver  # UI Dagster (port 8080)
+- dagster_daemon     # Daemon (jobs/sensors)
+- adminer            # PostgreSQL UI (port 8081)
+- portainer          # Docker UI (port 9000)
 ```
 
 ## Flux de Données
 
-### Ingestion Standard
+### Ingestion Hub'Eau
 
 ```
-1. Dagster Job déclenché (manuel ou automatique)
-2. DLT récupère données depuis Hub'Eau API
-3. Transformation CSV
-4. Chargement PostgreSQL (MERGE)
-5. Dagster log résultats
+1. Job Dagster déclenché (manuel ou schedule)
+2. Asset Dagster exécuté
+3. DLT source appelé (hubeau_stations ou hubeau_chroniques_*)
+4. Requêtes API Hub'Eau (pagination automatique)
+5. Transformation données → format DLT
+6. Chargement PostgreSQL (MERGE/UPSERT)
+7. Dagster log métriques (rows loaded, duration)
 ```
 
 ### Modes d'Ingestion
@@ -111,7 +127,7 @@ Voir [CONFIGURATION.md](CONFIGURATION.md)
 
 ### Configurations YAML
 
-28 fichiers dans `configs/hubeau/` :
+**Hub'Eau** : 22 fichiers dans `configs/hubeau/`
 - 1 fichier = 1 endpoint API
 - Configuration endpoint, pagination, filtres
 - Clés primaires pour déduplication
@@ -123,45 +139,111 @@ base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
 path: /chroniques
 primary_keys: [code_bss, date_mesure]
 replication_key: date_mesure
+page_size: 20000
 ```
+
+**CSV** : Fichiers dans `configs/csv_ingestion/`
+- Configuration par CSV
+- Pattern de fichier, table destination, primary keys
+
+## Assets Dagster
+
+### Bronze Layer (22 assets Hub'Eau)
+
+**Stations** (11 assets) :
+- `piezometry_stations_raw`
+- `hydrometry_sites_raw`, `hydrometry_stations_raw`
+- `quality_rivers_stations_raw`
+- `quality_groundwater_stations_raw`
+- `temperature_stations_raw`
+- `hydrobio_stations_raw`
+- `ecoulement_stations_raw`, `ecoulement_campagnes_raw`
+- `prelevements_ouvrages_raw`, `prelevements_points_raw`
+
+**Chroniques** (11 assets) :
+- `piezometry_chroniques_raw`
+- `hydrometry_obs_elab_raw`
+- `quality_rivers_analyses_raw`, `quality_rivers_conditions_raw`, `quality_rivers_operations_raw`
+- `quality_groundwater_analyses_raw`
+- `temperature_chroniques_raw`
+- `hydrobio_indices_raw`, `hydrobio_taxons_raw`
+- `ecoulement_observations_raw`
+- `prelevements_chroniques_raw`
+
+### Reference Data (6 multi-assets)
+
+**SANDRE** : 4 multi-assets (17 tables)
+**BD-LISA** : 2 assets (2 tables)
+
+Voir [SANDRE_BDLISA_INTEGRATION.md](SANDRE_BDLISA_INTEGRATION.md)
+
+### CSV Ingestion
+
+- `ingest_all_csvs_asset` : Asset universel pour tous CSVs
+- `csv_*` assets : Générés dynamiquement depuis configs
 
 ## Jobs Dagster
 
-Un job par API :
-- `piezometry_job`
-- `quality_rivers_job`
-- `hydrometry_job`
-- `temperature_job`
-- `ecoulement_job`
-- `hydrobio_job`
-- `prelevements_job`
-- `quality_groundwater_job`
+### Jobs par API (16 jobs)
 
-Jobs globaux :
-- `all_stations_job` (9 assets stations)
-- `all_chroniques_job` (11 assets chroniques)
-- `all_hubeau_job` (tous assets)
+**Stations** (8 jobs) :
+- `piezometry_stations_bronze`
+- `quality_rivers_stations_bronze`
+- `quality_groundwater_stations_bronze`
+- `hydrometry_stations_bronze`
+- `temperature_stations_bronze`
+- `hydrobio_stations_bronze`
+- `ecoulement_stations_bronze`
+- `prelevements_stations_bronze`
 
-## Sensors
+**Chroniques** (8 jobs) :
+- `piezometry_chroniques_bronze`
+- `quality_rivers_chroniques_bronze`
+- `quality_groundwater_chroniques_bronze`
+- `hydrometry_chroniques_bronze`
+- `temperature_chroniques_bronze`
+- `hydrobio_chroniques_bronze`
+- `ecoulement_chroniques_bronze`
+- `prelevements_chroniques_bronze`
 
-**Monitoring** :
-- `error_detection_sensor` : Détection erreurs
-- `pipeline_failure_alert_sensor` : Alertes échecs
-- `long_running_pipeline_sensor` : Pipelines lents
-- `repeated_failure_sensor` : Échecs répétés
+### Jobs Globaux (2 jobs)
+
+- `all_stations_bronze` : 11 assets stations
+- `all_chroniques_bronze` : 11 assets chroniques (partitioned)
+
+### Jobs Référence (3 jobs)
+
+- `sandre_full_load_job` : Toutes tables SANDRE
+- `bdlisa_spatial_load_job` : Tables BD-LISA
+- `reference_data_full_load_job` : Tout (SANDRE + BD-LISA)
 
 ## Monitoring
 
-**Dagster UI** :
-- Vue d'ensemble des runs
-- Logs détaillés par asset
-- Métriques d'exécution
-- Graphe de dépendances
+### Dagster UI (http://localhost:8080)
 
-**PostgreSQL** :
-- Adminer (http://localhost:8081)
-- Requêtes SQL directes
+- Vue d'ensemble runs (succès/échec)
+- Logs détaillés par asset
+- Métriques d'exécution (duration, rows loaded)
+- Graphe de dépendances assets
+- Sensors status
+- Partitions status
+
+### PostgreSQL
+
+**Adminer** : http://localhost:8081
+- Connexion : postgres / postgres / <password>
+- Requêtes SQL
 - Volumétrie tables
+
+**Métriques DLT** :
+```sql
+-- Runs DLT récents
+SELECT * FROM staging._dlt_loads
+ORDER BY inserted_at DESC LIMIT 10;
+
+-- État pipelines
+SELECT * FROM staging._dlt_pipeline_state;
+```
 
 ## Déploiement
 
@@ -171,99 +253,79 @@ Jobs globaux :
 docker-compose up -d
 ```
 
-Services démarrés :
-- PostgreSQL données (port 5432)
+**Services démarrés** :
+- PostgreSQL Hub'Eau (port 5432)
 - PostgreSQL Dagster (interne)
 - Dagster Webserver (port 8080)
 - Dagster Daemon
-- Worker DLT
+- DLT Worker
 - Adminer (port 8081)
+- Portainer (port 9000)
 
 ### Production (GitLab CI/CD)
 
-Push sur `main` → déploiement automatique VPS
+Push sur `main` → déploiement automatique
 
-Pipeline :
-1. Build images Docker
-2. Deploy sur VPS
-3. Health checks
-4. Rollback si échec
+**Pipeline GitLab** :
+1. Build images Docker (worker + orchestrator)
+2. Push images vers registry
+3. Deploy sur serveur
+4. Health checks
+5. Rollback si échec
 
-Voir [.gitlab-ci.yml](../.gitlab-ci.yml)
+Voir [GITLAB_CI_VARIABLES_SETUP.md](GITLAB_CI_VARIABLES_SETUP.md)
 
 ## Optimisations
 
 ### Performance
-- Exécution séquentielle (1 asset à la fois) pour éviter OOM
-- Index PostgreSQL optimisés
-- Rate limiting API Hub'Eau
-- Batch size adaptatif
+
+- **Parallélisme limité** : Max 3 assets concurrents (évite OOM)
+- **Rate limiting** : 0.3s entre requêtes API Hub'Eau
+- **Batch size adaptatif** : Pagination optimisée par API
+- **COPY PostgreSQL** : Bulk insert (100k rows en 1-2s)
 
 ### Résilience
-- Retry automatique sur erreurs
-- Health checks Docker
-- Logs structurés
-- État DLT persisté
 
-## Sécurité
+- **Retry automatique** : DLT retry sur erreurs API (3 tentatives)
+- **Health checks** : Docker containers monitored
+- **Logs structurés** : Dagster + DLT logging
+- **État persisté** : DLT state pour incremental
 
-- Mots de passe dans GitLab CI/CD Variables (masked)
+### Sécurité
+
+- Mots de passe dans `.env` (gitignored)
+- GitLab CI/CD Variables (masked)
 - Pas de secrets dans le code
 - Réseau Docker interne
 - `.dlt/*.toml` gitignored
 
-## Création Automatique de Tables
+## Tables PostgreSQL
 
-### PostgresBulkDestinationV2
+### Création Automatique
 
-DLT créera automatiquement les tables lors du premier run :
+**DLT gère automatiquement** :
+1. Création tables au premier run
+2. Inférence types depuis données
+3. Ajout colonnes si nouveau champ API
+4. Gestion métadonnées (`_dlt_id`, `_dlt_load_id`)
 
-1. **Pandas infère les types** depuis les CSV Hub'Eau
-2. **Table créée** avec colonnes TEXT (ultra-safe)
-3. **COPY bulk** des données (100k records en 1-2s)
-4. **Auto-fix** si erreur de type (ALTER COLUMN → TEXT)
+**Aucun script SQL requis** pour tables Hub'Eau.
 
-**Localisation** : `src/hubeau_pipeline/destinations/postgres_optimized_v2.py:282`
+### Schema
 
-**Stratégie ULTRA-SAFE** :
-- Tout est créé en TEXT sauf datetime évident
-- Zéro erreur COPY (text accepte tout)
-- Pas de retries multiples
-- Performance optimale
+**Par défaut** : `staging`
 
-**Documentation détaillée** : Voir [AUTO_SCHEMA_CREATION.md](AUTO_SCHEMA_CREATION.md)
-
-### Gestion Base Existante
-
-✅ **Message PostgreSQL normal** : "_Database directory appears to contain a database; Skipping initialization_"
-
-**Explication** :
-- PostgreSQL détecte que `/var/lib/postgresql/data` existe déjà
-- Les scripts d'init (`01_init_minimal.sql`) sont skip
-- **Ce n'est PAS une erreur !** C'est le comportement standard.
-
-✅ **Comportement attendu** :
-- Si schéma `hubeau` existe → On l'utilise directement
-- Si tables existent → MERGE/UPSERT des nouvelles données
-- Si tables n'existent pas → Création automatique au premier run
-
-❌ **Seul cas problématique** :
-- Schéma `hubeau` n'existe pas → Erreur DLT
-- **Solution** : Exécuter manuellement `01_init_minimal.sql` ou reset PostgreSQL
-
-**Vérification santé base** :
+**Configurable via** :
 ```bash
-# Accéder PostgreSQL
-docker exec -it brgm-postgres psql -U postgres -d postgres
-
-# Vérifier schéma hubeau
-\dn hubeau
-
-# Lister tables (si données déjà chargées)
-\dt hubeau.*
-
-# Si aucune table: NORMAL! Tables créées au premier run d'asset
+# .env
+DLT_BRONZE_DATASET=staging  # ou "hubeau", "bronze", etc.
 ```
+
+### Métadonnées DLT
+
+- `_dlt_loads` : Historique chargements
+- `_dlt_pipeline_state` : État incremental
+- `_dlt_version` : Version DLT
 
 ## Troubleshooting
 
@@ -271,19 +333,9 @@ docker exec -it brgm-postgres psql -U postgres -d postgres
 
 ✅ **Ce n'est PAS une erreur !**
 
-Ce message PostgreSQL est **normal** et signifie que la base existe déjà. PostgreSQL skip l'init, c'est attendu.
-
-**Actions** :
-- Si les conteneurs démarrent → Tout va bien, ignorer le message
-- Si le worker `brgm-dlt-worker` est unhealthy → Vérifier les logs
+Message PostgreSQL normal au redémarrage. La base existe déjà, scripts d'init skippés.
 
 ### Container `brgm-dlt-worker` unhealthy
-
-**Causes possibles** :
-1. Port 4000 déjà utilisé
-2. Erreur Python au démarrage
-3. PostgreSQL pas accessible
-4. Dagster module non trouvé
 
 **Diagnostic** :
 ```bash
@@ -291,55 +343,53 @@ docker compose logs dlt_worker
 docker compose ps
 ```
 
+**Causes fréquentes** :
+- Port 4000 déjà utilisé
+- PostgreSQL pas accessible
+- Erreur Python au démarrage
+
 **Solution** :
 ```bash
-docker compose down
-docker compose up -d
+docker compose restart dlt_worker
 ```
 
-### Erreur : "could not translate host name postgres"
-→ Vérifier service `postgres` dans docker-compose
+### Erreur DLT connection
 
-### Erreur : DLT connection failed
-→ Vérifier variables `PG_HOST`, `PG_PASSWORD` dans `.env`
+Vérifier variables dans `.env` :
+```bash
+PG_HOST=postgres
+PG_PASSWORD=xxx
+DESTINATION__POSTGRES__CREDENTIALS__HOST=postgres
+```
 
-### Erreur : Dagster UI inaccessible
-→ Vérifier `dagster_webserver` container status
+### Reset complet
 
-### Reset complet de la base
+**ATTENTION : Perte données**
 
 ```bash
-# Supprimer volumes Docker (ATTENTION: perte données)
 docker compose down -v
-
-# Recréation complète
 docker compose up -d
 ```
 
 ### Logs
-```bash
-# Daemon Dagster
-docker compose logs -f dagster_daemon
 
+```bash
 # Worker DLT
 docker compose logs -f dlt_worker
 
-# PostgreSQL Hub'Eau
+# Daemon Dagster
+docker compose logs -f dagster_daemon
+
+# PostgreSQL
 docker compose logs -f postgres
 
-# PostgreSQL Dagster
-docker compose logs -f dagster_postgres
-
-# Tous les services
+# Tous services
 docker compose logs -f
 ```
 
-### Vérification santé services
+## Références
 
-```bash
-# Script automatique
-./scripts/check_services.sh
-
-# Manuel
-docker compose ps
-```
+- [Hub'Eau APIs](https://hubeau.eaufrance.fr)
+- [Dagster Docs](https://docs.dagster.io)
+- [DLT Docs](https://dlthub.com/docs)
+- [PostGIS](https://postgis.net)

@@ -1,20 +1,9 @@
-# Docker Compose pour CI/CD (GitLab CI, production)
-# Utilise des variables d'environnement fournies par le CI/CD
-# Pour le développement local, utilisez: docker-compose.local.yml
-# Usage CI/CD: docker compose up -d
-#
-# Configuration conforme à: https://docs.dagster.io/deployment/oss/deployment-options/docker
-#
-# DIFFÉRENCES AVEC L'EXEMPLE DAGSTER (toutes justifiées):
-# 1. ❌ Pas de /var/run/docker.sock monté → Pas nécessaire (QueuedRunCoordinator, pas DockerRunLauncher)
-# 2. ❌ Pas de DAGSTER_CURRENT_IMAGE → Pas nécessaire (runs s'exécutent dans worker existant)
-# 3. ❌ Pas de /tmp/io_manager_storage → Pas nécessaire (resources custom, pas d'IO manager filesystem)
-# 4. ⚠️  Pas de réseau explicite → Fonctionne (Docker Compose crée brgm_default automatiquement)
-# 5. ✅ AMÉLIORATIONS: restart policies, health checks, volumes persistence, depends_on conditions
-# 6. ✅ AMÉLIORATION: "dagster code-server start" au lieu de "dagster api grpc" pour hot reload automatique
+# Hub'Eau Pipeline - Docker Compose Configuration
+# Production & Development deployment
+# Hot reload enabled: edit code → save → reload in UI (2-3s)
 
 services:
-  # Base de données métadonnées Dagster
+  # Dagster metadata database
   dagster_postgres:
     image: postgres:16-alpine
     container_name: brgm-dagster-postgres
@@ -30,7 +19,7 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Base de données Hub'Eau avec PostGIS
+  # Hub'Eau database (PostGIS)
   postgres:
     image: postgis/postgis:16-3.4-alpine
     container_name: brgm-postgres
@@ -51,7 +40,7 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # Worker DLT - Exécution des pipelines
+  # DLT Worker - Pipeline execution
   dlt_worker:
     build:
       context: .
@@ -86,25 +75,16 @@ services:
       DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST}
       DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT}
     volumes:
-      # DEVELOPMENT: Mount source code for hot reload (no rebuild needed)
-      # For production/CI, remove this line to use code baked into image
+      # Hot reload: mount source code (remove for production)
       - ./src:/app/src
       - ./configs:/app/configs
       - ./scripts:/app/scripts
       - ./dagster_home:/app/dagster_home
-      # CSV ingestion: drop CSVs here for auto-ingestion
       - ./data/csv_inbox:/app/data/csv_inbox
       - ./data/csv_archive:/app/data/csv_archive
-    # CODE RELOAD BEHAVIOR:
-    # - Using "dagster code-server start" instead of "dagster api grpc"
-    # - This runs user code in a SUBPROCESS (not main process)
-    # - Clicking "Reload definitions" in UI automatically restarts the subprocess
-    # - Fresh Python interpreter on each reload = no cached modules!
-    # - Hot reload workflow: Edit code → Save → Reload in UI → Done ✅
-    # Reference: https://github.com/dagster-io/dagster/discussions/14709
     command: ["dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-f", "/app/src/hubeau_pipeline/grpc_server.py"]
     expose:
-      - "4000"  # GRPC API (internal)
+      - "4000"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 4000)); s.close()"]
       interval: 30s
@@ -113,7 +93,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Dagster Webserver - Interface UI
+  # Dagster Web UI
   dagster_webserver:
     build:
       context: .
@@ -145,7 +125,6 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
-      # CSV ingestion (read-only for webserver)
       - ./data/csv_inbox:/app/data/csv_inbox:ro
       - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
@@ -159,7 +138,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Dagster Daemon - Orchestration (schedules, sensors)
+  # Dagster Daemon - Schedules & Sensors
   dagster_daemon:
     image: hubeau-orchestrator:latest
     container_name: brgm-dagster-daemon
@@ -188,7 +167,6 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
-      # CSV ingestion (read-only for daemon)
       - ./data/csv_inbox:/app/data/csv_inbox:ro
       - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-daemon","run"]
@@ -200,7 +178,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Adminer - Interface web PostgreSQL
+  # Adminer - PostgreSQL Web UI
   adminer:
     image: adminer:latest
     container_name: brgm-adminer
