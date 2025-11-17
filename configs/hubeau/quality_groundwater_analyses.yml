@@ -1,16 +1,17 @@
 resource:
-  name: quality_groundwater_analyses
+  name: quality_groundwater_analyses_raw
   endpoint: /analyses.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/qualite_nappes
-  primary_key:
-  - code_bss
-  - date_debut_prelevement
-  - code_param
-  - code_fraction
+  # Bronze layer: no PK/FK constraints, duplicates allowed
+  primary_key: null
 extraction:
   default_params: {}
+  # Date filter parameter names for this API
+  date_filter_params:
+    date_debut: date_debut_prelevement  # Start date parameter name
+    date_fin: date_fin_prelevement      # End date parameter name
 performance:
-  parallelism: 3
+  parallelism: 1
   batch_size: 5000
   retry_times: 3
   retry_delay: 2.0

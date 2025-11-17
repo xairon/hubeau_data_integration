@@ -40,7 +40,7 @@ def basic_database_check(context: AssetExecutionContext, pg: PostgreSQLResource)
             LEFT JOIN pg_stat_user_tables s
                 ON t.schemaname = s.schemaname
                 AND t.tablename = s.relname
-            WHERE t.schemaname = 'hubeau'
+            WHERE t.schemaname = 'staging'
             ORDER BY s.n_live_tup DESC NULLS LAST
         """, conn)
 
@@ -54,7 +54,7 @@ def basic_database_check(context: AssetExecutionContext, pg: PostgreSQLResource)
                 indexname,
                 indexdef
             FROM pg_indexes
-            WHERE schemaname = 'hubeau'
+            WHERE schemaname = 'staging'
             AND indexdef LIKE '%GIST%'
             ORDER BY tablename
         """, conn)

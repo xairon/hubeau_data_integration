@@ -1,34 +1,30 @@
 # Documentation Hub'Eau Pipeline
 
-## 🚀 Démarrage
+## Démarrage Rapide
 
-- [README principal](../README.md)
-- [Configuration](CONFIGURATION.md)
-- [Modes d'ingestion](MODES_INGESTION.md)
+- [README principal](../README.md) - Installation et démarrage
+- [Configuration](CONFIGURATION.md) - Variables d'environnement
+- [CSV Ingestion](../configs/csv_ingestion/README.md) - Ingérer des CSVs
 
-## 📖 Architecture
+## Architecture & APIs
 
-- [Architecture générale](ARCHITECTURE.md)
-- [Schéma base de données](SCHEMA_BDD.md)
-- [APIs Hub'Eau supportées](APIS_HUBEAU.md)
+- [Architecture](ARCHITECTURE.md) - Architecture détaillée du pipeline
+- [APIs Hub'Eau](APIS_HUBEAU.md) - Liste complète des APIs et endpoints
+- [Schéma BDD](SCHEMA_BDD.md) - Structure PostgreSQL
 
-## 🔧 Administration
+## Administration
 
-- [Configuration environnement](CONFIGURATION.md)
-- [GitLab CI/CD](GITLAB_CI_VARIABLES_SETUP.md)
-- [Monitoring](OBSERVABILITY.md)
+- [GitLab CI/CD](GITLAB_CI_VARIABLES_SETUP.md) - Configuration déploiement
+- [SANDRE & BD-LISA](SANDRE_BDLISA_INTEGRATION.md) - Données de référence
 
-## 🌊 Contexte
+## Interfaces
 
-- [Projet JUNON - Vision](PROJET_JUNON_VISION.md)
+- **Dagster UI** : http://localhost:8080 - Orchestration
+- **Adminer** : http://localhost:8081 - PostgreSQL
+- **Portainer** : http://localhost:9000 - Docker
 
-## 🛠️ Outils
+## Ressources Externes
 
-- **Dagster UI** : http://localhost:8080
-- **Adminer** (PostgreSQL) : http://localhost:8081
-
-## 📚 Ressources Externes
-
-- [Hub'Eau](https://hubeau.eaufrance.fr)
-- [Dagster](https://dagster.io)
-- [DLT](https://dlthub.com)
+- [Hub'Eau](https://hubeau.eaufrance.fr) - APIs officielles
+- [Dagster Docs](https://docs.dagster.io) - Documentation Dagster
+- [DLT Docs](https://dlthub.com/docs) - Documentation DLT

@@ -24,11 +24,12 @@ COPY src /app/src
 # Install dependencies using uv (100x faster than pip!)
 # --no-cache: Don't cache packages (smaller image)
 # --system: Install to system Python (not venv)
+# -e: Editable install (symlink to /app/src for hot reload)
 # .[orchestrator]: Install orchestrator-only dependencies
-RUN uv pip install --no-cache --system ".[orchestrator]"
+RUN uv pip install --no-cache --system -e ".[orchestrator]"
 
 # Copy only orchestrator configuration (pas le code métier)
-COPY dagster_home /app/dagster_home
+COPY docker/orchestrator/dagster_home /app/dagster_home
 COPY configs /app/configs
 
 ENV PYTHONPATH=/app

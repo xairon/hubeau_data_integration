@@ -1,13 +1,16 @@
 """
-Source DLT CSV Hub'Eau avec support multi-mode et slicing
+Source DLT pour Hub'Eau API - Bronze Layer (raw tables)
 
-Modes d'ingestion :
-- FULL : Tout l'historique (pas de filtre date)
-- YEAR : Une annee specifique
-- INCREMENTAL : Derniers N jours
+Architecture simplifiée:
+- DLT native parallelization (parallelized=True)
+- Custom pagination (Hub'Eau specific)
+- Date filters (Hub'Eau specific)
+- No FK filtering (Bronze layer loads all data)
 
-Slicing :
-- Par station pour piezometry_chroniques (API impose code_bss)
+Modes:
+- FULL: Load all data (stations)
+- YEAR: Load specific year (chroniques - partition mode)
+- INCREMENTAL: Load since last date (chroniques - incremental mode)
 """
 
 import dlt
@@ -16,46 +19,53 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import io
-from typing import Iterator, List, Dict, Optional
+from typing import Iterator, Dict, Any, Optional, List
 import logging
 import time
-from enum import Enum
 from datetime import datetime, timedelta
 
-# Configure logger pour qu'il soit capture par Dagster
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Ajouter un handler console si pas deja present pour que Dagster capture les logs
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(levelname)s - %(name)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 
-class IngestionMode(Enum):
-    """Modes d'ingestion disponibles"""
-    FULL = "full"
-    YEAR = "year"
-    INCREMENTAL = "incremental"
+# ==============================================================================
+# HTTP CLIENT
+# ==============================================================================
+
+import threading
+
+# ==============================================================================
+# GLOBAL THREAD-SAFE RATE LIMITER
+# ==============================================================================
+
+class GlobalRateLimiter:
+    """
+    Thread-safe rate limiter shared across all parallel workers.
+    Prevents API bombardment when using DLT parallelization.
+    """
+    _lock = threading.Lock()
+    _last_request_time = 0
+
+    @classmethod
+    def wait(cls, rate_limit: float):
+        """Thread-safe rate limiting"""
+        with cls._lock:
+            elapsed = time.time() - cls._last_request_time
+            if elapsed < rate_limit:
+                sleep_time = rate_limit - elapsed
+                time.sleep(sleep_time)
+            cls._last_request_time = time.time()
 
 
 class HubeauAPIClient:
     """
-    Client HTTP optimise avec :
-    - Connection pooling
-    - Retry automatique
-    - Rate limiting
+    HTTP client with connection pooling and retry logic.
+    Uses GLOBAL rate limiter for thread-safe parallel requests.
     """
-
-    def __init__(self, base_url: str, rate_limit: float = 2.0):
+    def __init__(self, base_url: str, rate_limit: float = 0.3):
         self.base_url = base_url
         self.rate_limit = rate_limit
-        self.last_request_time = 0
 
-        # Session HTTP avec connection pooling
+        # Session with connection pooling
         self.session = requests.Session()
 
         # Retry strategy
@@ -75,200 +85,143 @@ class HubeauAPIClient:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-    def _rate_limit(self):
-        """Rate limiting intelligent"""
-        elapsed = time.time() - self.last_request_time
-        if elapsed < self.rate_limit:
-            time.sleep(self.rate_limit - elapsed)
-        self.last_request_time = time.time()
-
     def get(self, endpoint: str, params: Dict = None, timeout: int = 180) -> requests.Response:
-        """GET avec rate limiting et retry (timeout 180s pour grandes pages CSV)"""
-        self._rate_limit()
+        """GET with GLOBAL thread-safe rate limiting and retry"""
+        # Use global rate limiter (shared across all workers)
+        GlobalRateLimiter.wait(self.rate_limit)
 
         url = f"{self.base_url}{endpoint}"
-
-        # ============================================================================
-        # 🚨 MODIFICATION 5: LOG CRITIQUE - Afficher l'URL complète (page 1 seulement)
-        # ============================================================================
-        if params and params.get('page', 1) == 1:
-            from urllib.parse import urlencode
-            query_string = urlencode(params)
-            full_url = f"{url}?{query_string}"
-            logger.info(f"🌐 HTTP GET (page 1): {full_url}")
-            logger.info(f"🔍 Query params: {params}")
 
         try:
             response = self.session.get(url, params=params, timeout=timeout)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Erreur requete {url}: {e}")
+            logger.error(f"Request error {url}: {e}")
             raise
 
 
-def detect_date_field(resource_name: str) -> Optional[str]:
-    """
-    Detecte le nom du champ date selon le type d'endpoint
-    """
-    if 'chronique' in resource_name or 'observation' in resource_name or 'obs_elab' in resource_name:
-        return 'mesure'
-    elif 'analyse' in resource_name:
-        return 'prelevement'
-    elif 'condition' in resource_name or 'operation' in resource_name:
-        return 'prelevement'
-    elif 'campagne' in resource_name:
-        return 'campagne'
-    else:
-        return None
+# ==============================================================================
+# PAGINATION HELPERS
+# ==============================================================================
 
-
-def build_params_for_mode(
-    mode: IngestionMode,
-    year: Optional[int],
-    incremental_days: int,
-    default_params: Dict,
-    resource_name: str
-) -> Dict:
-    """
-    Construit les parametres API selon le mode d'ingestion
-    """
-    params = {**(default_params or {})}
-
-    date_field = detect_date_field(resource_name)
-
-    if not date_field:
-        # Pas de filtre date disponible (stations, referentiels)
-        return params
-
-    if mode == IngestionMode.FULL:
-        # Pas de filtre date
-        logger.info(f"{resource_name}: Mode FULL - pas de filtre date")
-
-    elif mode == IngestionMode.YEAR:
-        if not year:
-            raise ValueError("Mode YEAR necessite le parametre 'year'")
-
-        params[f'date_debut_{date_field}'] = f"{year}-01-01"
-        params[f'date_fin_{date_field}'] = f"{year}-12-31"
-
-        logger.info(f"{resource_name}: Mode YEAR - annee {year}")
-
-    elif mode == IngestionMode.INCREMENTAL:
-        today = datetime.now()
-        start_date = today - timedelta(days=incremental_days)
-
-        params[f'date_debut_{date_field}'] = start_date.strftime("%Y-%m-%d")
-        params[f'date_fin_{date_field}'] = today.strftime("%Y-%m-%d")
-
-        logger.info(
-            f"{resource_name}: Mode INCREMENTAL - "
-            f"{start_date.strftime('%Y-%m-%d')} a {today.strftime('%Y-%m-%d')}"
-        )
-
-    return params
-
-
-def get_total_pages_from_json(
+def get_total_pages(
     client: HubeauAPIClient,
     endpoint: str,
     params: Dict = None
 ) -> tuple:
     """
-    Requete JSON pour obtenir count + estimation pages
+    Get total pages and count from JSON endpoint
 
-    Retour : (total_pages, total_count)
+    Returns:
+        (total_pages, total_count)
     """
     endpoint_json = endpoint.replace('.csv', '')
 
     try:
-        # Requete 1 : count total SANS specifier 'size' pour exploiter le bug Hub'Eau
-        # Bug Hub'Eau : si 'size' n'est PAS specifie dans les params, on peut acceder a TOUTES les pages
-        # sans la limite habituelle de 20,000 records max (avec le page_size par defaut ~5k)
-        # ⚠️ NE PAS AJOUTER 'size' sinon Hub'Eau impose une limite de 20k records total !
+        logger.info(f"🔍 Fetching pagination info from {endpoint_json} (this may take 30-60 seconds)...")
+        logger.info(f"   Params: {params or {}}")
         response = client.get(endpoint_json, params={**(params or {}), 'page': 1})
+        logger.info(f"✅ Got response from API")
         data = response.json()
         total_count = data.get('count', 0)
 
         if total_count == 0:
             return 1, 0
 
-        # Taille de page reelle (varie selon endpoint, generalement ~5000 records)
+        # Actual page size from first page
         actual_page_size = len(data.get('data', []))
 
-        # ⚠️ DETECTION HYDROBIO : Si page_size == count, l'API n'a PAS de pagination !
+        # Single page API
         if actual_page_size == total_count:
-            logger.warning(
-                f"⚠️ {endpoint}: API sans pagination détectée ! "
-                f"{total_count:,} records sur UNE SEULE page (risque RAM élevé)"
-            )
-            # Forcer 1 seule page (tout est déjà là)
+            logger.info(f"{endpoint} - Single page API ({total_count:,} records)")
             return 1, total_count
 
         if actual_page_size == 0:
-            actual_page_size = 5000  # Default Hub'Eau (estimation conservatrice)
+            actual_page_size = 1000  # Default Hub'Eau
 
         total_pages = (total_count // actual_page_size) + (1 if total_count % actual_page_size > 0 else 0)
-
-        logger.info(f"📊 {endpoint}: Total={total_count:,} records ({actual_page_size} rec/page, {total_pages} pages)")
-
+        logger.info(f"{endpoint} - {total_count:,} records, {total_pages} pages")
         return total_pages, total_count
 
     except Exception as e:
-        logger.error(f"Impossible de recuperer count: {e}")
+        logger.error(f"Cannot get count: {e}")
         raise
 
 
-def fetch_csv_page(
+def detect_delimiter_from_sample(sample: str) -> str:
+    """
+    Detect CSV delimiter from sample text.
+    Hub'Eau typically uses ';' but we auto-detect for robustness.
+    """
+    import csv
+    delimiters = [';', ',', '\t', '|']
+    
+    try:
+        sniffer = csv.Sniffer()
+        detected = sniffer.sniff(sample, delimiters=''.join(delimiters))
+        return detected.delimiter
+    except (csv.Error, AttributeError):
+        # Fallback: count occurrences
+        delimiter_counts = {}
+        for delim in delimiters:
+            lines = sample.split('\n')[:5]
+            counts = [line.count(delim) for line in lines if line.strip()]
+            if counts:
+                delimiter_counts[delim] = sum(counts) / len(counts)
+        
+        if delimiter_counts:
+            return max(delimiter_counts, key=delimiter_counts.get)
+    
+    # Default for Hub'Eau
+    return ';'
+
+
+def fetch_page(
     client: HubeauAPIClient,
     endpoint: str,
     page: int,
-    params: Dict = None,
-    max_retries: int = 3
-) -> pd.DataFrame:
+    params: Dict = None
+) -> List[Dict]:
     """
-    Télécharge une page CSV complète (~5000 records par défaut selon l'API)
-
-    SIMPLIFIÉ: Pas de chunking - l'API Hub'Eau retourne des pages de ~5k records
-    On charge la page complète en mémoire (avec 32GB RAM, pas de problème)
-
-    Args:
-        client: Client HTTP
-        endpoint: Endpoint API
-        page: Numéro de page
-        params: Paramètres de requête
-        max_retries: Nombre de tentatives en cas de timeout (défaut: 3)
-
-    Returns:
-        DataFrame complet de la page (~5000 lignes)
+    Fetch single page from Hub'Eau API with robust CSV parsing.
+    
+    DLT FEATURES:
+    - Auto-detects delimiter (typically ';' for Hub'Eau)
+    - Handles encoding issues gracefully
+    - Skips bad lines instead of failing
+    - Normalizes column names
+    
+    Returns list of records (dicts)
     """
-    retry_count = 0
+    final_params = {**(params or {}), 'page': page}
 
-    while retry_count <= max_retries:
+    try:
+        response = client.get(endpoint, params=final_params, timeout=180)
+
+        if not response.text or len(response.text.strip()) == 0:
+            logger.warning(f"Page {page}: Empty response")
+            return []
+
+        # Auto-detect delimiter from first few lines
+        sample = response.text[:1024] if len(response.text) > 1024 else response.text
+        delimiter = detect_delimiter_from_sample(sample)
+        
+        # Note: response.text is already decoded by requests library
+        # No need to specify encoding for StringIO
+
+        # Parse CSV with robust error handling
         try:
-            # Build final params with page
-            final_params = {**(params or {}), 'page': page}
-            logger.debug(f"📥 Page {page}: Appel API avec params={final_params}")
-            
-            # Simple GET request
-            response = client.get(
-                endpoint,
-                params=final_params,
-                timeout=180
+            df = pd.read_csv(
+                io.StringIO(response.text),
+                sep=delimiter,
+                quotechar='"',
+                low_memory=False,
+                on_bad_lines='skip'  # Skip bad lines instead of failing
             )
-
-            # ✅ VALIDATION ROBUSTE: Vérifier le contenu de la réponse
-            if not response.text or len(response.text.strip()) == 0:
-                logger.warning(f"⚠️  Page {page}: Réponse vide")
-                return pd.DataFrame()
-            
-            # ✅ DETECTION FORMAT INVALIDE: Vérifier si la réponse est JSON au lieu de CSV
-            response_text = response.text.strip()
-            if response_text.startswith('{') or response_text.startswith('['):
-                logger.warning(f"⚠️  Page {page}: Format invalide (reçu JSON au lieu de CSV), page potentiellement vide ou erreur API")
-                return pd.DataFrame()
-
-            # Parse CSV complet (pas de chunking)
+        except Exception as parse_error:
+            # Fallback: try with default Hub'Eau delimiter
+            logger.warning(f"Page {page}: Parse error with delimiter '{delimiter}', trying ';': {parse_error}")
             df = pd.read_csv(
                 io.StringIO(response.text),
                 sep=';',
@@ -277,449 +230,381 @@ def fetch_csv_page(
                 on_bad_lines='skip'
             )
 
-            # ✅ VALIDATION SUPPLEMENTAIRE: Vérifier que le DataFrame n'est pas vide de manière inattendue
-            if df.empty and len(response.text) > 100:  # Si response non vide mais DataFrame vide
-                logger.warning(f"⚠️  Page {page}: DataFrame vide malgré réponse de {len(response.text)} caractères")
+        if df.empty:
+            return []
 
-            return df
+        # Normalize column names (DLT also does this, but pre-processing ensures consistency)
+        # Convert to lowercase and replace spaces/special chars
+        df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('[^\w]', '_', regex=True)
+        
+        # Replace NaN with None for DLT
+        df = df.where(pd.notnull(df), None)
 
-        except pd.errors.EmptyDataError:
-            logger.warning(f"⚠️  Page {page}: CSV vide")
-            return pd.DataFrame()
-
-        except pd.errors.ParserError as e:
-            logger.warning(f"⚠️  Page {page}: Erreur parsing CSV (format invalide?): {e}")
-            # Retourner DataFrame vide au lieu de lever l'erreur - continue avec les autres pages
-            return pd.DataFrame()
-
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
-            retry_count += 1
-            if retry_count > max_retries:
-                logger.error(f"❌ Page {page}: Max retries ({max_retries}) atteint après timeout: {e}")
-                raise
-
-            # Backoff exponentiel: 5s, 10s, 20s
-            wait_time = 5 * (2 ** (retry_count - 1))
-            logger.warning(
-                f"⚠️  Page {page}: Timeout (tentative {retry_count}/{max_retries}), "
-                f"retry dans {wait_time}s - Error: {type(e).__name__}"
-            )
-            time.sleep(wait_time)
-
-        except Exception as e:
-            logger.error(f"❌ Erreur parsing CSV page {page}: {type(e).__name__}: {e}")
-            # ✅ ROBUSTESSE: Au lieu de lever l'erreur, retourner DataFrame vide et continuer
-            logger.warning(f"⚠️  Page {page}: Retour DataFrame vide pour continuer l'ingestion")
-            return pd.DataFrame()
-
-
-def _paginate_csv(
-    client: HubeauAPIClient,
-    endpoint: str,
-    params: Dict,
-    resource_name: str
-) -> Iterator[List[Dict]]:
-    """
-    Pagination simple: une page = ~5000 records
-
-    SIMPLIFIÉ: Pas de chunking, pas de micro-batching
-    L'API Hub'Eau retourne des pages de ~5k records, on les charge complètes
-    """
-    try:
-        total_pages, total_count = get_total_pages_from_json(client, endpoint, params)
-    except Exception as e:
-        logger.error(f"{resource_name}: Impossible de recuperer count, abandon: {e}")
-        raise
-
-    if total_count == 0:
-        logger.warning(f"⚠️  {resource_name}: Aucune donnee trouvee pour ces parametres")
-        return
-
-    records_total = 0
-    errors_count = 0
-    max_consecutive_errors = 3
-
-    logger.info(f"🚀 {resource_name}: Pagination de {total_pages} pages (~5k records/page)")
-
-    for page in range(1, total_pages + 1):
-        try:
-            # ✅ Charger page complète (DataFrame complet)
-            df = fetch_csv_page(client, endpoint, page, params)
-
-            if df.empty:
-                logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} vide")
-                continue
-
-            # ✅ VALIDATION ROBUSTE: Convertir toute la page en liste de dicts avec vérifications
-            try:
-                records = df.to_dict('records')
-                
-                # ✅ DOUBLE VALIDATION: S'assurer qu'on a bien une liste de dictionnaires
-                if not isinstance(records, list):
-                    logger.error(f"❌ Page {page}: Format invalide (attendu list, reçu {type(records)})")
-                    # Tenter de corriger en wrappant dans une liste
-                    if isinstance(records, dict):
-                        records = [records]
-                    else:
-                        logger.warning(f"⚠️  Page {page}: Impossible de corriger le format, page ignorée")
-                        continue
-                
-                # Validation supplémentaire: chaque élément doit être un dict
-                validated_records = []
-                for i, record in enumerate(records):
-                    if isinstance(record, dict):
-                        validated_records.append(record)
-                    else:
-                        logger.warning(f"⚠️  Page {page}, record {i}: Format invalide (attendu dict, reçu {type(record)}), record ignoré")
-                
-                records = validated_records
-                records_count = len(records)
-                
-                if records_count == 0:
-                    logger.warning(f"⚠️  {resource_name}: Page {page}/{total_pages} - aucun record valide après validation")
-                    continue
-                    
-            except Exception as conversion_error:
-                logger.error(f"❌ Page {page}: Erreur conversion DataFrame->dict: {type(conversion_error).__name__}: {conversion_error}")
-                continue
-
-            records_total += records_count
-
-            # Log progression
-            progress_pct = (records_total / total_count * 100) if total_count > 0 else 0
-            logger.info(
-                f"📥 {resource_name}: Page {page}/{total_pages} -> "
-                f"{records_count:,} records (total: {records_total:,}/{total_count:,} = {progress_pct:.1f}%)"
-            )
-
-            # Yield toute la page d'un coup
-            yield records
-
-            errors_count = 0
-
-        except Exception as e:
-            errors_count += 1
-            logger.error(f"❌ {resource_name}: Erreur page {page}/{total_pages} (erreur #{errors_count}): {type(e).__name__}: {e}")
-
-            if errors_count >= max_consecutive_errors:
-                logger.error(f"❌ {resource_name}: ABANDON après {errors_count} erreurs consécutives")
-                raise
-
-            continue
-
-    logger.info(f"✅ {resource_name}: TERMINE - {records_total:,} records ingeres")
-
-
-def _paginate_with_station_slicing(
-    client: HubeauAPIClient,
-    endpoint: str,
-    params: Dict,
-    resource_name: str,
-    station_field: str = 'code_bss'
-) -> Iterator[List[Dict]]:
-    """
-    Pagination avec slicing par station (pour piezometry_chroniques)
-
-    L'API Hub'Eau piezometry/chroniques IMPOSE le parametre code_bss
-    """
-    logger.info(f"{resource_name}: Mode SLICING par station (champ: {station_field})")
-
-    # Etape 1 : Recuperer la liste des stations
-    # Endpoint stations correspondant
-    if 'piezometry' in resource_name:
-        stations_endpoint = '/stations.csv'
-        stations_base_url = client.base_url
-    else:
-        raise ValueError(f"Slicing par station non supporte pour {resource_name}")
-
-    logger.info(f"{resource_name}: Recuperation liste des stations...")
-
-    try:
-        # ⚠️ NE PAS specifier 'size' pour exploiter le bug Hub'Eau (pas de limite 20k records)
-        # Paginer les stations + chunking pour économiser RAM (certains endpoints ont 50k+ stations)
-        all_stations = []
-        page = 1
-        max_pages = 100  # Sécurité pour éviter boucle infinie
-
-        logger.info(f"{resource_name}: Récupération liste des stations (avec pagination + chunking)...")
-
-        while page <= max_pages:
-            try:
-                stations_response = client.get(stations_endpoint, params={'page': page})
-
-                # Vérifier si réponse vide
-                if not stations_response.text or len(stations_response.text) < 10:
-                    logger.info(f"  Page {page}: vide, fin de pagination")
-                    break
-
-                # ✅ Charger page complète (pas de chunking avec 32GB RAM)
-                df_stations = pd.read_csv(
-                    io.StringIO(stations_response.text),
-                    sep=';',
-                    quotechar='"',
-                    low_memory=False,
-                    on_bad_lines='skip'
-                )
-
-                if station_field not in df_stations.columns:
-                    raise ValueError(f"Colonne {station_field} introuvable dans les stations")
-
-                # Extraire codes stations uniques de la page
-                page_stations = df_stations[station_field].dropna().unique().tolist()
-
-                if not page_stations:
-                    logger.info(f"  Page {page}: aucune station, fin de pagination")
-                    break
-
-                all_stations.extend(page_stations)
-                logger.info(f"  Page {page}: +{len(page_stations)} stations (total cumulé: {len(all_stations)})")
-
-                # Si < 1000 stations sur cette page, probablement la dernière
-                if len(page_stations) < 1000:
-                    logger.info(f"  Page {page}: moins de 1000 stations, considéré comme dernière page")
-                    break
-
-                page += 1
-
-            except Exception as page_error:
-                logger.warning(f"  Page {page}: erreur {type(page_error).__name__}: {page_error}")
-                # Si erreur à la page > 1, on continue avec ce qu'on a
-                if page > 1:
-                    logger.info(f"  Erreur pagination page {page}, mais {len(all_stations)} stations déjà récupérées")
-                    break
-                else:
-                    # Erreur à la page 1 = problème critique
-                    raise
-
-        # Dédupliquer les stations (au cas où même station sur plusieurs pages)
-        stations = list(set(all_stations))
-        logger.info(f"{resource_name}: {len(stations)} stations uniques à traiter (dédupliquées depuis {len(all_stations)} entrées)")
-
-        # Log RAM après chargement stations (monitoring)
-        try:
-            import psutil
-            import os
-            process = psutil.Process(os.getpid())
-            mem_mb = process.memory_info().rss / 1024 / 1024
-            logger.info(f"[MEM] Après chargement {len(stations)} stations: {mem_mb:.1f} MB")
-        except ImportError:
-            pass  # psutil pas dispo, skip
-        except Exception as mem_error:
-            logger.debug(f"Impossible de logger RAM: {mem_error}")
+        return df.to_dict('records')
 
     except Exception as e:
-        logger.error(f"{resource_name}: Impossible de recuperer stations: {e}")
-        raise
-
-    # Etape 2 : Pour chaque batch de stations, recuperer leurs chroniques
-    # ✅ BATCH PAR 40 STATIONS (Réduction pour éviter les URL trop longues causant des 400 Bad Request)
-    # Note: L'API Hub'Eau supporte jusqu'à 200 code_bss, mais les URLs deviennent trop longues (>3000 chars)
-    # causant des erreurs 400 sur les pages 5+ lorsqu'on utilise 80 stations par batch
-    STATIONS_PER_BATCH = 40
-    total_records = 0
-
-    # Diviser stations en batches de 40
-    station_batches = [stations[i:i + STATIONS_PER_BATCH] for i in range(0, len(stations), STATIONS_PER_BATCH)]
-    num_batches = len(station_batches)
-
-    logger.info(f"{resource_name}: {len(stations)} stations → {num_batches} batches de {STATIONS_PER_BATCH} stations")
-
-    for batch_idx, station_batch in enumerate(station_batches, 1):
-        # Joindre les codes stations avec virgule pour query param
-        stations_param = ','.join(station_batch)
-
-        logger.info(
-            f"{resource_name}: Batch {batch_idx}/{num_batches} "
-            f"({len(station_batch)} stations: {station_batch[0]}...{station_batch[-1]})"
-        )
-
-        # Parametres avec batch de stations
-        batch_params = {**params, station_field: stations_param}
-
-        try:
-            batch_records = 0
-            # Pagination pour ce batch de stations
-            for records in _paginate_csv(client, endpoint, batch_params, f"{resource_name}[batch_{batch_idx}]"):
-                batch_records += len(records)
-                total_records += len(records)
-                yield records
-
-            logger.info(
-                f"✅ {resource_name}: Batch {batch_idx}/{num_batches} terminé: "
-                f"{batch_records:,} records ({total_records:,} cumulés)"
-            )
-
-        except Exception as e:
-            logger.error(
-                f"❌ {resource_name}: Erreur batch {batch_idx}/{num_batches} "
-                f"(stations {station_batch[0]}...{station_batch[-1]}): {type(e).__name__}: {e}"
-            )
-            # Continuer avec les autres batches
-            continue
-
-    logger.info(f"{resource_name}: TERMINE slicing - {total_records:,} records ingeres depuis {num_batches} batches")
+        logger.warning(f"Page {page} error: {e}")
+        return []
 
 
-@dlt.source
-def hubeau_csv_source(
-    resource_name: str,
-    endpoint: str,
+# ==============================================================================
+# STATION SLICING HELPERS
+# ==============================================================================
+
+def get_station_codes(
     base_url: str,
-    primary_key: List[str],
-    performance_config: Dict,
-    default_params: Dict = None,
-    mode: IngestionMode = IngestionMode.FULL,
-    year: Optional[int] = None,
-    incremental_days: int = 2,
-    use_station_slicing: bool = False
-):
+    stations_endpoint: str,
+    station_param: str,
+    rate_limit: float = 0.3
+) -> List[str]:
     """
-    Source DLT pour ingestion CSV Hub'Eau
+    Fetch list of station codes from stations endpoint.
 
     Args:
-        resource_name: Nom de la ressource
-        endpoint: Endpoint API (ex: '/chroniques.csv')
-        base_url: URL de base
-        primary_key: Cles primaires
-        performance_config: Config performance
-        default_params: Parametres par defaut
-        mode: Mode d'ingestion (FULL, YEAR, INCREMENTAL)
-        year: Annee (mode YEAR)
-        incremental_days: Nombre de jours (mode INCREMENTAL)
-        use_station_slicing: Activer slicing par station
-    """
-
-    # Compteur global pour tracking
-    total_records_yielded = {'count': 0}
-
-    @dlt.resource(
-        name=resource_name,
-        # NOTE: primary_key non utilisé car on utilise custom destination PostgreSQL
-        # qui fait le merge manuellement dans postgres_optimized_v2.py
-        # Garder None ici économise de la RAM (DLT ne track pas les PK inutilement)
-        primary_key=None,
-        write_disposition="append"  # append car on gère le merge nous-même
-    )
-    def csv_resource() -> Iterator[List[Dict]]:
-
-        # Client HTTP
-        client = HubeauAPIClient(
-            base_url=base_url,
-            rate_limit=performance_config.get('rate_limit', 2.0)
-        )
-
-        # Construire parametres selon mode
-        params = build_params_for_mode(
-            mode=mode,
-            year=year,
-            incremental_days=incremental_days,
-            default_params=default_params,
-            resource_name=resource_name
-        )
-
-        logger.info(f"🔧 {resource_name}: Mode={mode.value}, Params={params}")
-
-        # Choisir strategie de pagination
-        if use_station_slicing:
-            # Slicing par station (piezometry_chroniques)
-            for batch in _paginate_with_station_slicing(
-                client=client,
-                endpoint=endpoint,
-                params=params,
-                resource_name=resource_name
-            ):
-                total_records_yielded['count'] += len(batch)
-                yield batch
-        else:
-            # Pagination standard
-            for batch in _paginate_csv(
-                client=client,
-                endpoint=endpoint,
-                params=params,
-                resource_name=resource_name
-            ):
-                total_records_yielded['count'] += len(batch)
-                yield batch
-
-        logger.info(f"✅ {resource_name}: Total yielded = {total_records_yielded['count']:,} records")
-
-    # Attacher le compteur a la resource pour y acceder depuis l'asset
-    csv_resource._total_records = total_records_yielded
-
-    return csv_resource
-
-
-def get_raw_data_iterator(config_dict: Dict) -> Iterator[List[Dict]]:
-    """
-    Get raw data iterator without DLT resource wrapper.
-    Returns actual lists of records (pages), not individual records.
-
-    This bypasses DLT's automatic list unpacking behavior which converts
-    yielded lists into individual dict records.
-
-    Args:
-        config_dict: Configuration dictionary containing:
-            - resource: name, endpoint, base_url, primary_key
-            - extraction: default_params
-            - performance: rate_limit
-            - pagination: station_field, stations_endpoint (optional)
+        base_url: Base API URL
+        stations_endpoint: Endpoint to fetch stations (e.g., /stations.csv)
+        station_param: Name of station code field (e.g., code_bss)
+        rate_limit: Rate limit for requests
 
     Returns:
-        Iterator yielding lists of ~5000 dict records (complete pages)
+        List of station codes
     """
-    # Extract configuration
-    resource_config = config_dict.get('resource', {})
-    extraction_config = config_dict.get('extraction', {})
-    performance_config = config_dict.get('performance', {})
-    pagination_config = config_dict.get('pagination', {})
+    client = HubeauAPIClient(base_url, rate_limit=rate_limit)
 
-    resource_name = resource_config.get('name', 'unknown')
-    endpoint = resource_config.get('endpoint')
-    base_url = resource_config.get('base_url', 'https://hubeau.eaufrance.fr/api/v1')
+    logger.info(f"🔍 Fetching station list from {stations_endpoint}...")
 
-    # Create API client
-    client = HubeauAPIClient(
-        base_url=base_url,
-        rate_limit=performance_config.get('rate_limit', 2.0)
-    )
+    # Get total pages for stations
+    total_pages, total_count = get_total_pages(client, stations_endpoint)
 
-    # Build parameters (default to FULL mode for simplicity)
-    params = extraction_config.get('default_params', {})
+    if total_count == 0:
+        logger.warning(f"No stations found at {stations_endpoint}")
+        return []
 
-    logger.info(f"🔧 {resource_name}: Direct iterator (bypass DLT), params={params}")
+    logger.info(f"Found {total_count:,} stations across {total_pages} pages")
 
-    # ============================================================================
-    # 🚨 MODIFICATION 4: LOG CRITIQUE - Vérifier que les params de date sont présents
-    # ============================================================================
-    if any(key.endswith('_min') or key.endswith('_max') or key == 'annee' for key in params.keys()):
-        logger.info(f"✅ {resource_name}: Filtres de date détectés dans params: {params}")
+    # Fetch all stations
+    all_stations = []
+    for page_num in range(1, total_pages + 1):
+        records = fetch_page(client, stations_endpoint, page_num)
+        if records:
+            all_stations.extend(records)
+
+    # Extract station codes
+    station_codes = []
+    for station in all_stations:
+        # Try normalized key (lowercase with underscores)
+        code = station.get(station_param.lower().replace('-', '_'))
+        if not code:
+            # Try original key
+            code = station.get(station_param)
+        if code:
+            station_codes.append(str(code))
+
+    logger.info(f"✅ Extracted {len(station_codes):,} station codes")
+    return station_codes
+
+
+# ==============================================================================
+# DLT RESOURCES - Bronze Layer
+# ==============================================================================
+
+@dlt.resource(
+    parallelized=False,  # Disabled - Dagster multiprocess_executor handles parallelism
+    write_disposition="replace"
+)
+def hubeau_stations(
+    config: Dict[str, Any]
+) -> Iterator[List[Dict]]:
+    """
+    DLT resource for FULL load (stations)
+    - write_disposition="replace" → TRUNCATE + INSERT
+    - parallelized=False → Sequential fetching (Dagster handles asset-level parallelism)
+
+    Args:
+        config: Resource configuration from YAML
+
+    Yields:
+        List of records per page
+    """
+    base_url = config["resource"]["base_url"]
+    endpoint = config["resource"]["endpoint"]
+    rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
+
+    client = HubeauAPIClient(base_url, rate_limit=rate_limit)
+
+    # Get pagination info
+    total_pages, total_count = get_total_pages(client, endpoint)
+
+    if total_count == 0:
+        logger.warning(f"No data found for {endpoint}")
+        return
+
+    logger.info(f"=== STARTING FULL LOAD ===")
+    logger.info(f"Total records: {total_count:,}")
+    logger.info(f"Total pages: {total_pages}")
+    logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+    logger.info(f"Rate limit: {rate_limit}s per request")
+    logger.info(f"Batch writes: every 10,000 records")
+
+    # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
+    # Each page fetched sequentially with rate limiting
+    records_yielded = 0
+    for page_num in range(1, total_pages + 1):
+        records = fetch_page(client, endpoint, page_num)
+        if records:
+            records_yielded += len(records)
+            yield records
+
+            # Log progress every 10 pages
+            if page_num % 10 == 0:
+                progress_pct = (page_num / total_pages) * 100
+                logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records fetched")
+
+    logger.info(f"=== FETCH COMPLETE === Total: {records_yielded:,} records")
+
+
+@dlt.resource(
+    parallelized=False,  # Disabled - Dagster multiprocess_executor handles parallelism
+    write_disposition="append"
+)
+def hubeau_chroniques_year(
+    config: Dict[str, Any],
+    year: str
+) -> Iterator[List[Dict]]:
+    """
+    DLT resource for MODE partition (chroniques)
+    - write_disposition="append" → INSERT only
+    - parallelized=False → Sequential fetching (Dagster handles asset-level parallelism)
+
+    Args:
+        config: Resource configuration from YAML
+        year: Partition mode - "full" for ALL data, or specific year (e.g., "2024")
+
+    Yields:
+        List of records per page
+    """
+    base_url = config["resource"]["base_url"]
+    endpoint = config["resource"]["endpoint"]
+    rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
+
+    # Get date filter parameter names from config (with fallback to defaults)
+    date_filter_params = config.get("extraction", {}).get("date_filter_params", {})
+    param_date_debut = date_filter_params.get("date_debut", "date_debut_mesure")
+    param_date_fin = date_filter_params.get("date_fin", "date_fin_mesure")
+
+    client = HubeauAPIClient(base_url, rate_limit=rate_limit)
+
+    # Date filters based on partition mode
+    if year == "full":
+        # FULL MODE: Load ALL historical data (no date filter)
+        params = {}
+        mode_label = "FULL LOAD MODE (ALL HISTORICAL DATA)"
     else:
-        logger.warning(f"⚠️  {resource_name}: AUCUN filtre de date dans params! Mode FULL activé (toutes données historiques)")
+        # YEAR MODE: Load specific year
+        mode_label = f"YEAR PARTITION LOAD: {year}"
 
-    if params:
-        logger.info(f"📋 {resource_name}: Paramètres API configurés: {list(params.keys())}")
+        # Check if this is a single-param API (like prelevements with 'annee')
+        if param_date_fin is None or param_date_fin == "null":
+            # Single parameter: just the year as integer (e.g., annee=2020)
+            params = {
+                param_date_debut: year
+            }
+            logger.info(f"Using single year parameter: {param_date_debut}={year}")
+        else:
+            # Date range parameters (e.g., date_debut_mesure=2020-01-01, date_fin_mesure=2020-12-31)
+            date_debut = f"{year}-01-01"
+            date_fin = f"{year}-12-31"
+            params = {
+                param_date_debut: date_debut,
+                param_date_fin: date_fin
+            }
+            logger.info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
 
-    # Choose pagination method based on config
-    if 'station_field' in pagination_config:
-        # Station-based pagination (e.g., piezometry_chroniques)
-        station_field = pagination_config['station_field']
+    # Check if station slicing is required (e.g., piezometry API)
+    station_slicing_config = config.get("extraction", {}).get("station_slicing", {})
+    if station_slicing_config.get("enabled", False):
+        logger.info("⚡ STATION BATCHING MODE ENABLED")
 
-        logger.info(f"📍 {resource_name}: Using station slicing (field: {station_field})")
+        # Get configuration
+        station_param = station_slicing_config.get("station_param")
+        stations_endpoint = station_slicing_config.get("stations_endpoint")
+        batch_size = station_slicing_config.get("batch_size", 50)
 
-        return _paginate_with_station_slicing(
-            client=client,
-            endpoint=endpoint,
-            params=params,
-            resource_name=resource_name,
-            station_field=station_field
-        )
+        # Fetch list of station codes
+        station_codes = get_station_codes(base_url, stations_endpoint, station_param, rate_limit)
+
+        if len(station_codes) == 0:
+            logger.warning("No stations found - cannot proceed")
+            return
+
+        total_stations = len(station_codes)
+        total_chunks = (total_stations + batch_size - 1) // batch_size
+
+        logger.info(f"=== {mode_label} (STATION BATCHING) ===")
+        logger.info(f"Total stations: {total_stations:,}")
+        logger.info(f"Batch size: {batch_size} stations per chunk")
+        logger.info(f"Total chunks: {total_chunks}")
+        logger.info(f"Mode: Batching stations with comma-separated codes")
+        logger.info(f"Rate limit: {rate_limit}s per request")
+
+        # Process stations in batches
+        total_records_yielded = 0
+        for chunk_index in range(0, total_stations, batch_size):
+            chunk_stations = station_codes[chunk_index:chunk_index + batch_size]
+            chunk_num = (chunk_index // batch_size) + 1
+
+            logger.info(f"📦 Chunk {chunk_num}/{total_chunks}: {len(chunk_stations)} stations")
+            logger.info(f"   Stations: {', '.join(chunk_stations[:5])}{'...' if len(chunk_stations) > 5 else ''}")
+
+            # Build params with comma-separated station codes
+            chunk_params = {
+                **params,
+                station_param: ','.join(chunk_stations)
+            }
+
+            try:
+                # Get pagination info for this chunk
+                total_pages, total_count = get_total_pages(client, endpoint, chunk_params)
+
+                if total_count == 0:
+                    logger.info(f"  No data for chunk {chunk_num}")
+                    continue
+
+                logger.info(f"  Found {total_count:,} records across {total_pages} pages")
+
+                # Fetch all pages for this chunk
+                for page_num in range(1, total_pages + 1):
+                    records = fetch_page(client, endpoint, page_num, chunk_params)
+                    if records:
+                        total_records_yielded += len(records)
+                        yield records
+
+                logger.info(f"✅ Chunk {chunk_num}/{total_chunks} complete: {total_count:,} records")
+
+            except Exception as e:
+                logger.error(f"  Error processing chunk {chunk_num}: {e}")
+                continue
+
+        logger.info(f"=== {mode_label} COMPLETE === Total: {total_records_yielded:,} records from {total_stations} stations in {total_chunks} chunks")
+
     else:
-        # Standard pagination
-        logger.info(f"📄 {resource_name}: Using standard pagination")
+        # Standard mode (no station slicing)
+        # Get pagination info
+        total_pages, total_count = get_total_pages(client, endpoint, params)
 
-        return _paginate_csv(
-            client=client,
-            endpoint=endpoint,
-            params=params,
-            resource_name=resource_name
-        )
+        if total_count == 0:
+            logger.warning(f"No data found for partition: {year}")
+            return
+
+        logger.info(f"=== {mode_label} ===")
+        logger.info(f"Total records: {total_count:,}")
+        logger.info(f"Total pages: {total_pages}")
+        logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+        logger.info(f"Rate limit: {rate_limit}s per request")
+        logger.info(f"Batch writes: every 10,000 records")
+
+        # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
+        records_yielded = 0
+        for page_num in range(1, total_pages + 1):
+            records = fetch_page(client, endpoint, page_num, params)
+            if records:
+                records_yielded += len(records)
+                yield records
+
+            # Log progress every 10 pages
+            if page_num % 10 == 0:
+                progress_pct = (page_num / total_pages) * 100
+                logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records")
+
+        logger.info(f"=== {mode_label} COMPLETE === Total: {records_yielded:,} records")
+
+
+@dlt.resource(
+    parallelized=False,  # Disabled - Dagster multiprocess_executor handles parallelism
+    write_disposition="append"
+)
+def hubeau_chroniques_incremental(
+    config: Dict[str, Any],
+    last_date: Optional[dlt.sources.incremental] = None
+) -> Iterator[List[Dict]]:
+    """
+    DLT resource for INCREMENTAL loading (chroniques)
+    - write_disposition="append" → INSERT only
+    - parallelized=False → Sequential fetching (Dagster handles asset-level parallelism)
+    - DLT tracks last_date automatically
+
+    Args:
+        config: Resource configuration from YAML
+        last_date: DLT incremental tracker (automatic)
+
+    Yields:
+        List of records per page
+    """
+    base_url = config["resource"]["base_url"]
+    endpoint = config["resource"]["endpoint"]
+    rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
+
+    # Get date filter parameter names from config (with fallback to defaults)
+    date_filter_params = config.get("extraction", {}).get("date_filter_params", {})
+    param_date_debut = date_filter_params.get("date_debut", "date_debut_mesure")
+    param_date_fin = date_filter_params.get("date_fin", "date_fin_mesure")
+
+    client = HubeauAPIClient(base_url, rate_limit=rate_limit)
+
+    # Determine date range
+    if last_date and last_date.last_value:
+        # Continue from last loaded date
+        date_debut = last_date.last_value
+        logger.info(f"Incremental: loading since {date_debut}")
+    else:
+        # First load: start from last year
+        date_debut = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        logger.info(f"First load: loading from {date_debut}")
+
+    date_fin = datetime.now().strftime("%Y-%m-%d")
+
+    # Use API-specific parameter names from config
+    # Check if this is a single-param API (like prelevements with 'annee')
+    if param_date_fin is None or param_date_fin == "null":
+        # Single parameter: extract year from date_debut (e.g., annee=2024)
+        year = date_debut[:4]  # Extract YYYY from YYYY-MM-DD
+        params = {
+            param_date_debut: year
+        }
+        logger.info(f"Using single year parameter: {param_date_debut}={year}")
+    else:
+        # Date range parameters (standard case)
+        params = {
+            param_date_debut: date_debut,
+            param_date_fin: date_fin
+        }
+        logger.info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
+
+    # Get pagination info
+    total_pages, total_count = get_total_pages(client, endpoint, params)
+
+    if total_count == 0:
+        logger.info(f"No new data since {date_debut}")
+        return
+
+    logger.info(f"=== INCREMENTAL LOAD: {date_debut} → {date_fin} ===")
+    logger.info(f"Total records: {total_count:,}")
+    logger.info(f"Total pages: {total_pages}")
+    logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+    logger.info(f"Rate limit: {rate_limit}s per request")
+    logger.info(f"Batch writes: every 10,000 records")
+
+    # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
+    records_yielded = 0
+    for page_num in range(1, total_pages + 1):
+        records = fetch_page(client, endpoint, page_num, params)
+        if records:
+            records_yielded += len(records)
+            yield records
+
+        # Log progress every 10 pages
+        if page_num % 10 == 0:
+            progress_pct = (page_num / total_pages) * 100
+            logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records")
+
+    logger.info(f"=== INCREMENTAL COMPLETE === Total: {records_yielded:,} records")

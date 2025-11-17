@@ -1,25 +1,23 @@
 """
-Sensors - Monitoring et alertes
+Dagster Sensors - Hub'Eau Pipeline
+
+Sensors auto-detect events and trigger runs:
+- csv_file_watcher: Auto-ingest new CSV files from inbox
+- csv_archive_cleaner: Archive processed CSV files
 """
 
-from .error_detection import error_detection_sensor
-from .failure_sensor import (
-    pipeline_failure_alert_sensor,
-    long_running_pipeline_sensor,
-    repeated_failure_sensor,
+from .csv_sensor import (
+    csv_file_watcher_sensor,
+    csv_archive_cleaner_sensor
 )
 
 all_sensors = [
-    error_detection_sensor,
-    pipeline_failure_alert_sensor,
-    long_running_pipeline_sensor,
-    repeated_failure_sensor,
+    csv_file_watcher_sensor,
+    csv_archive_cleaner_sensor,
 ]
 
 __all__ = [
     "all_sensors",
-    "error_detection_sensor",
-    "pipeline_failure_alert_sensor",
-    "long_running_pipeline_sensor",
-    "repeated_failure_sensor",
+    "csv_file_watcher_sensor",
+    "csv_archive_cleaner_sensor",
 ]

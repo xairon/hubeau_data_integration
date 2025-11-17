@@ -1,10 +1,9 @@
-# Docker Compose pour CI/CD (GitLab CI, production)
-# Utilise des variables d'environnement fournies par le CI/CD
-# Pour le développement local, utilisez: docker-compose.local.yml
-# Usage CI/CD: docker compose up -d
+# Hub'Eau Pipeline - Docker Compose Configuration
+# Production & Development deployment
+# Hot reload enabled: edit code → save → reload in UI (2-3s)
 
 services:
-  # Base de données métadonnées Dagster
+  # Dagster metadata database
   dagster_postgres:
     image: postgres:16-alpine
     container_name: brgm-dagster-postgres
@@ -20,7 +19,7 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Base de données Hub'Eau avec PostGIS
+  # Hub'Eau database (PostGIS)
   postgres:
     image: postgis/postgis:16-3.4-alpine
     container_name: brgm-postgres
@@ -41,7 +40,7 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # Worker DLT - Exécution des pipelines
+  # DLT Worker - Pipeline execution
   dlt_worker:
     build:
       context: .
@@ -54,6 +53,7 @@ services:
     environment:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
+      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
       # Database credentials
       PG_HOST: ${PG_HOST}
       PG_PORT: ${PG_PORT}
@@ -75,13 +75,16 @@ services:
       DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST}
       DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT}
     volumes:
-      # Note: src/ is NOT mounted in CI/CD (code is baked into image)
-      - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
-      - ./dagster_home:/app/dagster_home:ro
-    command: ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline"]
+      # Hot reload: mount source code (remove for production)
+      - ./src:/app/src
+      - ./configs:/app/configs
+      - ./scripts:/app/scripts
+      - ./dagster_home:/app/dagster_home
+      - ./data/csv_inbox:/app/data/csv_inbox
+      - ./data/csv_archive:/app/data/csv_archive
+    command: ["dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-f", "/app/src/hubeau_pipeline/grpc_server.py"]
     expose:
-      - "4000"  # GRPC API (internal)
+      - "4000"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 4000)); s.close()"]
       interval: 30s
@@ -90,7 +93,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Dagster Webserver - Interface UI
+  # Dagster Web UI
   dagster_webserver:
     build:
       context: .
@@ -104,6 +107,7 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
+      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST}
       DAGSTER_PG_PORT: ${DAGSTER_PG_PORT}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB}
@@ -121,6 +125,8 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
+      - ./data/csv_inbox:/app/data/csv_inbox:ro
+      - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
     ports:
       - "8080:3000"
@@ -132,7 +138,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Dagster Daemon - Orchestration (schedules, sensors)
+  # Dagster Daemon - Schedules & Sensors
   dagster_daemon:
     image: hubeau-orchestrator:latest
     container_name: brgm-dagster-daemon
@@ -143,6 +149,7 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
+      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST}
       DAGSTER_PG_PORT: ${DAGSTER_PG_PORT}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB}
@@ -160,6 +167,8 @@ services:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
+      - ./data/csv_inbox:/app/data/csv_inbox:ro
+      - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-daemon","run"]
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
@@ -169,7 +178,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Adminer - Interface web PostgreSQL
+  # Adminer - PostgreSQL Web UI
   adminer:
     image: adminer:latest
     container_name: brgm-adminer
@@ -182,8 +191,22 @@ services:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: pepa-linha-dark
 
+  # Portainer - Docker management UI
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: brgm-portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
 volumes:
   postgres_data:
     driver: local
   dagster_pg_data:
+    driver: local
+  portainer_data:
     driver: local

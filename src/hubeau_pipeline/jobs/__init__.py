@@ -1,64 +1,96 @@
 """
-Jobs Dagster - Orchestration des pipelines Hub'Eau
+Dagster Jobs - Hub'Eau Bronze Layer + Reference Data
 
-Un job par API pour faciliter l'exécution sélective
+Stations jobs: FULL load (no partitions)
+Chroniques jobs: Partitioned load (full, 2020-2025)
+Reference jobs: SANDRE & BD-LISA data
 """
 
 from .hubeau_jobs import (
-    # Jobs par API
-    piezometry_job,
-    quality_rivers_job,
-    quality_groundwater_job,
-    hydrometry_job,
-    temperature_job,
-    hydrobio_job,
-    ecoulement_job,
-    prelevements_job,
-    # Jobs globaux
+    # Jobs STATIONS (no partitions)
+    piezometry_stations_job,
+    quality_rivers_stations_job,
+    quality_groundwater_stations_job,
+    hydrometry_stations_job,
+    temperature_stations_job,
+    hydrobio_stations_job,
+    ecoulement_stations_job,
+    prelevements_stations_job,
+    # Jobs CHRONIQUES (partitioned)
+    piezometry_chroniques_job,
+    quality_rivers_chroniques_job,
+    quality_groundwater_chroniques_job,
+    hydrometry_chroniques_job,
+    temperature_chroniques_job,
+    hydrobio_chroniques_job,
+    ecoulement_chroniques_job,
+    prelevements_chroniques_job,
+    # Jobs GLOBAUX
     all_stations_job,
     all_chroniques_job,
-    # Schedules
-    weekly_stations_schedule,
-    daily_chroniques_schedule,
+)
+
+# Jobs REFERENCE DATA (SANDRE & BD-LISA)
+from .reference_jobs import (
+    sandre_full_load_job,
+    bdlisa_spatial_load_job,
+    reference_data_full_load_job,
 )
 
 all_jobs = [
-    # Jobs par API
-    piezometry_job,
-    quality_rivers_job,
-    quality_groundwater_job,
-    hydrometry_job,
-    temperature_job,
-    hydrobio_job,
-    ecoulement_job,
-    prelevements_job,
-    # Jobs globaux (pour schedules)
+    # Jobs STATIONS (no partitions)
+    piezometry_stations_job,
+    quality_rivers_stations_job,
+    quality_groundwater_stations_job,
+    hydrometry_stations_job,
+    temperature_stations_job,
+    hydrobio_stations_job,
+    ecoulement_stations_job,
+    prelevements_stations_job,
+    # Jobs CHRONIQUES (partitioned)
+    piezometry_chroniques_job,
+    quality_rivers_chroniques_job,
+    quality_groundwater_chroniques_job,
+    hydrometry_chroniques_job,
+    temperature_chroniques_job,
+    hydrobio_chroniques_job,
+    ecoulement_chroniques_job,
+    prelevements_chroniques_job,
+    # Jobs GLOBAUX
     all_stations_job,
     all_chroniques_job,
-]
-
-all_schedules = [
-    weekly_stations_schedule,
-    daily_chroniques_schedule,
+    # Jobs REFERENCE DATA
+    sandre_full_load_job,
+    bdlisa_spatial_load_job,
+    reference_data_full_load_job,
 ]
 
 __all__ = [
-    # Jobs par API
-    "piezometry_job",
-    "quality_rivers_job",
-    "quality_groundwater_job",
-    "hydrometry_job",
-    "temperature_job",
-    "hydrobio_job",
-    "ecoulement_job",
-    "prelevements_job",
-    # Jobs globaux
+    # Jobs STATIONS (no partitions)
+    "piezometry_stations_job",
+    "quality_rivers_stations_job",
+    "quality_groundwater_stations_job",
+    "hydrometry_stations_job",
+    "temperature_stations_job",
+    "hydrobio_stations_job",
+    "ecoulement_stations_job",
+    "prelevements_stations_job",
+    # Jobs CHRONIQUES (partitioned)
+    "piezometry_chroniques_job",
+    "quality_rivers_chroniques_job",
+    "quality_groundwater_chroniques_job",
+    "hydrometry_chroniques_job",
+    "temperature_chroniques_job",
+    "hydrobio_chroniques_job",
+    "ecoulement_chroniques_job",
+    "prelevements_chroniques_job",
+    # Jobs GLOBAUX
     "all_stations_job",
     "all_chroniques_job",
-    # Schedules
-    "weekly_stations_schedule",
-    "daily_chroniques_schedule",
+    # Jobs REFERENCE DATA
+    "sandre_full_load_job",
+    "bdlisa_spatial_load_job",
+    "reference_data_full_load_job",
     # Collections
     "all_jobs",
-    "all_schedules",
 ]

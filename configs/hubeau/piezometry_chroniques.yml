@@ -1,16 +1,24 @@
 resource:
-  name: piezometry_chroniques
+  name: piezometry_chroniques_raw
   endpoint: /chroniques.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-  primary_key:
-  - code_bss
-  - date_mesure
+  # Bronze layer: no PK/FK constraints, duplicates allowed
+  primary_key: null
 extraction:
   default_params:
     size: 5000
-    date_debut_mesure: "2020-01-01"
+  # Date filter parameter names for this API
+  date_filter_params:
+    date_debut: date_debut_mesure  # Start date parameter name
+    date_fin: date_fin_mesure      # End date parameter name
+  # Station slicing configuration (REQUIRED for piezometry API)
+  station_slicing:
+    enabled: true                  # This endpoint REQUIRES station codes
+    station_param: code_bss        # Parameter name for station code
+    stations_endpoint: /stations.csv  # Endpoint to fetch station list
+    batch_size: 20                 # Number of stations per batch (comma-separated codes)
 performance:
-  parallelism: 5
+  parallelism: 1
   batch_size: 5000
   retry_times: 3
   retry_delay: 2.0
