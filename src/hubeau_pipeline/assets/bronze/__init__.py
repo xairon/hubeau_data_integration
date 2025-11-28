@@ -51,6 +51,11 @@ from hubeau_pipeline.assets.bronze.dlt_assets import (
     prelevements_chroniques_raw,
 )
 
+# ERA5 (1)
+from hubeau_pipeline.assets.bronze.era5_assets import (
+    era5_france_meteo_raw,
+)
+
 __all__ = [
     # Temperature
     "temperature_stations_raw",
@@ -89,4 +94,7 @@ __all__ = [
     "prelevements_ouvrages_raw",
     "prelevements_points_raw",
     "prelevements_chroniques_raw",
+
+    # ERA5
+    "era5_france_meteo_raw",
 ]

@@ -37,6 +37,11 @@ from .reference_jobs import (
     reference_data_full_load_job,
 )
 
+# Jobs ERA5
+from .era5_jobs import (
+    era5_meteo_job,
+)
+
 all_jobs = [
     # Jobs STATIONS (no partitions)
     piezometry_stations_job,
@@ -63,6 +68,8 @@ all_jobs = [
     sandre_full_load_job,
     bdlisa_spatial_load_job,
     reference_data_full_load_job,
+    # Jobs ERA5
+    era5_meteo_job,
 ]
 
 __all__ = [
@@ -91,6 +98,8 @@ __all__ = [
     "sandre_full_load_job",
     "bdlisa_spatial_load_job",
     "reference_data_full_load_job",
+    # Jobs ERA5
+    "era5_meteo_job",
     # Collections
     "all_jobs",
 ]

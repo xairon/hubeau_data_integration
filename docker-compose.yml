@@ -1,6 +1,6 @@
 # Hub'Eau Pipeline - Docker Compose Configuration
-# Production & Development deployment
-# Hot reload enabled: edit code → save → reload in UI (2-3s)
+# Zero-config deployment: git clone → docker compose build → docker compose up -d
+# Optional .env file for custom values (fallback to defaults if not present)
 
 services:
   # Dagster metadata database
@@ -8,7 +8,7 @@ services:
     image: postgres:16-alpine
     container_name: brgm-dagster-postgres
     environment:
-      POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD:-REDACTED}
       POSTGRES_DB: dagster
     volumes:
       - dagster_pg_data:/var/lib/postgresql/data
@@ -24,9 +24,9 @@ services:
     image: postgis/postgis:16-3.4-alpine
     container_name: brgm-postgres
     environment:
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-      POSTGRES_DB: ${PG_DB}
-      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-REDACTED}
+      POSTGRES_DB: ${PG_DB:-postgres}
+      POSTGRES_USER: ${PG_USER:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
@@ -53,29 +53,29 @@ services:
     environment:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
-      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
+      PYTHONDONTWRITEBYTECODE: 1
       # Database credentials
-      PG_HOST: ${PG_HOST}
-      PG_PORT: ${PG_PORT}
-      PG_DB: ${PG_DB}
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
-      POSTGIS_HOST: ${POSTGIS_HOST}
-      POSTGIS_PORT: ${POSTGIS_PORT}
-      POSTGIS_DB: ${POSTGIS_DB}
-      POSTGIS_USER: ${POSTGIS_USER}
-      POSTGIS_PASSWORD: ${POSTGIS_PASSWORD}
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-postgres}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-REDACTED}
+      POSTGIS_HOST: ${POSTGIS_HOST:-postgres}
+      POSTGIS_PORT: ${POSTGIS_PORT:-5432}
+      POSTGIS_DB: ${POSTGIS_DB:-postgres}
+      POSTGIS_USER: ${POSTGIS_USER:-postgres}
+      POSTGIS_PASSWORD: ${POSTGIS_PASSWORD:-REDACTED}
       # Hub'Eau schema
-      HUBEAU_SCHEMA: ${HUBEAU_SCHEMA}
+      HUBEAU_SCHEMA: ${HUBEAU_SCHEMA:-hubeau}
       HUBEAU_SCHEMA_DIR: /app/scripts/schema
       # DLT PostgreSQL destination credentials
-      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: ${PG_DB}
-      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: ${PG_USER}
-      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD}
-      DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST}
-      DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT}
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: ${PG_DB:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: ${PG_USER:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD:-REDACTED}
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST:-postgres}
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT:-5432}
     volumes:
-      # Hot reload: mount source code (remove for production)
+      # Hot reload: mount source code
       - ./src:/app/src
       - ./configs:/app/configs
       - ./scripts:/app/scripts
@@ -107,19 +107,19 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
-      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
-      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST}
-      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT}
-      DAGSTER_PG_DB: ${DAGSTER_PG_DB}
-      DAGSTER_PG_USER: ${DAGSTER_PG_USER}
-      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      PYTHONDONTWRITEBYTECODE: 1
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-REDACTED}
       PYTHONPATH: /app
       # Application database credentials
-      PG_HOST: ${PG_HOST}
-      PG_PORT: ${PG_PORT}
-      PG_DB: ${PG_DB}
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-postgres}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-REDACTED}
       HUBEAU_SCHEMA_DIR: /app/scripts/schema
     volumes:
       - ./dagster_home:/app/dagster_home
@@ -149,19 +149,19 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
-      PYTHONDONTWRITEBYTECODE: 1  # Prevent .pyc creation for clean reloads
-      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST}
-      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT}
-      DAGSTER_PG_DB: ${DAGSTER_PG_DB}
-      DAGSTER_PG_USER: ${DAGSTER_PG_USER}
-      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
+      PYTHONDONTWRITEBYTECODE: 1
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-REDACTED}
       PYTHONPATH: /app
       # Application database credentials
-      PG_HOST: ${PG_HOST}
-      PG_PORT: ${PG_PORT}
-      PG_DB: ${PG_DB}
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-postgres}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-REDACTED}
       HUBEAU_SCHEMA_DIR: /app/scripts/schema
     volumes:
       - ./dagster_home:/app/dagster_home

@@ -24,17 +24,17 @@ Ce projet ingère automatiquement les données de 8 APIs Hub'Eau (piézométrie,
 
 - Docker & Docker Compose
 - 4 GB RAM minimum
+- Git
 
-### Installation
+### Installation ZERO-CONFIG
 
 ```bash
 # 1. Cloner le projet
 git clone <repository-url>
-cd brgm
+cd hubeau_data_integration
 
-# 2. Configuration
-cp .env.example .env
-# Éditer .env avec vos credentials PostgreSQL
+# 2. Build les images Docker
+docker compose build
 
 # 3. Démarrage
 docker compose up -d
@@ -43,10 +43,30 @@ docker compose up -d
 open http://localhost:8080
 ```
 
+**✅ C'est tout !** Le système utilise des valeurs par défaut et fonctionne immédiatement.
+
 **Interfaces disponibles:**
 - Dagster UI : http://localhost:8080
 - Adminer (PostgreSQL) : http://localhost:8081
 - Portainer (Docker) : http://localhost:9000
+
+### Configuration personnalisée (optionnel)
+
+Pour personnaliser les credentials ou paramètres :
+
+```bash
+# Créer un fichier .env personnalisé (optionnel)
+cp .env.example .env
+# Éditer .env avec vos valeurs
+nano .env
+
+# Redémarrer les services
+docker compose restart
+```
+
+**Credentials par défaut** (si pas de .env) :
+- PostgreSQL : `postgres` / `REDACTED`
+- Dagster DB : `postgres` / `REDACTED`
 
 ### Premier Pipeline
 

@@ -1,0 +1,48 @@
+resource:
+  name: era5_france_meteo_raw
+  dataset: reanalysis-era5-single-levels
+
+  # Variables ERA5 (noms officiels CDS)
+  variables:
+    - 2m_temperature           # Température à 2m (K)
+    - total_precipitation       # Précipitations totales (m)
+    - potential_evaporation     # Évapotranspiration potentielle (m)
+
+  # Zone géographique : France métropolitaine
+  # Format: [North, West, South, East]
+  area: [51.5, -5.5, 41.0, 10.0]  # France + marges
+
+extraction:
+  # Période historique complète
+  time_range:
+    start_year: 1940  # Début ERA5
+    end_year: null    # null = année courante
+
+  # ⚠️ IMPORTANT: 1 seul timestep par jour
+  temporal_config:
+    time: "00:00"  # Uniquement 00:00 UTC (données veille 23:00 UTC)
+    days: "all"    # Tous les jours du mois
+
+  # Résolution spatiale
+  grid_resolution: 0.25  # 0.25° (~25km)
+
+  # ⚠️ CHUNKING: 2 ans par requête (limite API Copernicus)
+  chunking:
+    years_per_request: 2  # Requêtes par blocs de 2 ans
+    request_timeout: 600  # 10 minutes max par requête
+
+storage:
+  format: netcdf4
+  compression: true
+  storage_type: bytea  # PostgreSQL BYTEA column
+
+performance:
+  parallelism: 1  # Pas de parallélisme (API rate limits)
+  batch_size: 1   # 1 fichier NetCDF4 par requête
+  retry_times: 3
+  retry_delay: 10.0  # 10 secondes entre retries
+  rate_limit: 2.0    # 2 secondes entre requêtes (conservatif)
+
+credentials:
+  cds_api_url: https://cds.climate.copernicus.eu/api/v2
+  cds_api_key: REDACTED
