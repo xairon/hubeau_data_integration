@@ -42,7 +42,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Copy remaining application code
 COPY configs /app/configs
-COPY .dlt /app/.dlt
 
 ENV PYTHONPATH=/app/src:/app
 ENV DAGSTER_HOME=/app/dagster_home
