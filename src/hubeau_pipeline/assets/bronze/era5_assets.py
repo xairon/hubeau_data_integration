@@ -42,7 +42,7 @@ def era5_france_meteo_raw(context):
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    pipeline = create_dlt_pipeline("era5_france_meteo", context)
+    pipeline = create_dlt_pipeline("era5_france_meteo", context=context)
 
     metrics = run_dlt_resource(
         pipeline=pipeline,
