@@ -313,7 +313,8 @@ def get_station_codes(
     write_disposition="replace"
 )
 def hubeau_stations(
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    dagster_context=None
 ) -> Iterator[List[Dict]]:
     """
     DLT resource for FULL load (stations)
@@ -322,10 +323,22 @@ def hubeau_stations(
 
     Args:
         config: Resource configuration from YAML
+        dagster_context: Dagster context for logging (optional)
 
     Yields:
         List of records per page
     """
+    # Helper function to log both to Python logger and Dagster context
+    def log_info(message: str):
+        logger.info(message)
+        if dagster_context:
+            dagster_context.log.info(message)
+
+    def log_warning(message: str):
+        logger.warning(message)
+        if dagster_context:
+            dagster_context.log.warning(message)
+
     base_url = config["resource"]["base_url"]
     endpoint = config["resource"]["endpoint"]
     rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
@@ -336,15 +349,15 @@ def hubeau_stations(
     total_pages, total_count = get_total_pages(client, endpoint)
 
     if total_count == 0:
-        logger.warning(f"No data found for {endpoint}")
+        log_warning(f"No data found for {endpoint}")
         return
 
-    logger.info(f"=== STARTING FULL LOAD ===")
-    logger.info(f"Total records: {total_count:,}")
-    logger.info(f"Total pages: {total_pages}")
-    logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
-    logger.info(f"Rate limit: {rate_limit}s per request")
-    logger.info(f"Batch writes: every 10,000 records")
+    log_info(f"=== STARTING FULL LOAD ===")
+    log_info(f"Total records: {total_count:,}")
+    log_info(f"Total pages: {total_pages}")
+    log_info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+    log_info(f"Rate limit: {rate_limit}s per request")
+    log_info(f"Batch writes: every 10,000 records")
 
     # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
     # Each page fetched sequentially with rate limiting
@@ -358,9 +371,9 @@ def hubeau_stations(
             # Log progress every 10 pages
             if page_num % 10 == 0:
                 progress_pct = (page_num / total_pages) * 100
-                logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records fetched")
+                log_info(f"📊 [{page_num}/{total_pages}] Progress: {progress_pct:.1f}% ({records_yielded:,}/{total_count:,} records fetched)")
 
-    logger.info(f"=== FETCH COMPLETE === Total: {records_yielded:,} records")
+    log_info(f"✅ FETCH COMPLETE - Total: {records_yielded:,} records")
 
 
 @dlt.resource(
@@ -369,7 +382,8 @@ def hubeau_stations(
 )
 def hubeau_chroniques_year(
     config: Dict[str, Any],
-    year: str
+    year: str,
+    dagster_context=None
 ) -> Iterator[List[Dict]]:
     """
     DLT resource for MODE partition (chroniques)
@@ -379,10 +393,27 @@ def hubeau_chroniques_year(
     Args:
         config: Resource configuration from YAML
         year: Partition mode - "full" for ALL data, or specific year (e.g., "2024")
+        dagster_context: Dagster context for logging (optional)
 
     Yields:
         List of records per page
     """
+    # Helper function to log both to Python logger and Dagster context
+    def log_info(message: str):
+        logger.info(message)
+        if dagster_context:
+            dagster_context.log.info(message)
+
+    def log_warning(message: str):
+        logger.warning(message)
+        if dagster_context:
+            dagster_context.log.warning(message)
+
+    def log_error(message: str):
+        logger.error(message)
+        if dagster_context:
+            dagster_context.log.error(message)
+
     base_url = config["resource"]["base_url"]
     endpoint = config["resource"]["endpoint"]
     rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
@@ -409,7 +440,7 @@ def hubeau_chroniques_year(
             params = {
                 param_date_debut: year
             }
-            logger.info(f"Using single year parameter: {param_date_debut}={year}")
+            log_info(f"Using single year parameter: {param_date_debut}={year}")
         else:
             # Date range parameters (e.g., date_debut_mesure=2020-01-01, date_fin_mesure=2020-12-31)
             date_debut = f"{year}-01-01"
@@ -418,12 +449,12 @@ def hubeau_chroniques_year(
                 param_date_debut: date_debut,
                 param_date_fin: date_fin
             }
-            logger.info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
+            log_info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
 
     # Check if station slicing is required (e.g., piezometry API)
     station_slicing_config = config.get("extraction", {}).get("station_slicing", {})
     if station_slicing_config.get("enabled", False):
-        logger.info("⚡ STATION BATCHING MODE ENABLED")
+        log_info("⚡ STATION BATCHING MODE ENABLED")
 
         # Get configuration
         station_param = station_slicing_config.get("station_param")
@@ -434,18 +465,18 @@ def hubeau_chroniques_year(
         station_codes = get_station_codes(base_url, stations_endpoint, station_param, rate_limit)
 
         if len(station_codes) == 0:
-            logger.warning("No stations found - cannot proceed")
+            log_warning("No stations found - cannot proceed")
             return
 
         total_stations = len(station_codes)
         total_chunks = (total_stations + batch_size - 1) // batch_size
 
-        logger.info(f"=== {mode_label} (STATION BATCHING) ===")
-        logger.info(f"Total stations: {total_stations:,}")
-        logger.info(f"Batch size: {batch_size} stations per chunk")
-        logger.info(f"Total chunks: {total_chunks}")
-        logger.info(f"Mode: Batching stations with comma-separated codes")
-        logger.info(f"Rate limit: {rate_limit}s per request")
+        log_info(f"=== {mode_label} (STATION BATCHING) ===")
+        log_info(f"Total stations: {total_stations:,}")
+        log_info(f"Batch size: {batch_size} stations per chunk")
+        log_info(f"Total chunks: {total_chunks}")
+        log_info(f"Mode: Batching stations with comma-separated codes")
+        log_info(f"Rate limit: {rate_limit}s per request")
 
         # Process stations in batches
         total_records_yielded = 0
@@ -453,8 +484,8 @@ def hubeau_chroniques_year(
             chunk_stations = station_codes[chunk_index:chunk_index + batch_size]
             chunk_num = (chunk_index // batch_size) + 1
 
-            logger.info(f"📦 Chunk {chunk_num}/{total_chunks}: {len(chunk_stations)} stations")
-            logger.info(f"   Stations: {', '.join(chunk_stations[:5])}{'...' if len(chunk_stations) > 5 else ''}")
+            log_info(f"📦 [{chunk_num}/{total_chunks}] Processing {len(chunk_stations)} stations...")
+            log_info(f"   Stations: {', '.join(chunk_stations[:5])}{'...' if len(chunk_stations) > 5 else ''}")
 
             # Build params with comma-separated station codes
             chunk_params = {
@@ -467,25 +498,27 @@ def hubeau_chroniques_year(
                 total_pages, total_count = get_total_pages(client, endpoint, chunk_params)
 
                 if total_count == 0:
-                    logger.info(f"  No data for chunk {chunk_num}")
+                    log_info(f"  [{chunk_num}/{total_chunks}] No data for this chunk")
                     continue
 
-                logger.info(f"  Found {total_count:,} records across {total_pages} pages")
+                log_info(f"  [{chunk_num}/{total_chunks}] Found {total_count:,} records across {total_pages} pages")
 
                 # Fetch all pages for this chunk
+                chunk_records = 0
                 for page_num in range(1, total_pages + 1):
                     records = fetch_page(client, endpoint, page_num, chunk_params)
                     if records:
+                        chunk_records += len(records)
                         total_records_yielded += len(records)
                         yield records
 
-                logger.info(f"✅ Chunk {chunk_num}/{total_chunks} complete: {total_count:,} records")
+                log_info(f"✅ [{chunk_num}/{total_chunks}] Chunk complete: {chunk_records:,} records (Total: {total_records_yielded:,})")
 
             except Exception as e:
-                logger.error(f"  Error processing chunk {chunk_num}: {e}")
+                log_error(f"❌ [{chunk_num}/{total_chunks}] Error processing chunk: {e}")
                 continue
 
-        logger.info(f"=== {mode_label} COMPLETE === Total: {total_records_yielded:,} records from {total_stations} stations in {total_chunks} chunks")
+        log_info(f"🎉 {mode_label} COMPLETE - Total: {total_records_yielded:,} records from {total_stations:,} stations in {total_chunks} chunks")
 
     else:
         # Standard mode (no station slicing)
@@ -493,15 +526,15 @@ def hubeau_chroniques_year(
         total_pages, total_count = get_total_pages(client, endpoint, params)
 
         if total_count == 0:
-            logger.warning(f"No data found for partition: {year}")
+            log_warning(f"No data found for partition: {year}")
             return
 
-        logger.info(f"=== {mode_label} ===")
-        logger.info(f"Total records: {total_count:,}")
-        logger.info(f"Total pages: {total_pages}")
-        logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
-        logger.info(f"Rate limit: {rate_limit}s per request")
-        logger.info(f"Batch writes: every 10,000 records")
+        log_info(f"=== {mode_label} ===")
+        log_info(f"Total records: {total_count:,}")
+        log_info(f"Total pages: {total_pages}")
+        log_info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+        log_info(f"Rate limit: {rate_limit}s per request")
+        log_info(f"Batch writes: every 10,000 records")
 
         # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
         records_yielded = 0
@@ -514,9 +547,9 @@ def hubeau_chroniques_year(
             # Log progress every 10 pages
             if page_num % 10 == 0:
                 progress_pct = (page_num / total_pages) * 100
-                logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records")
+                log_info(f"📊 [{page_num}/{total_pages}] Progress: {progress_pct:.1f}% ({records_yielded:,}/{total_count:,} records)")
 
-        logger.info(f"=== {mode_label} COMPLETE === Total: {records_yielded:,} records")
+        log_info(f"🎉 {mode_label} COMPLETE - Total: {records_yielded:,} records")
 
 
 @dlt.resource(
@@ -525,7 +558,8 @@ def hubeau_chroniques_year(
 )
 def hubeau_chroniques_incremental(
     config: Dict[str, Any],
-    last_date: Optional[dlt.sources.incremental] = None
+    last_date: Optional[dlt.sources.incremental] = None,
+    dagster_context=None
 ) -> Iterator[List[Dict]]:
     """
     DLT resource for INCREMENTAL loading (chroniques)
@@ -536,10 +570,22 @@ def hubeau_chroniques_incremental(
     Args:
         config: Resource configuration from YAML
         last_date: DLT incremental tracker (automatic)
+        dagster_context: Dagster context for logging (optional)
 
     Yields:
         List of records per page
     """
+    # Helper function to log both to Python logger and Dagster context
+    def log_info(message: str):
+        logger.info(message)
+        if dagster_context:
+            dagster_context.log.info(message)
+
+    def log_warning(message: str):
+        logger.warning(message)
+        if dagster_context:
+            dagster_context.log.warning(message)
+
     base_url = config["resource"]["base_url"]
     endpoint = config["resource"]["endpoint"]
     rate_limit = config.get("performance", {}).get("rate_limit", 0.3)
@@ -555,11 +601,11 @@ def hubeau_chroniques_incremental(
     if last_date and last_date.last_value:
         # Continue from last loaded date
         date_debut = last_date.last_value
-        logger.info(f"Incremental: loading since {date_debut}")
+        log_info(f"📅 Incremental: loading since {date_debut}")
     else:
         # First load: start from last year
         date_debut = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-        logger.info(f"First load: loading from {date_debut}")
+        log_info(f"📅 First load: loading from {date_debut}")
 
     date_fin = datetime.now().strftime("%Y-%m-%d")
 
@@ -571,28 +617,28 @@ def hubeau_chroniques_incremental(
         params = {
             param_date_debut: year
         }
-        logger.info(f"Using single year parameter: {param_date_debut}={year}")
+        log_info(f"Using single year parameter: {param_date_debut}={year}")
     else:
         # Date range parameters (standard case)
         params = {
             param_date_debut: date_debut,
             param_date_fin: date_fin
         }
-        logger.info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
+        log_info(f"Using date range parameters: {param_date_debut}={date_debut}, {param_date_fin}={date_fin}")
 
     # Get pagination info
     total_pages, total_count = get_total_pages(client, endpoint, params)
 
     if total_count == 0:
-        logger.info(f"No new data since {date_debut}")
+        log_info(f"No new data since {date_debut}")
         return
 
-    logger.info(f"=== INCREMENTAL LOAD: {date_debut} → {date_fin} ===")
-    logger.info(f"Total records: {total_count:,}")
-    logger.info(f"Total pages: {total_pages}")
-    logger.info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
-    logger.info(f"Rate limit: {rate_limit}s per request")
-    logger.info(f"Batch writes: every 10,000 records")
+    log_info(f"=== INCREMENTAL LOAD: {date_debut} → {date_fin} ===")
+    log_info(f"Total records: {total_count:,}")
+    log_info(f"Total pages: {total_pages}")
+    log_info(f"Mode: Sequential fetching (parallelism handled by Dagster)")
+    log_info(f"Rate limit: {rate_limit}s per request")
+    log_info(f"Batch writes: every 10,000 records")
 
     # Sequential fetching - Dagster handles asset-level parallelism (3 assets concurrently)
     records_yielded = 0
@@ -605,6 +651,6 @@ def hubeau_chroniques_incremental(
         # Log progress every 10 pages
         if page_num % 10 == 0:
             progress_pct = (page_num / total_pages) * 100
-            logger.info(f"Progress: {page_num}/{total_pages} pages ({progress_pct:.1f}%) - {records_yielded:,} records")
+            log_info(f"📊 [{page_num}/{total_pages}] Progress: {progress_pct:.1f}% ({records_yielded:,}/{total_count:,} records)")
 
-    logger.info(f"=== INCREMENTAL COMPLETE === Total: {records_yielded:,} records")
+    log_info(f"🎉 INCREMENTAL COMPLETE - Total: {records_yielded:,} records")

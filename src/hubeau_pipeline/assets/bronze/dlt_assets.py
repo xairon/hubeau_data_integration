@@ -22,6 +22,7 @@ import yaml
 import dlt
 from dagster import asset, StaticPartitionsDefinition
 from typing import Dict, Any
+from datetime import datetime
 
 from hubeau_pipeline.utils.db_helpers import delete_year_data
 from hubeau_pipeline.sources.hubeau_csv_source import (
@@ -38,14 +39,29 @@ from hubeau_pipeline.utils.dlt_batching import (
 # PARTITIONS DEFINITION
 # ============================================================================
 
-# MODE_PARTITIONS: FULL (all data) + YEAR-based backfills (2020-2025)
-# - "full" = Load ALL data (no date filter) - for production initial load
-# - "2020"-"2025" = Load specific year - for testing or targeted backfills
+# MODE_PARTITIONS: YEAR-based backfills from 1960 to current year
+# - Each year is a separate partition to avoid loading all data in memory
+# - For historical backfill: run partitions from oldest (1960) to newest
 # - NO PARTITION (incremental) = Load since last date - for ongoing updates (DLT managed)
-MODE_PARTITIONS = StaticPartitionsDefinition([
-    "full",  # Load ALL data (production mode)
-    "2020", "2021", "2022", "2023", "2024", "2025"  # Year-specific backfills (testing/targeted)
-])
+#
+# Historical context:
+# - French piezometry data goes back to ~1960s
+# - Each year is loaded independently to ensure data is written to PostgreSQL
+#   immediately after processing (no memory accumulation)
+# - Delete existing data for each year before reload (idempotence)
+
+# Generate year partitions from 1967 to current year
+# Historical context: French national piezometry network (ADES) started in 1967
+# Some older data may exist but 1967 marks the systematic monitoring start
+CURRENT_YEAR = datetime.now().year
+OLDEST_YEAR = 1967  # ADES national piezometry network started in 1967
+
+# Create list of year strings from oldest to current
+# This generates: ["1967", "1968", ..., "2024", "2025"]
+# Total: 59 partitions for complete historical backfill
+YEAR_PARTITIONS = [str(year) for year in range(OLDEST_YEAR, CURRENT_YEAR + 1)]
+
+MODE_PARTITIONS = StaticPartitionsDefinition(YEAR_PARTITIONS)
 
 
 # ============================================================================
@@ -123,7 +139,7 @@ def temperature_stations_raw(context):
     metrics = _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         "temperature_stations_raw",
     )
 
@@ -148,7 +164,7 @@ def piezometry_stations_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         "piezometry_stations_raw",
     )
 
@@ -173,7 +189,7 @@ def hydrometry_sites_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -198,7 +214,7 @@ def hydrometry_stations_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -223,7 +239,7 @@ def hydrobio_stations_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -248,7 +264,7 @@ def quality_rivers_stations_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -273,7 +289,7 @@ def quality_groundwater_stations_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -298,7 +314,7 @@ def ecoulement_stations_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -343,7 +359,7 @@ def temperature_chroniques_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "temperature_chroniques_raw",
         )
     else:
@@ -356,7 +372,8 @@ def temperature_chroniques_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_mesure_temp")
+                last_date=dlt.sources.incremental("date_mesure_temp"),
+                dagster_context=context
             ),
             "temperature_chroniques_raw",
         )
@@ -400,7 +417,7 @@ def piezometry_chroniques_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "piezometry_chroniques_raw",
         )
     else:
@@ -413,7 +430,8 @@ def piezometry_chroniques_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_mesure")
+                last_date=dlt.sources.incremental("date_mesure"),
+                dagster_context=context
             ),
             "piezometry_chroniques_raw",
         )
@@ -457,7 +475,7 @@ def hydrometry_obs_elab_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "hydrometry_obs_elab_raw",
         )
     else:
@@ -470,7 +488,8 @@ def hydrometry_obs_elab_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_obs_elab")
+                last_date=dlt.sources.incremental("date_obs_elab"),
+                dagster_context=context
             ),
             "hydrometry_obs_elab_raw",
         )
@@ -514,7 +533,7 @@ def hydrobio_indices_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "hydrobio_indices_raw",
         )
     else:
@@ -527,7 +546,8 @@ def hydrobio_indices_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_prelevement")
+                last_date=dlt.sources.incremental("date_prelevement"),
+                dagster_context=context
             ),
             "hydrobio_indices_raw",
         )
@@ -571,7 +591,7 @@ def hydrobio_taxons_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "hydrobio_taxons_raw",
         )
     else:
@@ -584,7 +604,8 @@ def hydrobio_taxons_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_prelevement")
+                last_date=dlt.sources.incremental("date_prelevement"),
+                dagster_context=context
             ),
             "hydrobio_taxons_raw",
         )
@@ -628,7 +649,7 @@ def quality_rivers_analyses_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "quality_rivers_analyses_raw",
         )
     else:
@@ -641,7 +662,8 @@ def quality_rivers_analyses_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_prelevement")
+                last_date=dlt.sources.incremental("date_prelevement"),
+                dagster_context=context
             ),
             "quality_rivers_analyses_raw",
         )
@@ -685,7 +707,7 @@ def quality_rivers_conditions_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "quality_rivers_conditions_raw",
         )
     else:
@@ -698,7 +720,8 @@ def quality_rivers_conditions_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_prelevement")
+                last_date=dlt.sources.incremental("date_prelevement"),
+                dagster_context=context
             ),
             "quality_rivers_conditions_raw",
         )
@@ -742,7 +765,7 @@ def quality_rivers_operations_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "quality_rivers_operations_raw",
         )
     else:
@@ -755,7 +778,8 @@ def quality_rivers_operations_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_prelevement")
+                last_date=dlt.sources.incremental("date_prelevement"),
+                dagster_context=context
             ),
             "quality_rivers_operations_raw",
         )
@@ -799,7 +823,7 @@ def quality_groundwater_analyses_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "quality_groundwater_analyses_raw",
         )
     else:
@@ -812,7 +836,8 @@ def quality_groundwater_analyses_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_prelevement")
+                last_date=dlt.sources.incremental("date_prelevement"),
+                dagster_context=context
             ),
             "quality_groundwater_analyses_raw",
         )
@@ -840,7 +865,7 @@ def ecoulement_campagnes_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -881,7 +906,7 @@ def ecoulement_observations_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "ecoulement_observations_raw",
         )
     else:
@@ -894,7 +919,8 @@ def ecoulement_observations_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("date_observation")
+                last_date=dlt.sources.incremental("date_observation"),
+                dagster_context=context
             ),
             "ecoulement_observations_raw",
         )
@@ -938,7 +964,7 @@ def prelevements_chroniques_raw(context):
         metrics = _run_resource_with_metrics(
             context,
             pipeline,
-            hubeau_chroniques_year(config, year=year),
+            hubeau_chroniques_year(config, year=year, dagster_context=context),
             "prelevements_chroniques_raw",
         )
     else:
@@ -951,7 +977,8 @@ def prelevements_chroniques_raw(context):
             pipeline,
             hubeau_chroniques_incremental(
                 config,
-                last_date=dlt.sources.incremental("annee")
+                last_date=dlt.sources.incremental("annee"),
+                dagster_context=context
             ),
             "prelevements_chroniques_raw",
         )
@@ -979,7 +1006,7 @@ def prelevements_ouvrages_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
 
@@ -1004,6 +1031,6 @@ def prelevements_points_raw(context):
     return _run_resource_with_metrics(
         context,
         pipeline,
-        hubeau_stations(config),
+        hubeau_stations(config, dagster_context=context),
         table_name,
     )
