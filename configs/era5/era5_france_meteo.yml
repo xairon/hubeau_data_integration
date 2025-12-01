@@ -1,6 +1,8 @@
 resource:
   name: era5_france_meteo_raw
-  dataset: reanalysis-era5-single-levels
+  # ERA5-Land: Meilleure résolution spatiale (~9km vs ~31km pour ERA5 standard)
+  # Plus adapté pour les variables de surface (précip, temp, ET)
+  dataset: reanalysis-era5-land
 
   # Variables ERA5 (noms officiels CDS)
   variables:
@@ -15,7 +17,7 @@ resource:
 extraction:
   # Période historique complète
   time_range:
-    start_year: 1940  # Début ERA5
+    start_year: 1950  # ⚠️ ERA5-Land commence en 1950 (ERA5 standard commence en 1940)
     end_year: null    # null = année courante
 
   # ⚠️ IMPORTANT: 1 seul timestep par jour
@@ -44,5 +46,8 @@ performance:
   rate_limit: 2.0    # 2 secondes entre requêtes (conservatif)
 
 credentials:
-  cds_api_url: https://cds.climate.copernicus.eu/api/v2
-  cds_api_key: REDACTED
+  # ⚠️ UPDATED: New CDS API endpoint (December 2024)
+  # Old URL (deprecated): https://cds.climate.copernicus.eu/api/v2
+  # New URL: https://cds.climate.copernicus.eu/api
+  cds_api_url: https://cds.climate.copernicus.eu/api
+  cds_api_key: REDACTED  # Format: API key WITHOUT <UID>: prefix

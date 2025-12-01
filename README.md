@@ -249,8 +249,31 @@ docker compose down -v
 docker compose up -d
 ```
 
+## Accès Distant (SSH Port Forwarding)
+
+Si le projet tourne sur un serveur distant, utilisez **Tabby** pour vous connecter avec redirection automatique des ports :
+
+### Configuration Tabby (RECOMMANDÉ)
+
+1. Ouvrir Tabby → **Settings** → **Profiles & connections**
+2. **New profile** → **SSH connection**
+3. **Importer le profil** : `scripts/tabby-profile-hubeau.json`
+
+Ou configurer manuellement :
+- **Host:** `dib-2019006065`
+- **Username:** `ringuet`
+- **Port forwarding:** 18080→8080, 18081→8081, 19000→9000, 15432→5432
+
+✅ Une fois connecté, accédez aux interfaces via :
+- Dagster UI : http://localhost:18080
+- Adminer : http://localhost:18081
+- Portainer : http://localhost:19000
+
+Voir [docs/PORT_FORWARDING.md](docs/PORT_FORWARDING.md) pour plus de détails.
+
 ## Documentation
 
+- [Port Forwarding](docs/PORT_FORWARDING.md) - SSH tunneling & configuration Tabby
 - [Architecture](docs/ARCHITECTURE.md) - Architecture détaillée
 - [Configuration](docs/CONFIGURATION.md) - Variables d'environnement
 - [APIs Hub'Eau](docs/APIS_HUBEAU.md) - Liste complète des endpoints

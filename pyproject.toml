@@ -61,7 +61,10 @@ dependencies = [
     "pyyaml>=6.0",
 
     # ERA5 / Copernicus CDS
-    "cdsapi==0.7.2",
+    # Updated to new CADS API client (December 2024)
+    # Note: cads-api-client requires cdsapi for legacy compatibility
+    "cads-api-client>=1.0.0",
+    "cdsapi>=0.7.7",  # Required by cads-api-client.legacy_api_client
 
     # Monitoring and logging
     "structlog==23.2.0",
@@ -135,7 +138,8 @@ worker = [
     "python-dateutil==2.8.2",
     "structlog==23.2.0",
     "prometheus-client==0.19.0",
-    "cdsapi==0.7.2",
+    "cads-api-client>=1.0.0",  # Updated to new CADS API
+    "cdsapi>=0.7.7",  # Required by cads-api-client
 ]
 
 # All dependencies (for local development)

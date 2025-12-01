@@ -132,3 +132,116 @@ pkill -f "ssh.*18080"
 ```
 
 **Attention** : En mode background, vous devez manuellement fermer le tunnel.
+
+## Configuration Tabby (RECOMMANDÉ)
+
+Tabby permet de configurer un profil SSH avec port forwarding automatique - c'est la méthode la plus simple !
+
+### Étape 1 : Ouvrir les paramètres Tabby
+
+1. Ouvrir Tabby
+2. Cliquer sur ⚙️ **Settings** (en bas à gauche)
+3. Aller dans **Profiles & connections**
+
+### Étape 2 : Créer un nouveau profil SSH
+
+1. Cliquer sur **New profile** → **SSH connection**
+2. Configurer le profil comme suit :
+
+**Onglet "General" :**
+- **Name:** `BRGM Hub'Eau (avec port forwarding)`
+- **Group:** `BRGM` (ou laissez vide)
+- **Icon:** 🌊 (optionnel)
+
+**Onglet "Connection" :**
+- **Host:** `dib-2019006065`
+- **Port:** `22`
+- **Username:** `ringuet`
+- **Authentication:** Password / Key (selon votre config)
+
+**Onglet "Port forwarding" :**
+
+Cliquer sur **Add** pour chaque redirection :
+
+| Type | Description | Listen Address | Listen Port | Target Address | Target Port |
+|------|-------------|----------------|-------------|----------------|-------------|
+| Local | Dagster UI | `localhost` | `18080` | `localhost` | `8080` |
+| Local | Adminer | `localhost` | `18081` | `localhost` | `8081` |
+| Local | Portainer | `localhost` | `19000` | `localhost` | `9000` |
+| Local | PostgreSQL | `localhost` | `15432` | `localhost` | `5432` |
+
+**Onglet "Advanced" (optionnel) :**
+- **Keep alive interval:** `60` secondes
+- Cocher ✅ **Reconnect automatically**
+
+### Étape 3 : Sauvegarder et utiliser
+
+1. Cliquer sur **Save**
+2. Le profil apparaît maintenant dans votre liste de connexions
+3. Double-cliquer dessus pour se connecter → **Les ports sont automatiquement redirigés !**
+
+### Avantages de Tabby
+
+✅ **Pas besoin de script** : Tout est configuré dans l'interface
+✅ **Reconnexion auto** : Si la connexion se perd, Tabby reconnecte et rétablit les tunnels
+✅ **Profil réutilisable** : Un clic pour se connecter avec tous les forwards
+✅ **Visual** : Voir l'état des port forwards dans l'interface
+✅ **Multi-session** : Peut ouvrir plusieurs onglets sur le même serveur
+
+### Export/Import du profil (optionnel)
+
+Pour partager la config avec l'équipe, vous pouvez exporter le profil :
+
+1. **Settings** → **Profiles & connections**
+2. Clic droit sur le profil → **Export**
+3. Partager le fichier JSON avec l'équipe
+
+**Exemple de configuration JSON :**
+```json
+{
+  "type": "ssh",
+  "name": "BRGM Hub'Eau (avec port forwarding)",
+  "group": "BRGM",
+  "options": {
+    "host": "dib-2019006065",
+    "port": 22,
+    "user": "ringuet",
+    "forwardedPorts": [
+      {
+        "type": "Local",
+        "description": "Dagster UI",
+        "host": "localhost",
+        "port": 18080,
+        "targetAddress": "localhost",
+        "targetPort": 8080
+      },
+      {
+        "type": "Local",
+        "description": "Adminer",
+        "host": "localhost",
+        "port": 18081,
+        "targetAddress": "localhost",
+        "targetPort": 8081
+      },
+      {
+        "type": "Local",
+        "description": "Portainer",
+        "host": "localhost",
+        "port": 19000,
+        "targetAddress": "localhost",
+        "targetPort": 9000
+      },
+      {
+        "type": "Local",
+        "description": "PostgreSQL",
+        "host": "localhost",
+        "port": 15432,
+        "targetAddress": "localhost",
+        "targetPort": 5432
+      }
+    ],
+    "keepaliveInterval": 60000,
+    "keepaliveCountMax": 3
+  }
+}
+```
