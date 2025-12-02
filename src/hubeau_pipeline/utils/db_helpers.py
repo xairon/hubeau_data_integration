@@ -82,11 +82,13 @@ def delete_year_data(
             return deleted_count
         else:
             # YEAR MODE: Delete only specific year
+            # Convert year to int to ensure proper type for EXTRACT comparison
+            year_int = int(year)
             delete_sql = f"""
                 DELETE FROM {schema}.{table_name}
                 WHERE EXTRACT(YEAR FROM {date_column}) = %s
             """
-            cursor.execute(delete_sql, (year,))
+            cursor.execute(delete_sql, (year_int,))
 
             deleted_count = cursor.rowcount
             conn.commit()
