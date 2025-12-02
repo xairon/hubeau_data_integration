@@ -12,7 +12,7 @@ PATTERN 2: CHRONIQUES (14 assets) - MODE partition + INCREMENTAL
 - With partition "full": Uses hubeau_chroniques_year() to load ALL historical data
 - With partition "2020"-"2025": Uses hubeau_chroniques_year() for specific year backfills
 - Without partition: Uses hubeau_chroniques_incremental() for ongoing updates
-- Uses delete_year_data() for idempotence in partition modes
+- Bronze layer: Append-only, deduplication handled in Silver layer (dbt)
 """
 
 # pyright: reportMissingImports=false
@@ -24,7 +24,6 @@ from dagster import asset, StaticPartitionsDefinition
 from typing import Dict, Any
 from datetime import datetime
 
-from hubeau_pipeline.utils.db_helpers import delete_year_data
 from hubeau_pipeline.sources.hubeau_csv_source import (
     hubeau_stations,
     hubeau_chroniques_year,
@@ -347,13 +346,8 @@ def temperature_chroniques_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "temperature_chroniques_raw",
-            year,
-            "date_mesure_temp"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -405,13 +399,8 @@ def piezometry_chroniques_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "piezometry_chroniques_raw",
-            year,
-            "date_mesure"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -463,13 +452,8 @@ def hydrometry_obs_elab_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "hydrometry_obs_elab_raw",
-            year,
-            "date_obs_elab"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -521,13 +505,8 @@ def hydrobio_indices_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "hydrobio_indices_raw",
-            year,
-            "date_prelevement"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -579,13 +558,8 @@ def hydrobio_taxons_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "hydrobio_taxons_raw",
-            year,
-            "date_prelevement"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -637,13 +611,8 @@ def quality_rivers_analyses_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "quality_rivers_analyses_raw",
-            year,
-            "date_prelevement"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -695,13 +664,8 @@ def quality_rivers_conditions_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "quality_rivers_conditions_raw",
-            year,
-            "date_prelevement"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -753,13 +717,8 @@ def quality_rivers_operations_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "quality_rivers_operations_raw",
-            year,
-            "date_prelevement"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -811,13 +770,8 @@ def quality_groundwater_analyses_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "quality_groundwater_analyses_raw",
-            year,
-            "date_prelevement"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -894,13 +848,8 @@ def ecoulement_observations_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "ecoulement_observations_raw",
-            year,
-            "date_observation"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
@@ -952,13 +901,8 @@ def prelevements_chroniques_raw(context):
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Delete existing data for this year (idempotence)
-        deleted = delete_year_data(
-            "prelevements_chroniques_raw",
-            year,
-            "annee"
-        )
-        context.log.info(f"Deleted {deleted} records for year {year}")
+        # Bronze layer: Append-only strategy (no DELETE)
+        # Deduplication will be handled in Silver layer (dbt)
 
         # Load year data
         metrics = _run_resource_with_metrics(
