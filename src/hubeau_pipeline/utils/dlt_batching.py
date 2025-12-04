@@ -294,11 +294,20 @@ def run_dlt_resource(
             getattr(resource, "name", str(resource)),
             f" -> {table_name}" if table_name else "",
         )
-        context.log.info(f"🔍 DEBUG: run_kwargs = {run_kwargs}")
-        context.log.info(f"🔍 DEBUG: resource type = {type(resource)}")
-        context.log.info(f"🔍 DEBUG: resource name = {getattr(resource, 'name', 'NO NAME')}")
+
+    # DEBUG: Force print to stdout to see in Dagster logs
+    print(f"🔍 DEBUG RUN_DLT_RESOURCE:")
+    print(f"  - table_name: {table_name}")
+    print(f"  - write_disposition: {write_disposition}")
+    print(f"  - run_kwargs: {run_kwargs}")
+    print(f"  - resource type: {type(resource)}")
+    print(f"  - resource name: {getattr(resource, 'name', 'NO NAME')}")
 
     load_info = pipeline.run(resource, **run_kwargs)
+
+    print(f"🔍 DEBUG AFTER PIPELINE.RUN:")
+    print(f"  - load_info type: {type(load_info)}")
+    print(f"  - hasattr load_packages: {hasattr(load_info, 'load_packages')}")
     metrics = extract_load_metrics(load_info)
 
     metadata: Dict[str, Any] = {
