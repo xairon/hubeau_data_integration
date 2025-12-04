@@ -169,6 +169,10 @@ class ERA5Extractor:
         # Check if file is ZIP compressed (Copernicus sometimes sends .nc.zip)
         logger.info(f"📊 Loading NetCDF into xarray...")
 
+        # Convert memoryview to bytes if needed (PostgreSQL returns memoryview)
+        if isinstance(netcdf_bytes, memoryview):
+            netcdf_bytes = bytes(netcdf_bytes)
+
         # Check for ZIP signature (PK\x03\x04)
         if netcdf_bytes[:4] == b'PK\x03\x04':
             logger.info(f"🔓 File is ZIP compressed, extracting...")
