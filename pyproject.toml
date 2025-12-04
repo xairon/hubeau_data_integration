@@ -65,6 +65,9 @@ dependencies = [
     # Note: cads-api-client requires cdsapi for legacy compatibility
     "cads-api-client>=1.0.0",
     "cdsapi>=0.7.7",  # Required by cads-api-client.legacy_api_client
+    "xarray>=2023.12.0",  # NetCDF data processing
+    "h5netcdf>=1.3.0",  # NetCDF engine for xarray
+    "netCDF4>=1.6.5",  # Alternative NetCDF engine
 
     # Monitoring and logging
     "structlog==23.2.0",
@@ -140,6 +143,9 @@ worker = [
     "prometheus-client==0.19.0",
     "cads-api-client>=1.0.0",  # Updated to new CADS API
     "cdsapi>=0.7.7",  # Required by cads-api-client
+    "xarray>=2023.12.0",  # NetCDF data processing
+    "h5netcdf>=1.3.0",  # NetCDF engine for xarray
+    "netCDF4>=1.6.5",  # Alternative NetCDF engine
 ]
 
 # All dependencies (for local development)
