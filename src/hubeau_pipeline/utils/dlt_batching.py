@@ -294,6 +294,9 @@ def run_dlt_resource(
             getattr(resource, "name", str(resource)),
             f" -> {table_name}" if table_name else "",
         )
+        context.log.info(f"🔍 DEBUG: run_kwargs = {run_kwargs}")
+        context.log.info(f"🔍 DEBUG: resource type = {type(resource)}")
+        context.log.info(f"🔍 DEBUG: resource name = {getattr(resource, 'name', 'NO NAME')}")
 
     load_info = pipeline.run(resource, **run_kwargs)
     metrics = extract_load_metrics(load_info)
