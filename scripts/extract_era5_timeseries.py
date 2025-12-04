@@ -148,6 +148,8 @@ class ERA5Extractor:
 
     def extract_netcdf(self, file_id: str) -> xr.Dataset:
         """Extract NetCDF data from PostgreSQL bytea column."""
+        import zipfile
+
         logger.info(f"📥 Fetching NetCDF data for {file_id}...")
 
         with self.conn.cursor() as cur:
@@ -164,8 +166,24 @@ class ERA5Extractor:
             netcdf_bytes = row[0]
             logger.info(f"✅ Fetched {len(netcdf_bytes) / (1024*1024):.2f} MB")
 
-        # Load NetCDF from bytes
+        # Check if file is ZIP compressed (Copernicus sometimes sends .nc.zip)
         logger.info(f"📊 Loading NetCDF into xarray...")
+
+        # Check for ZIP signature (PK\x03\x04)
+        if netcdf_bytes[:4] == b'PK\x03\x04':
+            logger.info(f"🔓 File is ZIP compressed, extracting...")
+
+            # Extract NetCDF from ZIP
+            with zipfile.ZipFile(io.BytesIO(netcdf_bytes)) as zf:
+                # Get first file in ZIP (should be the .nc file)
+                nc_filename = zf.namelist()[0]
+                logger.info(f"📦 Extracting {nc_filename} from ZIP...")
+
+                with zf.open(nc_filename) as nc_file:
+                    netcdf_bytes = nc_file.read()
+                    logger.info(f"✅ Extracted {len(netcdf_bytes) / (1024*1024):.2f} MB")
+
+        # Load NetCDF from bytes
         ds = xr.open_dataset(io.BytesIO(netcdf_bytes), engine='h5netcdf')
         logger.info(f"✅ Loaded NetCDF with {len(ds.time)} timesteps, {len(ds.latitude)} latitudes, {len(ds.longitude)} longitudes")
 
