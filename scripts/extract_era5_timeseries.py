@@ -189,7 +189,10 @@ class ERA5Extractor:
 
         # Load NetCDF from bytes
         ds = xr.open_dataset(io.BytesIO(netcdf_bytes), engine='h5netcdf')
-        logger.info(f"✅ Loaded NetCDF with {len(ds.time)} timesteps, {len(ds.latitude)} latitudes, {len(ds.longitude)} longitudes")
+
+        # Get time dimension (could be 'time' or 'valid_time' depending on ERA5 version)
+        time_dim = 'valid_time' if 'valid_time' in ds.dims else 'time'
+        logger.info(f"✅ Loaded NetCDF with {len(ds[time_dim])} timesteps, {len(ds.latitude)} latitudes, {len(ds.longitude)} longitudes")
 
         return ds
 
@@ -202,10 +205,12 @@ class ERA5Extractor:
 
         # Rename columns to match our schema
         # ERA5-Land variables: t2m (temperature), tp (total precipitation), pev (potential evaporation)
+        # Time dimension could be 'time' or 'valid_time'
         df = df.rename(columns={
             't2m': 'temperature_2m',
             'tp': 'total_precipitation',
-            'pev': 'potential_evaporation'
+            'pev': 'potential_evaporation',
+            'valid_time': 'time'  # Rename valid_time to time
         })
 
         # Convert units
