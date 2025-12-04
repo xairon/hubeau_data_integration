@@ -98,7 +98,6 @@ Pipeline d'ingestion des données Hub'Eau vers PostgreSQL avec orchestration Dag
 - dagster_webserver  # UI Dagster (port 8080)
 - dagster_daemon     # Daemon (jobs/sensors)
 - adminer            # PostgreSQL UI (port 8081)
-- portainer          # Docker UI (port 9000)
 ```
 
 ## Flux de Données
@@ -260,7 +259,6 @@ docker-compose up -d
 - Dagster Daemon
 - DLT Worker
 - Adminer (port 8081)
-- Portainer (port 9000)
 
 ### Production (GitLab CI/CD)
 

@@ -21,7 +21,6 @@
 
 - **Dagster UI** : http://localhost:8080 - Orchestration
 - **Adminer** : http://localhost:8081 - PostgreSQL
-- **Portainer** : http://localhost:9000 - Docker
 
 ## Ressources Externes
 

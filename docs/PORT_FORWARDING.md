@@ -1,5 +1,46 @@
 # SSH Port Forwarding Guide
 
+## 📖 Instructions pour l'équipe
+
+### Prérequis
+1. ✅ Accès VPN configuré
+2. ✅ Compte SSH sur le serveur `dib-2019006065`
+3. ✅ Connexion SSH fonctionnelle
+
+### Étapes rapides
+
+#### 1. Connexion VPN
+Connectez-vous au VPN de l'entreprise (si pas déjà fait).
+
+#### 2. Créer le tunnel SSH
+
+**Option simple (Adminer seulement)** :
+```bash
+ssh -L 18081:localhost:8081 VOTRE_USERNAME@dib-2019006065
+```
+
+**Option complète (tous les services)** :
+```bash
+ssh -L 18080:localhost:8080 \
+    -L 18081:localhost:8081 \
+    -L 15432:localhost:5432 \
+    VOTRE_USERNAME@dib-2019006065
+```
+
+⚠️ Remplacez `VOTRE_USERNAME` par votre identifiant SSH !
+
+#### 3. Accéder à Adminer
+
+Une fois le tunnel SSH ouvert, allez sur : http://localhost:18081
+
+**Credentials** :
+- Serveur : `postgres`
+- Utilisateur : `readonly`
+- Mot de passe : `readonly_2024_secure`
+- Base : `postgres`
+
+---
+
 ## Convention des Ports
 
 **Règle simple** : Ports locaux = Ports serveur avec préfixe `1`
@@ -8,7 +49,6 @@
 |---------|--------------|------------|------------|
 | **Dagster UI** | 8080 | **18080** | http://localhost:18080 |
 | **Adminer** | 8081 | **18081** | http://localhost:18081 |
-| **Portainer** | 9000 | **19000** | http://localhost:19000 |
 | **PostgreSQL** | 5432 | **15432** | localhost:15432 |
 
 ## Utilisation
@@ -37,10 +77,11 @@ Si vous préférez lancer manuellement :
 ```bash
 ssh -L 18080:localhost:8080 \
     -L 18081:localhost:8081 \
-    -L 19000:localhost:9000 \
     -L 15432:localhost:5432 \
-    ringuet@dib-2019006065
+    VOTRE_USERNAME@dib-2019006065
 ```
+
+⚠️ **IMPORTANT** : Remplacez `VOTRE_USERNAME` par votre identifiant SSH sur le serveur (ex: `ringuet`, `ben`, etc.)
 
 ## Accès aux Interfaces
 
@@ -57,17 +98,21 @@ Interface principale pour :
 ### 🗄️ Adminer (PostgreSQL Web)
 **URL** : http://localhost:18081
 
-**Credentials** :
+**Credentials (Read-Only - Recommandé)** :
 - **System** : PostgreSQL
-- **Server** : `brgm-postgres` ou `postgres`
+- **Server** : `postgres`
+- **Username** : `readonly`
+- **Password** : `readonly_2024_secure`
+- **Database** : `postgres`
+
+**Credentials (Admin - Full Access)** :
+- **System** : PostgreSQL
+- **Server** : `postgres`
 - **Username** : `postgres`
 - **Password** : `REDACTED`
 - **Database** : `postgres`
 
-### 🐳 Portainer (Docker Management)
-**URL** : http://localhost:19000
-
-Au premier accès, créer un compte admin.
+💡 **Recommandation** : Utilisez le user `readonly` pour la consultation. Le user `postgres` est réservé pour les opérations de maintenance.
 
 ### 🔌 PostgreSQL Direct
 
@@ -107,11 +152,10 @@ Si la connexion SSH timeout, ajoutez ces options :
 ```bash
 ssh -L 18080:localhost:8080 \
     -L 18081:localhost:8081 \
-    -L 19000:localhost:9000 \
     -L 15432:localhost:5432 \
     -o ServerAliveInterval=60 \
     -o ServerAliveCountMax=3 \
-    ringuet@dib-2019006065
+    VOTRE_USERNAME@dib-2019006065
 ```
 
 ## Background Mode (Optionnel)
@@ -123,9 +167,8 @@ Pour laisser le tunnel en arrière-plan :
 ssh -f -N \
     -L 18080:localhost:8080 \
     -L 18081:localhost:8081 \
-    -L 19000:localhost:9000 \
     -L 15432:localhost:5432 \
-    ringuet@dib-2019006065
+    VOTRE_USERNAME@dib-2019006065
 
 # Pour tuer le tunnel
 pkill -f "ssh.*18080"
@@ -156,8 +199,10 @@ Tabby permet de configurer un profil SSH avec port forwarding automatique - c'es
 **Onglet "Connection" :**
 - **Host:** `dib-2019006065`
 - **Port:** `22`
-- **Username:** `ringuet`
+- **Username:** `VOTRE_USERNAME` (ex: ringuet, ben, etc.)
 - **Authentication:** Password / Key (selon votre config)
+
+⚠️ **IMPORTANT** : Utilisez **votre propre username SSH**, pas celui de quelqu'un d'autre !
 
 **Onglet "Port forwarding" :**
 
@@ -167,7 +212,6 @@ Cliquer sur **Add** pour chaque redirection :
 |------|-------------|----------------|-------------|----------------|-------------|
 | Local | Dagster UI | `localhost` | `18080` | `localhost` | `8080` |
 | Local | Adminer | `localhost` | `18081` | `localhost` | `8081` |
-| Local | Portainer | `localhost` | `19000` | `localhost` | `9000` |
 | Local | PostgreSQL | `localhost` | `15432` | `localhost` | `5432` |
 
 **Onglet "Advanced" (optionnel) :**
@@ -222,14 +266,6 @@ Pour partager la config avec l'équipe, vous pouvez exporter le profil :
         "port": 18081,
         "targetAddress": "localhost",
         "targetPort": 8081
-      },
-      {
-        "type": "Local",
-        "description": "Portainer",
-        "host": "localhost",
-        "port": 19000,
-        "targetAddress": "localhost",
-        "targetPort": 9000
       },
       {
         "type": "Local",

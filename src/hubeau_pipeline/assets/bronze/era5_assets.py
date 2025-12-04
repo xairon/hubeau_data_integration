@@ -9,6 +9,7 @@ Stockage NetCDF4 bruts en PostgreSQL
 
 import yaml
 import dlt
+import gc
 from typing import Dict, Any
 from dagster import asset
 from hubeau_pipeline.sources.era5_source import era5_france_meteo
@@ -45,13 +46,15 @@ def era5_france_meteo_raw(context):
 
     context.log.info("🚀 Starting ERA5 download with TRUE incremental loading (chunk-by-chunk storage)...")
 
-    pipeline = create_dlt_pipeline("era5_france_meteo", context=context)
-
     total_files = 0
     total_size_mb = 0.0
 
     # Iterate through ERA5 generator and save EACH chunk individually
     for chunk_index, record in enumerate(era5_france_meteo(config, dagster_context=context), start=1):
+
+        # ⚠️ MEMORY FIX: Recreate pipeline for each chunk to avoid memory accumulation
+        context.log.info(f"🔧 [{chunk_index}] Creating fresh DLT pipeline to avoid memory leaks...")
+        pipeline = create_dlt_pipeline("era5_france_meteo", context=context)
 
         # Create a single-record resource for this chunk
         @dlt.resource(
@@ -78,6 +81,12 @@ def era5_france_meteo_raw(context):
             f"✅ [{chunk_index}] Chunk {record['file_id']} stored successfully in PostgreSQL! "
             f"Total: {total_files} files, {total_size_mb:.2f} MB"
         )
+
+        # ⚠️ MEMORY FIX: Force garbage collection after each chunk
+        del pipeline
+        del load_info
+        gc.collect()
+        context.log.info(f"🧹 [{chunk_index}] Memory cleaned (garbage collection completed)")
 
     context.log.info(
         f"🎉 ERA5 download complete! Stored {total_files} NetCDF4 files in PostgreSQL ({total_size_mb:.2f} MB)"

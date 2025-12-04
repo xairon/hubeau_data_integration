@@ -27,6 +27,9 @@ services:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-REDACTED}
       POSTGRES_DB: ${PG_DB:-postgres}
       POSTGRES_USER: ${PG_USER:-postgres}
+      # Read-only user credentials (passed to init scripts)
+      # Note: PostgreSQL custom settings must be prefixed with a namespace
+      PGOPTIONS: "-c hubeau.readonly_user=${PG_READONLY_USER:-readonly} -c hubeau.readonly_password=${PG_READONLY_PASSWORD:-readonly_default_pass_2024}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
@@ -191,22 +194,8 @@ services:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: pepa-linha-dark
 
-  # Portainer - Docker management UI
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: brgm-portainer
-    restart: unless-stopped
-    ports:
-      - "9000:9000"
-      - "9443:9443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-
 volumes:
   postgres_data:
     driver: local
   dagster_pg_data:
-    driver: local
-  portainer_data:
     driver: local

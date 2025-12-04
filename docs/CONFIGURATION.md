@@ -38,13 +38,6 @@ Ce guide détaille la configuration des variables d'environnement pour le projet
 | `DESTINATION__POSTGRES__CREDENTIALS__USERNAME` | User destination DLT | `${PG_USER}` | ✅ |
 | `DESTINATION__POSTGRES__CREDENTIALS__PASSWORD` | Pass destination DLT | `${PG_PASSWORD}` | ✅ |
 
-### Monitoring (Optionnel)
-
-| Variable | Description | Valeur par défaut | Obligatoire |
-|----------|-------------|-------------------|-------------|
-| `GRAFANA_PASSWORD` | Mot de passe admin Grafana | `admin` | ❌ |
-| `PROMETHEUS_PORT` | Port Prometheus | `9090` | ❌ |
-
 ### Backfill (Optionnel)
 
 | Variable | Description | Valeur par défaut | Obligatoire |
