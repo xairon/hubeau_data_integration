@@ -82,9 +82,11 @@ def delete_year_data(
             return deleted_count
         else:
             # YEAR MODE: Delete only specific year
+            # CRITICAL: Cast BOTH date_column (may be TEXT/VARCHAR) AND year parameter (string to INTEGER)
+            # DLT may create date columns as TEXT instead of TIMESTAMP, so we cast to TIMESTAMP first
             delete_sql = f"""
                 DELETE FROM {schema}.{table_name}
-                WHERE EXTRACT(YEAR FROM {date_column}) = %s
+                WHERE EXTRACT(YEAR FROM CAST({date_column} AS TIMESTAMP)) = CAST(%s AS INTEGER)
             """
             cursor.execute(delete_sql, (year,))
 
