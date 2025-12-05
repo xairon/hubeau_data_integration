@@ -34,7 +34,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"
+      - "49500-49599:5432"  # Nicolas's allocated port range
     healthcheck:
       test: ["CMD-SHELL","pg_isready -U postgres -d postgres"]
       interval: 10s
@@ -132,7 +132,7 @@ services:
       - ./data/csv_archive:/app/data/csv_archive:ro
     command: ["dagster-webserver","-h","0.0.0.0","-p","3000","-w","/app/dagster_home/workspace.yaml"]
     ports:
-      - "8080:3000"
+      - "49500-49599:3000"  # Nicolas's allocated port range
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/server_info || exit 1"]
       interval: 30s
@@ -189,7 +189,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "8081:8080"
+      - "49500-49599:8080"  # Nicolas's allocated port range
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: pepa-linha-dark
