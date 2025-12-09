@@ -289,10 +289,3 @@ Voir [docs/PORT_FORWARDING.md](docs/PORT_FORWARDING.md) pour plus de détails.
 - **Conteneurisation** : Docker + Docker Compose
 - **CI/CD** : GitLab CI/CD
 
-## Licence
-
-Propriétaire - BRGM
-
----
-
-**Besoin d'aide ?** Voir [docs/](docs/) pour la documentation complète.
