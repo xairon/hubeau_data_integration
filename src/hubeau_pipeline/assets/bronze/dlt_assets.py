@@ -387,45 +387,59 @@ def piezometry_chroniques_raw(context):
     - With partition "full": Load ALL historical data
     - With partition "2020"-"2025": Load specific year (backfill/testing)
     - Without partition: Incremental from last date
+    
+    SIMPLIFIED: Uses pipeline.run() directly instead of custom wrappers
     """
     config_path = "configs/hubeau/piezometry_chroniques.yml"
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
     pipeline = _create_dlt_pipeline("hubeau_piezometry_chroniques", context)
+    table_name = "piezometry_chroniques_raw"
 
     if context.has_partition_key:
         # ===== YEAR PARTITION MODE =====
         year = context.partition_key
         context.log.info(f"YEAR PARTITION: {year}")
 
-        # Bronze layer: Append-only strategy (no DELETE)
-        # Deduplication will be handled in Silver layer (dbt)
-
-        # Load year data
-        metrics = _run_resource_with_metrics(
-            context,
-            pipeline,
+        # Use pipeline.run() DIRECTLY - no wrapper
+        # NOTE: write_disposition is already set in @dlt.resource decorator
+        load_info = pipeline.run(
             hubeau_chroniques_year(config, year=year, dagster_context=context),
-            "piezometry_chroniques_raw",
+            table_name=table_name
         )
     else:
         # ===== INCREMENTAL MODE =====
         context.log.info("INCREMENTAL mode")
 
-        # Use DLT incremental (tracks last date automatically)
-        metrics = _run_resource_with_metrics(
-            context,
-            pipeline,
+        load_info = pipeline.run(
             hubeau_chroniques_incremental(
                 config,
                 last_date=dlt.sources.incremental("date_mesure"),
                 dagster_context=context
             ),
-            "piezometry_chroniques_raw",
+            table_name=table_name
         )
 
-    return metrics
+    # Extract metrics from load_info
+    rows_loaded = 0
+    try:
+        for package in getattr(load_info, "load_packages", []) or []:
+            for job in getattr(package, "jobs", []) or []:
+                metrics = getattr(job, "metrics", None) or {}
+                items = metrics.get("items", 0)
+                if isinstance(items, (int, float)):
+                    rows_loaded += int(items)
+    except Exception as e:
+        context.log.warning(f"Could not extract metrics: {e}")
+
+    context.log.info(f"✅ Loaded {rows_loaded:,} rows to {table_name}")
+    
+    return {
+        "rows_loaded": rows_loaded,
+        "table_name": table_name,
+        "status": "success"
+    }
 
 
 @asset(

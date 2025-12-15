@@ -56,6 +56,11 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
     era5_france_meteo_raw,
 )
 
+# Simple assets (no DLT) - for debugging
+from hubeau_pipeline.assets.bronze.simple_assets import (
+    piezometry_chroniques_simple,
+)
+
 __all__ = [
     # Temperature
     "temperature_stations_raw",
@@ -97,4 +102,7 @@ __all__ = [
 
     # ERA5
     "era5_france_meteo_raw",
+
+    # Simple (no DLT)
+    "piezometry_chroniques_simple",
 ]

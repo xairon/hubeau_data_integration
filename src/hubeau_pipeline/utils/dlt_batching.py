@@ -49,21 +49,26 @@ def create_dlt_pipeline(
     dataset_name: Optional[str] = None,
     progress: Optional[str] = "log",
 ) -> dlt.Pipeline:
-    """Crée un pipeline DLT isolé pour un run Dagster.
+    """Crée un pipeline DLT pour un run Dagster.
 
     Args:
         pipeline_name: Nom logique du pipeline.
-        context: Contexte Dagster, utilisé pour isoler les runs concurrents.
+        context: Contexte Dagster pour le logging (optionnel).
         dataset_name: Schéma de destination (défaut configurable via env).
         progress: Mode de reporting de DLT ("log", None, ...).
 
     Returns:
         Instance `dlt.Pipeline` configurée sur PostgreSQL.
+    
+    Note:
+        Pipeline name is kept STABLE across Dagster runs to ensure DLT
+        maintains consistent schema state. This is required for append
+        mode to work correctly when multiple partitions write to the same table.
     """
 
+    # Use stable pipeline name (no run_id suffix) to share DLT state across runs
+    # This ensures schema versioning works correctly for append operations
     unique_name = pipeline_name
-    if context is not None and getattr(context, "run_id", None):
-        unique_name = f"{pipeline_name}_{context.run_id[:8]}"
 
     dataset = dataset_name or os.getenv("DLT_DEFAULT_DATASET", "staging")
 

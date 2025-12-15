@@ -11,9 +11,11 @@ from .sensors import all_sensors
 from .resources import RESOURCES
 from .io.io_managers import noop_io_manager
 
-# Limit parallelism to 3 concurrent assets (prevents OOM)
+# Force sequential execution (max_concurrent: 1) to prevent DLT file conflicts
+# when multiple partitions run in parallel. DLT uses shared temp files that
+# don't support concurrent access from multiple processes.
 limited_executor = multiprocess_executor.configured({
-    "max_concurrent": 3
+    "max_concurrent": 1
 })
 
 defs = Definitions(
