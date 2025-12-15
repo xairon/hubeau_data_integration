@@ -43,6 +43,8 @@ from .bronze import (
     prelevements_chroniques_raw,
     # ERA5 (1)
     era5_france_meteo_raw,
+    # Simple loader (no DLT)
+    piezometry_chroniques_simple,
 )
 
 # Monitoring assets
@@ -108,6 +110,8 @@ all_bronze_assets = [
     prelevements_chroniques_raw,
     # ERA5 (1)
     era5_france_meteo_raw,
+    # Simple loader (no DLT)
+    piezometry_chroniques_simple,
 ]
 
 # Universal CSV ingestion asset (always available)
@@ -164,6 +168,8 @@ __all__ = [
     "prelevements_chroniques_raw",
     # ERA5 Assets
     "era5_france_meteo_raw",
+    # Simple loader
+    "piezometry_chroniques_simple",
     # Reference Data Assets
     "sandre_analysis_refs",
     "sandre_territorial_refs",
