@@ -1,5 +1,5 @@
 # Configuration Dagster pour Hub'Eau
-# Configuration avec limitations pour protéger les APIs externes ET la RAM
+# Limitation stricte des runs concurrents pour éviter les conflits DLT
 
 storage:
   postgres:
@@ -15,17 +15,16 @@ storage:
       password:
         env: DAGSTER_PG_PASSWORD
 
-# Limitation des exécutions concurrentes pour éviter de surcharger Hub'Eau ET éviter OOM (SIGKILL)
-# OPTIMISÉ: Augmentation du parallélisme pour profiter du rate_limit réduit (0.3s)
+# DLT ne supporte pas les runs concurrents avec le même pipeline
+# Un seul run à la fois pour éviter les FileNotFoundError pendant normalize
 run_coordinator:
   module: dagster.core.run_coordinator
   class: QueuedRunCoordinator
   config:
-    max_concurrent_runs: 4  # ✅ Maximum 4 runs en parallèle (optimisé avec rate_limit 0.3s)
+    max_concurrent_runs: 1  # ⚠️ CRITIQUE: Un seul run pour éviter conflits DLT
     tag_concurrency_limits:
-      - key: "api"
-        value: "hubeau"
-        limit: 3  # ✅ 3 exécutions Hub'Eau simultanées (optimisé)
+      - key: "dagster/concurrency_key"
+        limit: 1
 
 telemetry:
   enabled: false

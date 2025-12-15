@@ -29,9 +29,13 @@ def piezometry_chroniques_simple(context: AssetExecutionContext):
     
     Uses direct PostgreSQL loader for reliability.
     Each partition = one year of data.
+    
+    NOTE: Writes to a SEPARATE table (piezometry_chroniques_simple_raw)
+    to avoid conflicts with the DLT version (piezometry_chroniques_raw).
+    Use this as a fallback if DLT fails.
     """
     year = context.partition_key
-    table_name = "piezometry_chroniques_raw"
+    table_name = "piezometry_chroniques_simple_raw"  # Different table to avoid DLT conflict
     
     context.log.info(f"🚀 Starting load for year {year}")
     

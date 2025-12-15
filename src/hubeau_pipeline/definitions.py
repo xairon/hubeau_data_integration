@@ -1,5 +1,5 @@
 """
-Dagster Definitions - Application entry point
+Dagster Definitions - Entry point
 """
 
 from dagster import Definitions, multiprocess_executor
@@ -11,21 +11,14 @@ from .sensors import all_sensors
 from .resources import RESOURCES
 from .io.io_managers import noop_io_manager
 
-# Force sequential execution (max_concurrent: 1) to prevent DLT file conflicts
-# when multiple partitions run in parallel. DLT uses shared temp files that
-# don't support concurrent access from multiple processes.
-limited_executor = multiprocess_executor.configured({
-    "max_concurrent": 1
-})
+# Sequential execution to prevent DLT file conflicts
+limited_executor = multiprocess_executor.configured({"max_concurrent": 1})
 
 defs = Definitions(
     assets=all_assets,
     jobs=all_jobs,
     schedules=all_schedules,
     sensors=all_sensors,
-    resources={
-        **RESOURCES,
-        "noop_io_manager": noop_io_manager,
-    },
+    resources={**RESOURCES, "noop_io_manager": noop_io_manager},
     executor=limited_executor,
 )
