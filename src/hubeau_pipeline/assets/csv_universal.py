@@ -44,18 +44,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from hubeau_pipeline.utils.dlt_batching import (
-    create_dlt_pipeline,
-    run_dlt_resource,
-)
 
-
-def _create_dlt_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
-    """Compatibilité avec les autres assets via `create_dlt_pipeline`."""
-
-    return create_dlt_pipeline(
-        pipeline_name,
-        context=context,
+def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
+    """Create DLT pipeline with PostgreSQL destination."""
+    import os
+    from dlt.destinations import postgres
+    
+    destination = postgres(
+        credentials={
+            "database": os.environ.get("PG_DB", "postgres"),
+            "username": os.environ.get("PG_USER", "postgres"),
+            "password": os.environ.get("PG_PASSWORD"),
+            "host": os.environ.get("PG_HOST", "postgres"),
+            "port": int(os.environ.get("PG_PORT", "5432")),
+        }
+    )
+    
+    return dlt.pipeline(
+        pipeline_name=pipeline_name,
+        destination=destination,
         dataset_name="staging",
         progress="log",
     )
@@ -174,25 +181,10 @@ def ingest_single_csv(
     context: AssetExecutionContext
 ) -> Dict[str, Any]:
     """
-    Ingest a single CSV file using DLT with advanced features.
-
-    DLT FEATURES USED:
-    - Automatic schema detection and evolution
-    - Automatic column name normalization
-    - Type inference and validation
-    - Batch processing for large files
-    - Error handling and retry mechanisms
-    - Progress tracking and metrics
-
-    Args:
-        csv_path: Path to CSV file
-        context: Dagster context
-
-    Returns:
-        Dict with ingestion stats
+    Ingest a single CSV file using DLT with advanced features (Streaming).
+    
+    OPTIMIZED: Uses streaming instead of Pandas to handle large files (No OOM).
     """
-    import pandas as pd
-
     csv_filename = csv_path.name
     context.log.info(f"=== INGESTING: {csv_filename} ===")
 
@@ -210,123 +202,83 @@ def ingest_single_csv(
     else:
         context.log.info(f"Using delimiter from config: '{delimiter}'")
     
-    date_columns = source_config.get("date_columns", [])
     table_name = dest_config.get("table_name", csv_path.stem)
     write_disposition = dest_config.get("write_disposition", "replace")
     primary_key = dest_config.get("primary_key")
-    merge_key = dest_config.get("merge_key")  # For merge write_disposition
+    merge_key = dest_config.get("merge_key")
 
     # Prefix table with "staging_"
     full_table_name = f"staging_{table_name}"
 
-    context.log.info(f"Config: delimiter='{delimiter}', dates={date_columns}")
     context.log.info(f"Destination: staging.{full_table_name}")
     context.log.info(f"Write mode: {write_disposition}")
 
-    # Read CSV with error handling and encoding fallback
-    # Try UTF-8 first, fallback to latin-1 for compatibility
-    try:
-        df = pd.read_csv(
-            csv_path,
-            sep=delimiter,
-            parse_dates=date_columns if date_columns else False,
-            low_memory=False,
-            encoding='utf-8',
-            on_bad_lines='warn'  # Warn on bad lines instead of failing
-        )
-    except UnicodeDecodeError:
-        # Try with different encoding (common for French data)
-        context.log.warning(f"UTF-8 failed, trying latin-1 for {csv_filename}")
-        df = pd.read_csv(
-            csv_path,
-            sep=delimiter,
-            parse_dates=date_columns if date_columns else False,
-            low_memory=False,
-            encoding='latin-1',
-            on_bad_lines='warn'
-        )
-
-    total_rows = len(df)
-    context.log.info(f"Loaded {total_rows:,} rows with {len(df.columns)} columns")
-
-    # Normalize column names (DLT also does this, but we pre-process for consistency)
-    original_columns = df.columns.tolist()
-    df.columns = [normalize_column_name(col) for col in df.columns]
-    
-    # Log column name changes if any
-    if original_columns != df.columns.tolist():
-        context.log.info(f"Normalized {len([i for i, (o, n) in enumerate(zip(original_columns, df.columns)) if o != n])} column names")
-
-    # Replace NaN with None (DLT handles this, but explicit is better)
-    df = df.where(pd.notnull(df), None)
-
-    # Create DLT resource with advanced features
+    # Create DLT resource with generator for streaming
     @dlt.resource(
         name=full_table_name,
         write_disposition=write_disposition,
         primary_key=primary_key,
         merge_key=merge_key if write_disposition == "merge" else None,
-        # DLT will automatically:
-        # - Detect and infer data types
-        # - Normalize column names (we pre-process for consistency)
-        # - Handle schema evolution
-        # - Batch data efficiently
     )
     def csv_data():
-        """
-        DLT resource for CSV data.
+        """Generator that streams rows from CSV."""
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252']
         
-        Uses DLT's automatic features:
-        - Schema detection and type inference
-        - Column normalization
-        - Batch processing
-        - Error handling
-        """
-        # Yield in batches for memory efficiency
-        batch_size = 10000
-        for i in range(0, len(df), batch_size):
-            batch = df.iloc[i:i+batch_size]
-            # Convert to dict records - DLT will handle type inference
-            records = batch.to_dict('records')
-            # DLT automatically handles:
-            # - Type coercion
-            # - Null handling
-            # - Schema validation
-            yield records
+        for encoding in encodings:
+            try:
+                with open(csv_path, 'r', encoding=encoding) as f:
+                    reader = csv.DictReader(f, delimiter=delimiter)
+                    try:
+                        # Verify we can read first row
+                        first_row = next(reader)
+                        yield first_row
+                        # Yield the rest
+                        for row in reader:
+                            # Filter empty keys if any
+                            clean_row = {k: v for k, v in row.items() if k is not None}
+                            yield clean_row
+                        break # Success, stop trying encodings
+                    except StopIteration:
+                        break # Empty file
+            except UnicodeDecodeError:
+                context.log.warning(f"Encoding {encoding} failed for {csv_filename}, trying next...")
+                continue
+            except Exception as e:
+                context.log.error(f"Error reading CSV with {encoding}: {e}")
+                raise e
 
-    # Create pipeline with enhanced configuration
-    pipeline = _create_dlt_pipeline(f"csv_{table_name}", context)
+    # Create pipeline
+    pipeline = _create_pipeline(f"csv_{table_name}", context)
     
-    # Run pipeline - DLT handles schema detection, retries, etc.
+    # Run pipeline
     try:
-        metrics = run_dlt_resource(
-            pipeline=pipeline,
-            resource=csv_data(),
-            context=context,
-            table_name=full_table_name,
-            write_disposition=write_disposition,
-            extra_metadata={
-                "columns_count": len(df.columns),
-                "source_file": csv_filename,
-                "schema": "staging",
-            },
-        )
+        load_info = pipeline.run(csv_data())
+        
+        # Extract metrics
+        rows_loaded = 0
+        for pkg in getattr(load_info, "load_packages", []) or []:
+            for job in getattr(pkg, "jobs", []) or []:
+                rows_loaded += getattr(job, "metrics", {}).get("items", 0)
+        
+        metrics = {"rows_loaded": rows_loaded, "status": "success"}
     except Exception as e:
         context.log.error(f"DLT pipeline failed for {csv_filename}: {e}")
-        raise
+        raise e
 
-    rows_loaded = metrics.get("rows_loaded", total_rows or 0)
-
+    # Simple approximate row count for logging if DLT metrics are empty (e.g. if skipped)
+    # We don't want to re-read the file just for counting if possible, but logging '0' might be confusing.
+    # DLT 'rows_loaded' is accurate for what was inserted.
+    
     context.log.info(
-        f"✅ Ingested {csv_filename}: {rows_loaded:,} rows → staging.{full_table_name}"
+        f"✅ Ingested {csv_filename}: {metrics['rows_loaded']:,} rows → staging.{full_table_name}"
     )
 
     return {
         "filename": csv_filename,
-        "rows_loaded": rows_loaded,
+        "rows_loaded": metrics['rows_loaded'],
         "table_name": full_table_name,
         "write_disposition": write_disposition,
-        "columns_count": len(df.columns),
         "status": metrics.get("status", "success"),
     }
 

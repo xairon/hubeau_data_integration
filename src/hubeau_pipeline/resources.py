@@ -13,7 +13,6 @@ import os
 from contextlib import contextmanager
 from typing import Optional
 
-import httpx
 import psycopg2
 from dagster import ConfigurableResource
 from pydantic import Field, PrivateAttr
@@ -123,40 +122,6 @@ class PostgreSQLResource(ConfigurableResource):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
 
-class HTTPClientResource(ConfigurableResource):
-    """
-    HTTP client resource for Hub'Eau API calls.
-
-    Provides a configured httpx.Client with proper timeouts and headers.
-    """
-
-    timeout: float = Field(default=30.0, description="Request timeout in seconds")
-    user_agent: str = Field(default="hubeau-pipeline/1.0", description="User-Agent header")
-
-    _client: Optional[httpx.Client] = PrivateAttr(default=None)
-
-    def get_client(self) -> httpx.Client:
-        """
-        Get HTTP client (lazy initialization, reuses same client).
-
-        Returns:
-            httpx.Client: Configured HTTP client
-        """
-        if self._client is None:
-            logger.info(f"🌐 Creating HTTP client (timeout={self.timeout}s, UA={self.user_agent})")
-            self._client = httpx.Client(
-                timeout=self.timeout,
-                headers={"User-Agent": self.user_agent},
-                follow_redirects=True
-            )
-        return self._client
-
-    def teardown(self):
-        """Cleanup HTTP client on resource teardown"""
-        if self._client:
-            self._client.close()
-            logger.debug("✅ HTTP client closed")
-
 
 # ============================================================================
 # RESOURCE DEFINITIONS
@@ -165,7 +130,10 @@ class HTTPClientResource(ConfigurableResource):
 # These are instantiated lazily - NO code execution at import time!
 # ============================================================================
 
+from dagster_dlt import DagsterDltResource
+
 RESOURCES = {
     "pg": PostgreSQLResource(),
-    "http_client": HTTPClientResource(),
+    "dlt": DagsterDltResource(),  # Official dagster-dlt integration
 }
+

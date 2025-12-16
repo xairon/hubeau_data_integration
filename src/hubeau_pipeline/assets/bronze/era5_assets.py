@@ -11,15 +11,35 @@ import yaml
 import dlt
 import gc
 import io
+import os
 import zipfile
 from typing import Dict, Any
 from dagster import asset, AssetExecutionContext
 from hubeau_pipeline.sources.era5_source import era5_france_meteo
-from hubeau_pipeline.utils.dlt_batching import create_dlt_pipeline
+from dlt.destinations import postgres
 import psycopg2
 import xarray as xr
 import pandas as pd
 from psycopg2.extras import execute_values
+
+
+def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
+    """Create DLT pipeline with PostgreSQL destination."""
+    destination = postgres(
+        credentials={
+            "database": os.environ.get("PG_DB", "postgres"),
+            "username": os.environ.get("PG_USER", "postgres"),
+            "password": os.environ.get("PG_PASSWORD"),
+            "host": os.environ.get("PG_HOST", "postgres"),
+            "port": int(os.environ.get("PG_PORT", "5432")),
+        }
+    )
+    return dlt.pipeline(
+        pipeline_name=pipeline_name,
+        destination=destination,
+        dataset_name=os.environ.get("DLT_BRONZE_DATASET", "staging"),
+        progress="log",
+    )
 
 
 @asset(
@@ -60,7 +80,7 @@ def era5_france_meteo_raw(context):
 
         # ⚠️ MEMORY FIX: Recreate pipeline for each chunk to avoid memory accumulation
         context.log.info(f"🔧 [{chunk_index}] Creating fresh DLT pipeline to avoid memory leaks...")
-        pipeline = create_dlt_pipeline("era5_france_meteo", context=context)
+        pipeline = _create_pipeline("era5_france_meteo", context=context)
 
         # Create a single-record resource for this chunk
         @dlt.resource(
