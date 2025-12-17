@@ -30,7 +30,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "49500-49599:5432" # Nicolas's allocated port range
+      - "49502:5432"  # PostgreSQL - fixed port
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
       interval: 10s
@@ -124,7 +124,7 @@ services:
       - ./scripts:/app/scripts:ro
     command: [ "dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster_home/workspace.yaml" ]
     ports:
-      - "49500-49599:3000" # Nicolas's allocated port range
+      - "49500:3000"  # Dagster UI - fixed port
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:3000/server_info || exit 1" ]
       interval: 30s
@@ -179,7 +179,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "49500-49599:8080" # Nicolas's allocated port range
+      - "49501:8080"  # Adminer - fixed port
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: pepa-linha-dark

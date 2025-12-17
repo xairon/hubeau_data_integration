@@ -379,10 +379,13 @@ def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) 
                 values
             )
 
-            rows_inserted += len(batch)
-            context.log.info(f"  💾 {rows_inserted:,}/{total_rows:,} rows inserted ({rows_inserted/total_rows*100:.1f}%)")
+            # Commit after each batch to avoid transaction bloat
+            conn.commit()
 
-    conn.commit()
+            rows_inserted += len(batch)
+            if rows_inserted % 100000 == 0 or rows_inserted == total_rows:
+                context.log.info(f"  💾 {rows_inserted:,}/{total_rows:,} rows inserted ({rows_inserted/total_rows*100:.1f}%)")
+
     context.log.info(f"✅ All {rows_inserted:,} rows committed to database")
 
     return rows_inserted
