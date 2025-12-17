@@ -22,6 +22,7 @@ from .hubeau_jobs import (
 # Jobs ERA5
 from .era5_jobs import (
     era5_meteo_job,
+    era5_timeseries_job,
 )
 
 all_jobs = [
@@ -36,6 +37,7 @@ all_jobs = [
     all_chroniques_job,
     # Jobs ERA5
     era5_meteo_job,
+    era5_timeseries_job,
 ]
 
 __all__ = [
@@ -50,6 +52,7 @@ __all__ = [
     "all_chroniques_job",
     # Jobs ERA5
     "era5_meteo_job",
+    "era5_timeseries_job",
     # Collections
     "all_jobs",
 ]

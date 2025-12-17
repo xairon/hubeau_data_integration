@@ -9,6 +9,7 @@ from .bronze import (
     hydrometry_stations_raw,
     hydrometry_obs_elab_raw,
     era5_france_meteo_raw,
+    era5_france_timeseries,
 )
 
 from .csv_universal import ingest_all_csvs_asset
@@ -20,6 +21,7 @@ all_bronze_assets = [
     hydrometry_stations_raw,
     hydrometry_obs_elab_raw,
     era5_france_meteo_raw,
+    era5_france_timeseries,
 ]
 
 all_csv_assets = [ingest_all_csvs_asset]

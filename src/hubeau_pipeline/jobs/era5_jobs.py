@@ -20,3 +20,18 @@ era5_meteo_job = define_asset_job(
     ),
     tags={"dagster/concurrency_key": "era5_meteo_bronze"}
 )
+
+
+era5_timeseries_job = define_asset_job(
+    name="era5_timeseries_extract",
+    description=(
+        "Extract ERA5 NetCDF bytea data to normalized time series table. "
+        "Unpacks ZIP-compressed NetCDF, converts units (K→°C, m→mm), "
+        "creates staging.era5_france_timeseries (~277M rows). "
+        "Runtime: ~30-60 minutes for full dataset."
+    ),
+    selection=AssetSelection.keys(
+        AssetKey("era5_france_timeseries")
+    ),
+    tags={"dagster/concurrency_key": "era5_timeseries"}
+)

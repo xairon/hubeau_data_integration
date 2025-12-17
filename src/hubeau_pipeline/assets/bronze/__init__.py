@@ -17,7 +17,10 @@ from hubeau_pipeline.assets.bronze.dlt_assets import (
 )
 
 # ERA5 Meteorology
-from hubeau_pipeline.assets.bronze.era5_assets import era5_france_meteo_raw
+from hubeau_pipeline.assets.bronze.era5_assets import (
+    era5_france_meteo_raw,
+    era5_france_timeseries,
+)
 
 __all__ = [
     "piezometry_stations_raw",
@@ -26,5 +29,6 @@ __all__ = [
     "hydrometry_stations_raw",
     "hydrometry_obs_elab_raw",
     "era5_france_meteo_raw",
+    "era5_france_timeseries",
     "MODE_PARTITIONS",
 ]
