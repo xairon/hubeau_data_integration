@@ -10,6 +10,9 @@ extraction:
   date_filter_params:
     date_debut: date_debut_obs_elab  # Start date parameter name
     date_fin: date_fin_obs_elab      # End date parameter name
+  station_slicing:
+    station_param: code_entite
+    batch_size: 50
 performance:
   parallelism: 1
   batch_size: 5000

@@ -109,18 +109,17 @@ def piezometry_stations_source():
 # LAZY LOADING RESOURCE - BEST PRACTICE
 # ============================================================================
 
-def _fetch_stations_from_pg(logger=None) -> List[str]:
+def _fetch_distinct_column_values(table_name: str, column_name: str, logger=None) -> List[str]:
     """
-    Helper to fetch station codes directly from PG at runtime.
+    Helper to fetch distinct values from a column in PG at runtime.
     Uses standard env vars available in the container.
     """
     log = logger.info if logger else print
-    log("🔍 Récupération des codes de stations depuis PostgreSQL...")
+    log(f"🔍 Récupération des valeurs distinctes pour {column_name} dans {table_name}...")
     try:
         host = os.environ.get("PG_HOST", "postgres")
         db = os.environ.get("PG_DB", "postgres")
         user = os.environ.get("PG_USER", "postgres")
-        log(f"📡 Connexion à PostgreSQL: {host}/{db} (user: {user})")
         
         conn = psycopg2.connect(
             host=host,
@@ -130,17 +129,15 @@ def _fetch_stations_from_pg(logger=None) -> List[str]:
             password=os.environ.get("PG_PASSWORD"),
         )
         with conn:
-            log("✅ Connexion établie. Exécution de la requête...")
             with conn.cursor() as cur:
-                # Select distinct codes from bronze/staging table
                 schema = os.environ.get("DLT_BRONZE_DATASET", "staging")
-                query = f'SELECT DISTINCT "code_bss" FROM "{schema}"."piezometry_stations_raw" WHERE "code_bss" IS NOT NULL'
+                query = f'SELECT DISTINCT "{column_name}" FROM "{schema}"."{table_name}" WHERE "{column_name}" IS NOT NULL'
                 cur.execute(query)
                 results = [str(row[0]) for row in cur.fetchall()]
-                log(f"✅ {len(results):,} codes de stations récupérés depuis PostgreSQL")
+                log(f"✅ {len(results):,} valeurs récupérées pour {table_name}.{column_name}")
                 return results
     except Exception as e:
-        error_msg = f"❌ Erreur lors de la récupération des stations depuis PG: {e}"
+        error_msg = f"❌ Erreur lors de la récupération depuis PG: {e}"
         if logger:
             logger.error(error_msg)
         else:
@@ -168,7 +165,11 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
 
         log("🔄 Démarrage du générateur de ressource DLT...")
         
-        station_codes = _fetch_stations_from_pg(logger=logger)
+        station_codes = _fetch_distinct_column_values(
+            "piezometry_stations_raw", 
+            "code_bss", 
+            logger=logger
+        )
         
         if not station_codes:
             warning_msg = "⚠️ Aucun code de station trouvé! Le pipeline ne produira aucune donnée."
@@ -217,7 +218,7 @@ def hydrometry_stations_source():
 
 
 @dlt.source(name="hubeau_hydrometry_obs_elab")
-def hydrometry_obs_elab_source(year: str):
+def hydrometry_obs_elab_source(year: str, dagster_context=None):
     """DLT Source for Hydrometry Observations (YEAR partition)."""
     config = _load_config("hydrometry_obs_elab")
     
@@ -227,7 +228,25 @@ def hydrometry_obs_elab_source(year: str):
         parallelized=False
     )
     def _resource():
-        yield from hubeau_chroniques_year(config, year=year, station_codes=[]) # Hydrometry uses simpler logic often
+        # Lazy load station codes from hydrometry_stations_raw
+        logger = dagster_context.log if dagster_context else None
+        station_codes = _fetch_distinct_column_values(
+            "hydrometry_stations_raw",
+            "code_station",
+            logger=logger
+        )
+        
+        if not station_codes:
+            if logger:
+                logger.warning("⚠️ Aucun code de station hydrométrique trouvé!")
+            return
+
+        yield from hubeau_chroniques_year(
+            config, 
+            year=year, 
+            station_codes=station_codes,
+            dagster_context=dagster_context
+        )
     
     return _resource
 
@@ -361,15 +380,10 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
     year = context.partition_key
     pipeline = _create_pipeline(f"hubeau_hydrometry_obs_elab_{year}")
     
-    # Hydrometry logic might differ slightly but follows same pattern
-    # For now assuming simple fetch
-    config = _load_config("hydrometry_obs_elab")
+    # Pass context to source to enable logging and lazy loading
+    resource = hydrometry_obs_elab_source(year, dagster_context=context)
     
-    @dlt.resource(name="hydrometry_obs_elab_raw", write_disposition="append")
-    def _res():
-        yield from hubeau_chroniques_year(config, year, station_codes=[]) 
-    
-    load_info = pipeline.run(_res)
+    load_info = pipeline.run(resource)
     
     # Metrics extraction
     rows = 0
