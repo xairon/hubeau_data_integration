@@ -217,9 +217,11 @@ def hydrometry_stations_source():
     )()
 
 
-@dlt.source(name="hubeau_hydrometry_obs_elab")
-def hydrometry_obs_elab_source(year: str, dagster_context=None):
-    """DLT Source for Hydrometry Observations (YEAR partition)."""
+def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
+    """
+    Factory that creates a resource for Hydrometry Observations (YEAR partition).
+    Matches the pattern used in create_piezometry_chroniques_resource.
+    """
     config = _load_config("hydrometry_obs_elab")
     
     @dlt.resource(
@@ -230,6 +232,10 @@ def hydrometry_obs_elab_source(year: str, dagster_context=None):
     def _resource():
         # Lazy load station codes from hydrometry_stations_raw
         logger = dagster_context.log if dagster_context else None
+        log = logger.info if logger else print
+        
+        log("🔄 Démarrage du générateur de ressource DLT (hydrometry obs_elab)...")
+        
         station_codes = _fetch_distinct_column_values(
             "hydrometry_stations_raw",
             "code_station",
@@ -237,9 +243,19 @@ def hydrometry_obs_elab_source(year: str, dagster_context=None):
         )
         
         if not station_codes:
+            warning_msg = "⚠️ Aucun code de station hydrométrique trouvé! Le pipeline ne produira aucune donnée."
             if logger:
-                logger.warning("⚠️ Aucun code de station hydrométrique trouvé!")
+                logger.warning(warning_msg)
+            else:
+                print(warning_msg, flush=True)
             return
+
+        log(f"📊 {len(station_codes):,} stations à traiter pour l'année {year}")
+        
+        # Calculate batch info for logging
+        batch_size = config.get("extraction", {}).get("station_slicing", {}).get("batch_size", 50)
+        total_batches = (len(station_codes) + batch_size - 1) // batch_size
+        log(f"📦 Les stations seront traitées en {total_batches} lots de {batch_size} stations")
 
         yield from hubeau_chroniques_year(
             config, 
@@ -381,7 +397,7 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
     pipeline = _create_pipeline(f"hubeau_hydrometry_obs_elab_{year}")
     
     # Pass context to source to enable logging and lazy loading
-    resource = hydrometry_obs_elab_source(year, dagster_context=context)
+    resource = create_hydrometry_obs_elab_resource(year, dagster_context=context)
     
     load_info = pipeline.run(resource)
     

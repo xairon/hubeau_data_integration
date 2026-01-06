@@ -87,3 +87,6 @@ nul
 
 # DLT configuration files (use .example files as templates)
 .dlt/*.toml
+
+# Agents
+.agent/

@@ -33,32 +33,83 @@ def parse_csv_stream(text: str, delimiter: str = ';') -> Iterator[Dict[str, Any]
 # ==============================================================================
 
 def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = None, context=None) -> Iterator[Dict[str, Any]]:
+    """
+    Fetch data from Hub'Eau API with cursor-based pagination.
+    Hub'Eau API uses Link header with rel="next" for pagination.
+    Each page returns up to 1000 records.
+    Includes retry logic for 503 errors.
+    """
+    import re
+    import requests
+    import time as time_module
+    
     log = context.log.info if context else logger.info
+    
+    MAX_RETRIES = 5
+    BASE_DELAY = 2  # seconds
+    
+    def request_with_retry(url, params=None):
+        """Make request with exponential backoff retry for 5xx errors."""
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = requests.get(url, params=params)
+                response.raise_for_status()
+                return response
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code in [500, 502, 503, 504]:
+                    if attempt < MAX_RETRIES - 1:
+                        delay = BASE_DELAY * (2 ** attempt)
+                        log(f"⚠️ API returned {e.response.status_code}, retry {attempt + 1}/{MAX_RETRIES} in {delay}s...")
+                        time_module.sleep(delay)
+                        continue
+                raise
+            except Exception as e:
+                raise
+        return None  # Should not reach here
+    
+    # Build initial URL
+    base_url = client.base_url + endpoint
+    
+    # First request
+    try:
+        response = request_with_retry(base_url, params=params)
+    except Exception as e:
+        log(f"❌ HTTP Request failed: {e}")
+        raise e
+    
     page = 1
     total_yielded = 0
+    
     while True:
-        request_params = {**(params or {}), "page": page}
-        try:
-            response = client.get(endpoint, params=request_params)
-        except Exception as e:
-            log(f"❌ HTTP Request failed: {e}")
-            raise e
+        records = list(parse_csv_stream(response.text))
+        page_count = len(records)
         
-        page_records = list(parse_csv_stream(response.text))
-        page_count = len(page_records)
-        
-        if page_count == 0:
-            break
-            
-        for record in page_records:
+        for record in records:
             total_yielded += 1
             yield record
         
-        page += 1
-        if page % 10 == 0:
-            log(f"📊 Progress: {total_yielded:,} records...")
+        # Check for next page in Link header
+        link_header = response.headers.get('Link', '')
+        next_match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
+        
+        if next_match and page_count > 0:
+            next_url = next_match.group(1)
+            page += 1
+            
+            # Small delay between pages to avoid overwhelming API
+            time_module.sleep(0.2)
+            
+            try:
+                response = request_with_retry(next_url)
+            except Exception as e:
+                log(f"❌ HTTP Request failed on page {page}: {e}")
+                raise e
+        else:
+            # No more pages
+            break
     
-    log(f"✅ Fetched {total_yielded:,} records total.")
+    if page > 1:
+        log(f"  ↳ Fetched {total_yielded:,} records ({page} pages)")
 
 def batch_stations(stations: List[str], batch_size: int = 50) -> Iterator[List[str]]:
     for i in range(0, len(stations), batch_size):
@@ -123,28 +174,40 @@ def hubeau_chroniques_year(
     # Simple, standard batching loop
     for batch_idx, station_batch in enumerate(batch_stations(station_codes, batch_size), 1):
         codes_str = ','.join(station_batch)
+        progress_pct = (batch_idx / total_batches) * 100
         
-        # Log progress every 10 batches or at start/end
-        if batch_idx == 1 or batch_idx % 10 == 0 or batch_idx == total_batches:
-            elapsed = time.time() - batch_start_time
-            progress_pct = (batch_idx / total_batches) * 100
-            log(f"🔄 Lot {batch_idx}/{total_batches} ({progress_pct:.1f}%) - {len(station_batch)} stations - {total_records:,} enregistrements récupérés jusqu'à présent")
-            
+        # Start with default_params from config (e.g. grandeur_hydro_elab: QmnJ)
+        default_params = extraction.get("default_params", {})
         params = {
+            **default_params,
             date_debut_param: date_start,
             date_fin_param: date_end,
             station_field: codes_str
         }
         
+        # Debug: log params for first batch
+        if batch_idx == 1:
+            log(f"🔧 DEBUG params: {params}")
+        
         batch_records = 0
         for record in fetch_all_pages(client, endpoint, params=params, context=dagster_context):
             total_records += 1
             batch_records += 1
+            
+            if total_records == 1:
+                 log(f"🔍 SAMPLE RECORD: {record}")
+            
             yield record
         
-        # Log batch completion for first few batches or every 50th batch
-        if batch_idx <= 3 or batch_idx % 50 == 0:
-            log(f"  ✓ Lot {batch_idx} terminé: {batch_records:,} enregistrements récupérés")
+        # Log progress for every batch
+        elapsed = time.time() - batch_start_time
+        if batch_idx > 1:
+            eta_seconds = (elapsed / batch_idx) * (total_batches - batch_idx)
+            eta_str = f"ETA: {eta_seconds/60:.1f}min"
+        else:
+            eta_str = "ETA: calculating..."
+        
+        log(f"📊 Lot {batch_idx}/{total_batches} ({progress_pct:.1f}%) | {batch_records:,} records | Total: {total_records:,} | {eta_str}")
 
     elapsed_total = time.time() - batch_start_time
-    log(f"✅ Année {year} terminée: {total_records:,} enregistrements au total en {elapsed_total:.1f} secondes")
+    log(f"✅ Année {year} terminée: {total_records:,} enregistrements au total en {elapsed_total/60:.1f} minutes")

@@ -5,7 +5,8 @@ resource:
   # Bronze layer: no PK/FK constraints, duplicates allowed
   primary_key: null
 extraction:
-  default_params: {}
+  default_params:
+    grandeur_hydro_elab: QmnJ  # Daily mean flow (Débit moyen journalier)
   # Date filter parameter names for this API
   date_filter_params:
     date_debut: date_debut_obs_elab  # Start date parameter name
