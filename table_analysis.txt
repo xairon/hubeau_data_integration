@@ -1,0 +1,129 @@
+======================================================================
+TABLE 1: staging.era5_france_timeseries
+======================================================================
+
+Columns:
+  id                                       bigint
+  time                                     timestamp without time zone
+  latitude                                 numeric
+  longitude                                numeric
+  temperature_2m                           numeric
+  total_precipitation                      numeric
+  potential_evaporation                    numeric
+  source_file_id                           text
+  created_at                               timestamp without time zone
+
+Row count: 313,664,520
+
+Sample row:
+  id: 1
+  time: 1950-01-02 00:00:00
+  latitude: 51.500
+  longitude: -3.600
+  temperature_2m: 6.98
+  total_precipitation: 0.0129
+  potential_evaporation: -0.6240
+  source_file_id: era5_france_1950_1951
+  created_at: 2025-12-17 10:37:18.570028
+
+======================================================================
+TABLE 2: staging.piezometry_stations_raw
+======================================================================
+
+Columns:
+  code_bss                                 character varying
+  urn_bss                                  character varying
+  date_debut_mesure                        character varying
+  date_fin_mesure                          character varying
+  code_commune_insee                       character varying
+  nom_commune                              character varying
+  x                                        double precision
+  y                                        double precision
+  bss_id                                   character varying
+  altitude_station                         double precision
+  nb_mesures_piezo                         bigint
+  code_departement                         character varying
+  nom_departement                          character varying
+  profondeur_investigation                 double precision
+  date_maj                                 character varying
+  _dlt_load_id                             character varying
+  _dlt_id                                  character varying
+  codes_bdlisa                             character varying
+  urns_bdlisa                              character varying
+  libelle_pe                               character varying
+  codes_masse_eau_edl                      character varying
+  noms_masse_eau_edl                       character varying
+  urns_masse_eau_edl                       character varying
+
+Row count: 23,216
+
+Sample row:
+  code_bss: 02201X0105/H2(S7)
+  urn_bss: http://services.ades.eaufrance.fr/pointeau/02201X0105/H2(S7)
+  date_debut_mesure: 1971-09-22
+  date_fin_mesure: 1971-09-22
+  code_commune_insee: 77450
+  nom_commune: Servon
+  x: 2.59801091818919
+  y: 48.723116793236
+  bss_id: BSS000RPJR
+  altitude_station: 71.75
+  nb_mesures_piezo: 1
+  code_departement: 77
+  nom_departement: Seine-et-Marne
+  profondeur_investigation: 6.0
+  date_maj: Fri Jun 28 07:31:38 CEST 2024
+  _dlt_load_id: 1764677240.517083
+  _dlt_id: 8IG0TIoiG771/Q
+  codes_bdlisa: None
+  urns_bdlisa: None
+  libelle_pe: None
+  codes_masse_eau_edl: None
+  noms_masse_eau_edl: None
+  urns_masse_eau_edl: None
+
+======================================================================
+TABLE 3: staging.piezometry_chroniques_raw
+======================================================================
+
+Columns:
+  code_bss                                 character varying
+  urn_bss                                  character varying
+  date_mesure                              character varying
+  timestamp_mesure                         character varying
+  niveau_nappe_eau                         character varying
+  mode_obtention                           character varying
+  statut                                   character varying
+  qualification                            character varying
+  code_continuite                          character varying
+  nom_continuite                           character varying
+  code_producteur                          character varying
+  nom_producteur                           character varying
+  code_nature_mesure                       character varying
+  nom_nature_mesure                        character varying
+  profondeur_nappe                         character varying
+  _dlt_load_id                             character varying
+  _dlt_id                                  character varying
+  code_nature_mesure__v_text               character varying
+
+Row count: 23,318,538
+
+Sample row:
+  code_bss: 08501X0004/F1
+  urn_bss: http://services.ades.eaufrance.fr/pointeau/08501X0004/F1
+  date_mesure: 2005-04-14
+  timestamp_mesure: 1113436800000
+  niveau_nappe_eau: -6.12
+  mode_obtention: Valeur mesurée
+  statut: Donnée contrôlée niveau 1
+  qualification: Correcte
+  code_continuite: 2
+  nom_continuite: Point lié au point précédent
+  code_producteur: 327
+  nom_producteur: Service Géologique Régional d'Aquitaine (327)
+  code_nature_mesure: N
+  nom_nature_mesure: Naturel
+  profondeur_nappe: 15.31
+  _dlt_load_id: 1765893050.455362
+  _dlt_id: KuL3LIYDr3Aofg
+  code_nature_mesure__v_text: None

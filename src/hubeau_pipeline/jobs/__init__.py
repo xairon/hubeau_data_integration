@@ -1,10 +1,11 @@
 """
-Dagster Jobs - Hub'Eau Bronze Layer + ERA5 (SIMPLIFIED)
+Dagster Jobs - Hub'Eau Bronze Layer + ERA5 + Aggregation
 
 KEPT DOMAINS:
 - Piezometry (stations + chroniques)
 - Hydrometry (sites + stations + observations)
 - ERA5 (weather data)
+- Aggregation (ERA5 + Piezometry combined)
 """
 
 from .hubeau_jobs import (
@@ -25,6 +26,11 @@ from .era5_jobs import (
     era5_timeseries_job,
 )
 
+# Jobs Aggregation
+from .aggregation_jobs import (
+    aggregation_job,
+)
+
 all_jobs = [
     # Jobs STATIONS (no partitions)
     piezometry_stations_job,
@@ -38,6 +44,8 @@ all_jobs = [
     # Jobs ERA5
     era5_meteo_job,
     era5_timeseries_job,
+    # Jobs Aggregation
+    aggregation_job,
 ]
 
 __all__ = [
@@ -53,6 +61,8 @@ __all__ = [
     # Jobs ERA5
     "era5_meteo_job",
     "era5_timeseries_job",
+    # Jobs Aggregation
+    "aggregation_job",
     # Collections
     "all_jobs",
 ]
