@@ -1,5 +1,5 @@
 """
-Hub'Eau Assets - Bronze Layer + CSV + Aggregation
+Hub'Eau Assets - Bronze Layer + CSV + dbt
 """
 
 from .bronze import (
@@ -14,10 +14,7 @@ from .bronze import (
 
 from .csv_universal import ingest_all_csvs_asset
 
-from .aggregation_assets import (
-    station_era5_mapping,
-    daily_piezometry_era5,
-)
+from .dbt_assets import hubeau_dbt_assets
 
 all_bronze_assets = [
     piezometry_stations_raw,
@@ -29,12 +26,11 @@ all_bronze_assets = [
     era5_france_timeseries,
 ]
 
-all_aggregation_assets = [
-    station_era5_mapping,
-    daily_piezometry_era5,
-]
-
 all_csv_assets = [ingest_all_csvs_asset]
-all_assets = all_bronze_assets + all_csv_assets + all_aggregation_assets
 
-__all__ = ["all_assets", "all_bronze_assets", "all_csv_assets", "all_aggregation_assets"]
+# dbt assets replace the manual aggregation assets
+all_dbt_assets = [hubeau_dbt_assets]
+
+all_assets = all_bronze_assets + all_csv_assets + all_dbt_assets
+
+__all__ = ["all_assets", "all_bronze_assets", "all_csv_assets", "all_dbt_assets"]

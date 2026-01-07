@@ -23,6 +23,9 @@ dependencies = [
     "dagster-webserver==1.11.14",
     "dagster-postgres==0.27.14",
     "dagster-dlt==0.27.14",  # Dagster-DLT integration
+    "dagster-dbt==0.27.14",  # Dagster-DBT integration
+    "dbt-core==1.7.0",
+    "dbt-postgres==1.7.0",
 
     # DLT with destinations
     "dlt[postgres,filesystem]==0.4.12",
@@ -55,6 +58,7 @@ dependencies = [
 
     # Utilities
     "python-dotenv==1.0.0",
+    "protobuf<5.0.0",  # Fix for dbt/google-api compatibility
     "pydantic==2.5.3",
     "python-dateutil==2.8.2",
     "click>=8.0.0",
@@ -117,6 +121,7 @@ orchestrator = [
 worker = [
     "dagster==1.11.14",
     "dagster-dlt==0.27.14",
+    "dagster-dbt==0.27.14",
     "psycopg[binary]==3.1.13",
     "httpx==0.26.0",
     "tenacity==8.2.3",
@@ -137,6 +142,7 @@ worker = [
     "pyproj==3.6.1",
     "requests==2.31.0",
     "python-dotenv==1.0.0",
+    "protobuf<5.0.0",  # Fix for dbt/google-api compatibility
     "pydantic==2.5.3",
     "python-dateutil==2.8.2",
     "structlog==23.2.0",
@@ -146,6 +152,8 @@ worker = [
     "xarray>=2023.12.0",  # NetCDF data processing
     "h5netcdf>=1.3.0",  # NetCDF engine for xarray
     "netCDF4>=1.6.5",  # Alternative NetCDF engine
+    "dbt-core==1.7.0",
+    "dbt-postgres==1.7.0",
 ]
 
 # All dependencies (for local development)
@@ -183,6 +191,7 @@ extend-exclude = '''
   | \.venv
   | build
   | dist
+  | known_failures
 )/
 '''
 

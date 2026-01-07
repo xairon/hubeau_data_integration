@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: staging
+    schema: staging
+    tables:
+      - name: era5_france_timeseries
+        description: Données météo ERA5 brutes (timeseries)
+      - name: piezometry_stations_raw
+        description: Métadonnées des stations piézométriques
+      - name: piezometry_chroniques_raw
+        description: Mesures piézométriques brutes

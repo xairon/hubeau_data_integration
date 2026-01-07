@@ -1,0 +1,33 @@
+name: 'hubeau_pipeline'
+version: '1.0.0'
+config-version: 2
+
+profile: 'hubeau_pipeline'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  hubeau_pipeline:
+    # Config par défaut pour tous les modèles
+    +materialized: view
+    
+    staging:
+      +schema: staging
+      +materialized: view
+      
+    intermediate:
+      +schema: intermediate
+      +materialized: table
+      
+    marts:
+      +schema: hubeau
+      +materialized: table
