@@ -9,6 +9,8 @@
   )
 }}
 
+-- Table finale : Jointure Piezo + ERA5 (déjà journalier)
+
 WITH measurements AS (
     SELECT * FROM {{ ref('int_daily_measurements') }}
 ),
@@ -18,6 +20,7 @@ mapping AS (
 ),
 
 era5 AS (
+    -- ERA5 est déjà journalier, pas besoin de pré-agrégation
     SELECT * FROM {{ ref('stg_era5_timeseries') }}
 ),
 

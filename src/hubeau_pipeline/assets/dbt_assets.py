@@ -20,7 +20,6 @@ elif not dbt_project.manifest_path.exists():
     import subprocess
     print(f"⚠️ dbt manifest not found at {dbt_project.manifest_path}. Running 'dbt parse'...")
     try:
-        # Run dbt parse using the project dir
         subprocess.run(
             ["dbt", "parse", "--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)],
             check=True,
@@ -29,7 +28,6 @@ elif not dbt_project.manifest_path.exists():
         print("✅ dbt parse completed successfully.")
     except Exception as e:
         print(f"❌ Failed to run dbt parse: {e}")
-        # Let it fail downstream if manifest is still missing
 
 # Create the Dagster resource for dbt
 dbt_resource = DbtCliResource(project_dir=dbt_project)
@@ -43,4 +41,19 @@ def hubeau_dbt_assets(context: AssetExecutionContext, dbt: DbtCliResource):
     - Intermediate (mapping, aggregation)
     - Marts (daily_chroniques)
     """
-    yield from dbt.cli(["build"], context=context).stream()
+    import time
+    start_time = time.time()
+    
+    context.log.info("🚀 Démarrage du build dbt...")
+    context.log.info(f"📁 Projet dbt: {DBT_PROJECT_DIR}")
+    
+    # Use stream() to get real-time logs from dbt
+    dbt_invocation = dbt.cli(["build"], context=context)
+    
+    # Stream events and log them
+    for event in dbt_invocation.stream():
+        # Each event is a dbt asset materialization
+        yield event
+    
+    elapsed_time = time.time() - start_time
+    context.log.info(f"✅ Build dbt terminé en {elapsed_time:.1f} secondes")

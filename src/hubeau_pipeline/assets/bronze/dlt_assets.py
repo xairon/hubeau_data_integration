@@ -393,18 +393,59 @@ def piezometry_chroniques_raw(context: AssetExecutionContext) -> Output[Dict[str
     partitions_def=MODE_PARTITIONS,
 )
 def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, Any]]:
+    """
+    Hydrometry observations - Partitioned by year.
+    Uses 'Lazy Loading' pattern to avoid DLT config serialization issues.
+    """
+    import time
+    
     year = context.partition_key
+    context.log.info(f"📅 Traitement de la partition: {year}")
+    
+    # Create pipeline
+    context.log.info("🔧 Création du pipeline DLT...")
     pipeline = _create_pipeline(f"hubeau_hydrometry_obs_elab_{year}")
+    context.log.info("✅ Pipeline DLT créé")
     
-    # Pass context to source to enable logging and lazy loading
+    # Create resource with lazy loading
+    context.log.info("🏭 Création de la ressource DLT (chargement paresseux des stations)...")
     resource = create_hydrometry_obs_elab_resource(year, dagster_context=context)
+    context.log.info("✅ Ressource DLT créée")
     
+    context.log.info("🚀 Démarrage de l'exécution du pipeline DLT...")
+    start_time = time.time()
     load_info = pipeline.run(resource)
+    elapsed_time = time.time() - start_time
+    
+    context.log.info(f"⏱️ Pipeline terminé en {elapsed_time:.1f} secondes")
+    
+    # DEBUG: Log full load info
+    context.log.info(f"📋 DLT Load Info:\n{load_info}")
     
     # Metrics extraction
     rows = 0
-    for pkg in getattr(load_info, "load_packages", []) or []:
-        for job in getattr(pkg, "jobs", []) or []:
-            rows += getattr(job, "metrics", {}).get("items", 0)
-            
-    return Output({}, metadata={"year": year, "rows_loaded": MetadataValue.int(rows)})
+    try:
+        packages = getattr(load_info, "load_packages", []) or []
+        for pkg in packages:
+            jobs = getattr(pkg, "jobs", [])
+            if isinstance(jobs, dict):
+                all_jobs = []
+                for job_list in jobs.values():
+                    if isinstance(job_list, list):
+                        all_jobs.extend(job_list)
+                jobs = all_jobs
+            for job in jobs:
+                rows += getattr(job, "metrics", {}).get("items", 0)
+    except Exception as e:
+        context.log.error(f"⚠️ Failed to extract metrics from load_info: {e}")
+    
+    context.log.info(f"✅ Chargement terminé: {rows:,} lignes chargées pour l'année {year}")
+    
+    return Output(
+        {"rows_loaded": rows, "year": year},
+        metadata={
+            "rows_loaded": MetadataValue.int(rows),
+            "partition": MetadataValue.text(year),
+            "execution_time_seconds": MetadataValue.float(elapsed_time),
+        }
+    )
