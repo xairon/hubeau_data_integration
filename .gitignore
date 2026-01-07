@@ -90,3 +90,8 @@ nul
 
 # Agents
 .agent/
+
+# dbt
+**/target/
+**/dbt_packages/
+*.msgpack
