@@ -1,0 +1,18 @@
+version: 2
+
+seeds:
+  - name: tme_entites_hydrogeo
+    description: "Table des Masses d'Eau - Référentiel des entités hydrogéologiques BDLISA"
+    config:
+      column_types:
+        id: varchar
+        CodeEH: varchar
+        LibelleEH: varchar
+        OrdreAbsEH: varchar
+        NiveauEH: varchar
+        InclusEH: varchar
+        EtatEH: varchar
+        NatureEH: varchar
+        MilieuEH: varchar
+        ThemeEH: varchar
+        OrigineEH: varchar
