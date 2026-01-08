@@ -9,7 +9,7 @@
   )
 }}
 
--- Table finale : Jointure Piezo + ERA5 (déjà journalier)
+-- Table finale : Jointure optimisée Piezo + ERA5 (filtré aux stations)
 
 WITH measurements AS (
     SELECT * FROM {{ ref('int_daily_measurements') }}
@@ -19,9 +19,9 @@ mapping AS (
     SELECT * FROM {{ ref('int_station_era5_mapping') }}
 ),
 
-era5 AS (
-    -- ERA5 est déjà journalier, pas besoin de pré-agrégation
-    SELECT * FROM {{ ref('stg_era5_timeseries') }}
+era5_filtered AS (
+    -- Utilise la table ERA5 PRE-FILTREE (beaucoup plus petite)
+    SELECT * FROM {{ ref('int_era5_for_stations') }}
 ),
 
 final AS (
@@ -52,10 +52,10 @@ final AS (
         
     FROM measurements m
     INNER JOIN mapping map ON m.code_bss = map.code_bss
-    LEFT JOIN era5 e 
+    LEFT JOIN era5_filtered e 
         ON map.era5_latitude = e.latitude 
         AND map.era5_longitude = e.longitude
-        AND m.date_mesure = e.time::date
+        AND m.date_mesure = e.era5_date
 )
 
 SELECT * FROM final
