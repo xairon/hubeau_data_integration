@@ -26,13 +26,10 @@ station_mapping AS (
         ROUND(s.station_longitude * 10) / 10 AS era5_longitude,
         s.station_latitude,
         s.station_longitude,
-        s.urn_bdlisa,
-        -- Extract CodeEH from urn_bdlisa (format: SAQ0000974AA → 974AA)
-        CASE 
-            WHEN s.urn_bdlisa IS NOT NULL AND LENGTH(s.urn_bdlisa) > 7 
-            THEN SUBSTRING(s.urn_bdlisa FROM 8)
-            ELSE NULL 
-        END AS code_eh_extracted,
+        s.codes_bdlisa,
+        -- Extract first CodeEH from codes_bdlisa (comma-separated list)
+        -- Format: "231AE07,954AA15" → "231AE07"
+        SPLIT_PART(s.codes_bdlisa, ',', 1) AS code_eh_primary,
         s.code_commune_insee,
         s.nom_commune,
         s.altitude_station,
@@ -49,14 +46,14 @@ SELECT
     sm.era5_longitude,
     sm.station_latitude,
     sm.station_longitude,
-    sm.urn_bdlisa,
+    sm.codes_bdlisa,
     sm.code_commune_insee,
     sm.nom_commune,
     sm.altitude_station,
     sm.code_departement,
     sm.nom_departement,
-    -- TME metadata
-    t.code_eh,
+    -- TME metadata (joined on primary code)
+    COALESCE(t.code_eh, sm.code_eh_primary) AS code_eh,
     t.libelle_eh,
     t.niveau_eh,
     t.etat_eh,
@@ -65,4 +62,4 @@ SELECT
     t.theme_eh,
     t.origine_eh
 FROM station_mapping sm
-LEFT JOIN tme t ON sm.code_eh_extracted = t.code_eh
+LEFT JOIN tme t ON sm.code_eh_primary = t.code_eh

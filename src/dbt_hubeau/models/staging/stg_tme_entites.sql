@@ -6,18 +6,20 @@
 
 -- Staging view for TME (Table des Masses d'Eau / Entités Hydrogéologiques)
 -- Source: SANDRE/BDLISA reference data
+-- Note: "X" values in source are converted to NULL
 
 SELECT
     "id"::int AS tme_id,
     "CodeEH" AS code_eh,
     "LibelleEH" AS libelle_eh,
-    "OrdreAbsEH"::int AS ordre_abs_eh,
-    "NiveauEH"::int AS niveau_eh,
-    "InclusEH" AS inclus_eh,
-    "EtatEH" AS etat_eh,
-    "NatureEH" AS nature_eh,
-    "MilieuEH" AS milieu_eh,
-    "ThemeEH" AS theme_eh,
-    "OrigineEH" AS origine_eh
+    NULLIF("OrdreAbsEH", 'X')::int AS ordre_abs_eh,
+    NULLIF("NiveauEH", 'X')::int AS niveau_eh,
+    NULLIF("InclusEH", 'X') AS inclus_eh,
+    NULLIF("EtatEH", 'X') AS etat_eh,
+    NULLIF("NatureEH", 'X') AS nature_eh,
+    NULLIF("MilieuEH", 'X') AS milieu_eh,
+    NULLIF("ThemeEH", 'X') AS theme_eh,
+    NULLIF("OrigineEH", 'X') AS origine_eh
 FROM {{ ref('tme_entites_hydrogeo') }}
 WHERE "CodeEH" IS NOT NULL
+  AND "CodeEH" != 'X'

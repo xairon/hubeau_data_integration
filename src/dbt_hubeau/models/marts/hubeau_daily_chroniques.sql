@@ -39,7 +39,7 @@ final AS (
         e.potential_evaporation,
         
         -- Station metadata
-        map.urn_bdlisa,
+        map.codes_bdlisa,
         map.code_commune_insee,
         map.nom_commune,
         map.altitude_station,
