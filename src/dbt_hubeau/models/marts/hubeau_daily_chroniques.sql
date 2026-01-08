@@ -4,12 +4,13 @@
     indexes=[
       {'columns': ['code_bss', 'date']},
       {'columns': ['date']},
-      {'columns': ['code_departement']}
+      {'columns': ['code_departement']},
+      {'columns': ['code_eh']}
     ]
   )
 }}
 
--- Table finale : Jointure optimisée Piezo + ERA5 (filtré aux stations)
+-- Table finale : Piézométrie + ERA5 + TME (métadonnées aquifères)
 
 WITH measurements AS (
     SELECT * FROM {{ ref('int_daily_measurements') }}
@@ -20,7 +21,6 @@ mapping AS (
 ),
 
 era5_filtered AS (
-    -- Utilise la table ERA5 PRE-FILTREE (beaucoup plus petite)
     SELECT * FROM {{ ref('int_era5_for_stations') }}
 ),
 
@@ -45,6 +45,16 @@ final AS (
         map.altitude_station,
         map.code_departement,
         map.nom_departement,
+        
+        -- TME metadata (Entités Hydrogéologiques)
+        map.code_eh,
+        map.libelle_eh,
+        map.niveau_eh,
+        map.etat_eh,
+        map.nature_eh,
+        map.milieu_eh,
+        map.theme_eh,
+        map.origine_eh,
         
         -- Technical columns
         map.era5_latitude,

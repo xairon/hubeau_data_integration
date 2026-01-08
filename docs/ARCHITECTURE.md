@@ -155,5 +155,8 @@ BSS002 (48.756, 2.612) → arrondi → (48.8, 2.6)
 - `piezometry_chroniques_raw`
 - `era5_france_timeseries`
 
+### Seeds (dbt)
+- `tme_entites_hydrogeo` — Référentiel des entités hydrogéologiques (TME)
+
 ### Hubeau (dbt)
-- `hubeau_daily_chroniques` — Piézométrie + Météo combinées
+- `hubeau_daily_chroniques` — Piézométrie + Météo + TME combinées

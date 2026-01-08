@@ -95,3 +95,6 @@ nul
 **/target/
 **/dbt_packages/
 *.msgpack
+
+# Exception for dbt seeds
+!**/seeds/*.csv
