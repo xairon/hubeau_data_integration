@@ -56,7 +56,9 @@ final AS (
         map.theme_eh,
         map.origine_eh,
         
-        -- Technical columns
+        -- Technical columns: Station real coordinates + ERA5 grid coordinates
+        map.station_latitude,
+        map.station_longitude,
         map.era5_latitude,
         map.era5_longitude
         
