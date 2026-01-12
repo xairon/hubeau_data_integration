@@ -22,8 +22,9 @@ station_mapping AS (
     SELECT
         s.code_bss,
         -- Round to nearest 0.1° grid point for ERA5 matching
-        ROUND(s.station_latitude * 10) / 10 AS era5_latitude,
-        ROUND(s.station_longitude * 10) / 10 AS era5_longitude,
+        -- Cast to NUMERIC(6,3) to match era5_france_timeseries precision
+        ROUND(s.station_latitude, 1)::numeric(6,3) AS era5_latitude,
+        ROUND(s.station_longitude, 1)::numeric(6,3) AS era5_longitude,
         s.station_latitude,
         s.station_longitude,
         s.codes_bdlisa,
