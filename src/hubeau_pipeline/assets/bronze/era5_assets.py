@@ -14,13 +14,23 @@ import io
 import os
 import zipfile
 from typing import Dict, Any
-from dagster import asset, AssetExecutionContext
+from datetime import datetime
+from dagster import asset, AssetExecutionContext, StaticPartitionsDefinition
 from hubeau_pipeline.sources.era5_source import era5_france_meteo
 from dlt.destinations import postgres
 import psycopg2
 import xarray as xr
 import pandas as pd
 from psycopg2.extras import execute_values
+
+
+# ERA5 Partitions: chunks de 2 ans (1950-1951, 1952-1953, ..., 2024-2025)
+# Permet de re-télécharger un chunk spécifique si manquant
+ERA5_START_YEAR = 1950
+ERA5_CURRENT_YEAR = datetime.now().year
+ERA5_CHUNK_PARTITIONS = StaticPartitionsDefinition(
+    [str(year) for year in range(ERA5_START_YEAR, ERA5_CURRENT_YEAR + 1, 2)]
+)
 
 
 def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
@@ -45,11 +55,12 @@ def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
 @asset(
     compute_kind="era5",
     group_name="era5_meteo",
-    io_manager_key="noop_io_manager"
+    io_manager_key="noop_io_manager",
+    partitions_def=ERA5_CHUNK_PARTITIONS
 )
-def era5_france_meteo_raw(context):
+def era5_france_meteo_raw(context: AssetExecutionContext):
     """
-    ERA5 France Météo - NetCDF4 daily data (00:00 UTC)
+    ERA5 France Météo - NetCDF4 daily data (00:00 UTC) [PARTITIONNÉ PAR CHUNK]
 
     Variables:
     - 2m_temperature (K)
@@ -62,7 +73,7 @@ def era5_france_meteo_raw(context):
     Storage: PostgreSQL bytea (~38 files × 50-100 MB)
 
     Note: Downloads in 2-year chunks (API limitation)
-    Expected runtime: ~3-5 hours for full historical download
+    Partitionnement: Clique sur une année (ex: 2006) pour re-télécharger uniquement ce chunk
 
     ⚠️ Each chunk is stored IMMEDIATELY in PostgreSQL after download (true incremental loading)
     """
@@ -70,7 +81,16 @@ def era5_france_meteo_raw(context):
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    context.log.info("🚀 Starting ERA5 download with TRUE incremental loading (chunk-by-chunk storage)...")
+    # Si une partition est demandée, télécharger uniquement ce chunk
+    if context.has_partition_key:
+        chunk_start_year = int(context.partition_key)
+        context.log.info(f"🎯 Partition demandée: chunk {chunk_start_year}-{chunk_start_year+1}")
+        
+        # Override config pour ne télécharger que ce chunk
+        config['extraction']['chunking']['only_chunk_start_years'] = [chunk_start_year]
+        config['extraction']['chunking']['skip_existing_in_db'] = False  # Re-télécharger même si existe
+    else:
+        context.log.info("🚀 Téléchargement complet (toutes les années)")
 
     total_files = 0
     total_size_mb = 0.0
@@ -130,11 +150,12 @@ def era5_france_meteo_raw(context):
     compute_kind="era5",
     group_name="era5_meteo",
     io_manager_key="noop_io_manager",
-    deps=["era5_france_meteo_raw"]
+    deps=["era5_france_meteo_raw"],
+    partitions_def=ERA5_CHUNK_PARTITIONS
 )
 def era5_france_timeseries(context: AssetExecutionContext):
     """
-    ERA5 France Time Series - Normalized table from NetCDF bytea storage
+    ERA5 France Time Series - Normalized table from NetCDF bytea storage [PARTITIONNÉ]
 
     Extracts NetCDF data from staging.era5_france_meteo_raw (bytea columns)
     and creates a queryable time series table with normalized structure.
@@ -149,7 +170,9 @@ def era5_france_timeseries(context: AssetExecutionContext):
     - Creates indexed table for efficient SQL queries
     - Skips files already processed (incremental)
 
-    Expected runtime: ~30-60 minutes for full dataset
+    Partitionnement: Clique sur une année (ex: 2006) pour extraire uniquement ce chunk
+
+    Expected runtime: ~30-60 minutes for full dataset, ~1-2 min per chunk
     """
     import os
 
@@ -168,8 +191,16 @@ def era5_france_timeseries(context: AssetExecutionContext):
         _create_timeseries_table(conn)
         context.log.info("✅ Target table created with indexes")
 
+        # Si une partition est demandée, extraire uniquement ce chunk
+        target_file_id = None
+        if context.has_partition_key:
+            chunk_start_year = int(context.partition_key)
+            chunk_end_year = chunk_start_year + 1
+            target_file_id = f"era5_france_{chunk_start_year}_{chunk_end_year}"
+            context.log.info(f"🎯 Partition demandée: extraction de {target_file_id}")
+
         # Get files to process
-        files = _get_files_to_process(conn, context)
+        files = _get_files_to_process(conn, context, target_file_id=target_file_id)
         context.log.info(f"📁 Found {len(files)} files to process")
 
         if len(files) == 0:
@@ -252,18 +283,34 @@ def _create_timeseries_table(conn):
         conn.commit()
 
 
-def _get_files_to_process(conn, context):
-    """Get list of files that haven't been processed yet."""
+def _get_files_to_process(conn, context, target_file_id=None):
+    """Get list of files that haven't been processed yet.
+    
+    Args:
+        conn: Database connection
+        context: Dagster context
+        target_file_id: If specified, only process this specific file (for partition runs)
+    """
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT r.file_id, r.file_size_mb, r.start_year, r.end_year
-            FROM staging.era5_france_meteo_raw r
-            WHERE NOT EXISTS (
-                SELECT 1 FROM staging.era5_france_timeseries t
-                WHERE t.source_file_id = r.file_id
-            )
-            ORDER BY r.start_year
-        """)
+        if target_file_id:
+            # Mode partition: extraire un chunk spécifique même s'il existe déjà
+            cur.execute("""
+                SELECT r.file_id, r.file_size_mb, r.start_year, r.end_year
+                FROM staging.era5_france_meteo_raw r
+                WHERE r.file_id = %s
+                ORDER BY r.start_year
+            """, (target_file_id,))
+        else:
+            # Mode normal: uniquement les fichiers non encore extraits
+            cur.execute("""
+                SELECT r.file_id, r.file_size_mb, r.start_year, r.end_year
+                FROM staging.era5_france_meteo_raw r
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM staging.era5_france_timeseries t
+                    WHERE t.source_file_id = r.file_id
+                )
+                ORDER BY r.start_year
+            """)
         return cur.fetchall()
 
 
