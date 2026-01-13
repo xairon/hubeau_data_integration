@@ -215,6 +215,10 @@ def era5_france_timeseries(context: AssetExecutionContext):
             context.log.info(f"\n[{idx}/{len(files)}] Processing {file_id} ({start_year}-{end_year}, {file_size_mb:.2f} MB)")
 
             try:
+                # Si mode partition, supprimer les anciennes données pour éviter les doublons
+                if context.has_partition_key:
+                    _delete_existing_timeseries(conn, file_id, context)
+
                 # Extract NetCDF
                 ds = _extract_netcdf(conn, file_id, context)
 
@@ -281,6 +285,25 @@ def _create_timeseries_table(conn):
             GRANT SELECT ON staging.era5_france_timeseries TO readonly;
         """)
         conn.commit()
+
+
+def _delete_existing_timeseries(conn, file_id: str, context):
+    """Delete existing timeseries data for a file_id before re-extraction.
+    
+    Utilisé en mode partition pour éviter les doublons lors de la re-matérialisation.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            DELETE FROM staging.era5_france_timeseries
+            WHERE source_file_id = %s
+        """, (file_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        
+        if deleted > 0:
+            context.log.info(f"🗑️  Supprimé {deleted:,} lignes existantes pour {file_id} (évite les doublons)")
+        else:
+            context.log.info(f"✅ Aucune donnée existante pour {file_id}")
 
 
 def _get_files_to_process(conn, context, target_file_id=None):
