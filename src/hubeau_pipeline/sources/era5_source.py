@@ -30,6 +30,48 @@ logger = logging.getLogger(__name__)
 logger.info("Using cdsapi client for ERA5 downloads")
 
 
+def _get_existing_file_ids_from_db(dagster_context=None) -> set[str]:
+    """
+    Best-effort: fetch already downloaded file_ids from staging.era5_france_meteo_raw
+    so we can skip chunks that are already present in Postgres.
+
+    Uses standard env vars: PG_HOST, PG_PORT, PG_DB, PG_USER, PG_PASSWORD.
+    If connection fails or table doesn't exist, returns empty set.
+    """
+    try:
+        import psycopg  # psycopg v3
+    except Exception:
+        # If psycopg isn't available in the runtime, we simply can't pre-skip.
+        return set()
+
+    def log_info(message: str):
+        logger.info(message)
+        if dagster_context:
+            dagster_context.log.info(message)
+
+    host = os.getenv("PG_HOST")
+    port = os.getenv("PG_PORT")
+    db = os.getenv("PG_DB", "postgres")
+    user = os.getenv("PG_USER", "postgres")
+    password = os.getenv("PG_PASSWORD")
+
+    if not host or not port or not password:
+        # Not enough info to connect (common in pure-download/dev runs).
+        return set()
+
+    try:
+        with psycopg.connect(host=host, port=int(port), dbname=db, user=user, password=password, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT file_id FROM staging.era5_france_meteo_raw")
+                rows = cur.fetchall()
+                existing = {r[0] for r in rows}
+                log_info(f"🔎 Detected {len(existing)} already-downloaded ERA5 chunks in staging.era5_france_meteo_raw")
+                return existing
+    except Exception as e:
+        log_info(f"⚠️  Could not query existing ERA5 chunks in DB (skip disabled): {e}")
+        return set()
+
+
 @dlt.resource(
     name="era5_netcdf_files",
     write_disposition="append",
@@ -106,20 +148,44 @@ def era5_france_meteo(config: Dict[str, Any], dagster_context=None) -> Iterator[
     area = config['resource']['area']
     time_utc = config['extraction']['temporal_config']['time']
 
+    # Optional controls: targeted chunk download / idempotence
+    chunk_cfg = config.get("extraction", {}).get("chunking", {})
+    only_chunk_start_years = chunk_cfg.get("only_chunk_start_years")  # e.g. [2006] -> downloads 2006-2007
+    only_file_ids = chunk_cfg.get("only_file_ids")  # e.g. ["era5_france_2006_2007"]
+    skip_existing = config.get("extraction", {}).get("skip_existing_in_db", True)
+    continue_on_error = config.get("extraction", {}).get("continue_on_error", False)
+    retry_times = int(config.get("performance", {}).get("retry_times", 3))
+    retry_delay = float(config.get("performance", {}).get("retry_delay", 10.0))
+
+    existing_file_ids: set[str] = set()
+    if skip_existing:
+        existing_file_ids = _get_existing_file_ids_from_db(dagster_context=dagster_context)
+
     # Calculer nombre total de chunks
     total_years = end_year - start_year + 1
     total_chunks = (total_years + years_per_chunk - 1) // years_per_chunk
     log_info(f"📊 Starting ERA5 download: {start_year}-{end_year} ({total_years} years, {total_chunks} chunks)")
 
-    # Boucle sur chunks de 2 ans
-    year = start_year
+    # Determine which chunk starts to run
+    if only_chunk_start_years:
+        chunk_starts = list(map(int, only_chunk_start_years))
+    else:
+        chunk_starts = list(range(start_year, end_year + 1, years_per_chunk))
+
     chunk_number = 0
-    while year <= end_year:
+    for chunk_start in chunk_starts:
         chunk_number += 1
-        chunk_start = year
-        chunk_end = min(year + years_per_chunk - 1, end_year)
+        chunk_end = min(chunk_start + years_per_chunk - 1, end_year)
 
         file_id = f"era5_france_{chunk_start}_{chunk_end}"
+
+        if only_file_ids and file_id not in set(only_file_ids):
+            log_info(f"⏭️  Skipping {file_id} (not in only_file_ids)")
+            continue
+
+        if skip_existing and file_id in existing_file_ids:
+            log_info(f"⏭️  Skipping {file_id} (already in DB)")
+            continue
 
         log_info(
             f"📥 [{chunk_number}/{total_chunks}] Downloading ERA5 {chunk_start}-{chunk_end} "
@@ -143,14 +209,31 @@ def era5_france_meteo(config: Dict[str, Any], dagster_context=None) -> Iterator[
             tmp_path = tmp.name
 
         try:
-            log_info(f"🌐 [{chunk_number}/{total_chunks}] Submitting request to Copernicus CDS for {file_id}...")
+            last_err = None
+            for attempt in range(1, retry_times + 1):
+                try:
+                    log_info(
+                        f"🌐 [{chunk_number}/{total_chunks}] Submitting request to Copernicus CDS for {file_id} "
+                        f"(attempt {attempt}/{retry_times})..."
+                    )
 
-            # Téléchargement (peut prendre 5-10 minutes)
-            client.retrieve(
-                config['resource']['dataset'],
-                request_params,
-                tmp_path
-            )
+                    # Téléchargement (peut prendre 5-10 minutes)
+                    client.retrieve(
+                        config['resource']['dataset'],
+                        request_params,
+                        tmp_path
+                    )
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    log_error(f"❌ Attempt {attempt}/{retry_times} failed for {file_id}: {e}")
+                    if attempt < retry_times:
+                        import time
+                        time.sleep(retry_delay)
+
+            if last_err is not None:
+                raise last_err
 
             log_info(f"💾 [{chunk_number}/{total_chunks}] Download complete, reading file...")
 
@@ -186,14 +269,13 @@ def era5_france_meteo(config: Dict[str, Any], dagster_context=None) -> Iterator[
 
         except Exception as e:
             log_error(f"❌ [{chunk_number}/{total_chunks}] Failed to download {file_id}: {e}")
-            raise
+            if not continue_on_error:
+                raise
+            log_info(f"➡️  continue_on_error=true, moving on after failure of {file_id}")
 
         finally:
             # Nettoyer fichier temporaire
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-
-        # Next chunk
-        year += years_per_chunk
 
     log_info(f"🎉 ERA5 download complete: {chunk_number}/{total_chunks} chunks processed")
