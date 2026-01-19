@@ -64,10 +64,16 @@ final AS (
         
     FROM measurements m
     INNER JOIN mapping map ON m.code_bss = map.code_bss
-    LEFT JOIN era5_filtered e 
+    INNER JOIN era5_filtered e 
         ON map.era5_latitude = e.latitude 
         AND map.era5_longitude = e.longitude
         AND m.date_mesure = e.era5_date
 )
 
+-- Filtrer les lignes où toutes les 5 colonnes d'observation sont non-nulles
 SELECT * FROM final
+WHERE niveau_nappe_eau IS NOT NULL
+  AND profondeur_nappe IS NOT NULL
+  AND temperature_2m IS NOT NULL
+  AND total_precipitation IS NOT NULL
+  AND potential_evaporation IS NOT NULL

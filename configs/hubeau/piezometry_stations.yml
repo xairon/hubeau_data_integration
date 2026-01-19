@@ -2,7 +2,7 @@ resource:
   name: piezometry_stations_raw
   endpoint: /stations.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-  # Bronze layer: no PK/FK constraints, duplicates allowed
+  # Bronze layer: replace = full refresh (pas de doublons car table remplacée)
   primary_key: null
 extraction:
   default_params: {}

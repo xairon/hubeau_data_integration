@@ -2,11 +2,13 @@ resource:
   name: piezometry_chroniques_raw
   endpoint: /chroniques.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-  # Bronze layer: no PK/FK constraints, duplicates allowed
+  # Pas de primary_key: plusieurs chroniques légitimes possibles pour même station/date
+  # (différents mode_obtention, statut, qualification, valeurs)
+  # Les doublons de relance sont évités via _dlt_id (hash des données généré par DLT)
   primary_key: null
 extraction:
-  default_params:
-    size: 5000
+  default_params: {}
+  # Note: API v1 doesn't support 'size' parameter
   # Date filter parameter names for this API
   date_filter_params:
     date_debut: date_debut_mesure  # Start date parameter name

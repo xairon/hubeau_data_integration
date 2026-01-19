@@ -9,3 +9,6 @@ SELECT
     AVG(profondeur_nappe) AS profondeur_nappe
 FROM chroniques
 GROUP BY code_bss, date_mesure
+-- S'assurer que les deux colonnes piézo sont non-nulles
+HAVING AVG(niveau_nappe_eau) IS NOT NULL 
+    AND AVG(profondeur_nappe) IS NOT NULL

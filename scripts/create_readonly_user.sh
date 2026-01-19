@@ -127,26 +127,38 @@ GRANT USAGE ON SCHEMA public TO ${READONLY_USER};
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${READONLY_USER};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${READONLY_USER};
 
--- Grant read-only permissions on hubeau schema (if exists)
+-- Grant read-only permissions on silver schema (if exists)
 DO \$\$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'hubeau') THEN
-        GRANT USAGE ON SCHEMA hubeau TO ${READONLY_USER};
-        GRANT SELECT ON ALL TABLES IN SCHEMA hubeau TO ${READONLY_USER};
-        ALTER DEFAULT PRIVILEGES IN SCHEMA hubeau GRANT SELECT ON TABLES TO ${READONLY_USER};
-        RAISE NOTICE '✅ Permissions granted on schema: hubeau';
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'silver') THEN
+        GRANT USAGE ON SCHEMA silver TO ${READONLY_USER};
+        GRANT SELECT ON ALL TABLES IN SCHEMA silver TO ${READONLY_USER};
+        ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT SELECT ON TABLES TO ${READONLY_USER};
+        RAISE NOTICE '✅ Permissions granted on schema: silver';
     END IF;
 END
 \$\$;
 
--- Grant read-only permissions on staging schema (DLT default)
+-- Grant read-only permissions on gold schema (if exists)
 DO \$\$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'staging') THEN
-        GRANT USAGE ON SCHEMA staging TO ${READONLY_USER};
-        GRANT SELECT ON ALL TABLES IN SCHEMA staging TO ${READONLY_USER};
-        ALTER DEFAULT PRIVILEGES IN SCHEMA staging GRANT SELECT ON TABLES TO ${READONLY_USER};
-        RAISE NOTICE '✅ Permissions granted on schema: staging';
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'gold') THEN
+        GRANT USAGE ON SCHEMA gold TO ${READONLY_USER};
+        GRANT SELECT ON ALL TABLES IN SCHEMA gold TO ${READONLY_USER};
+        ALTER DEFAULT PRIVILEGES IN SCHEMA gold GRANT SELECT ON TABLES TO ${READONLY_USER};
+        RAISE NOTICE '✅ Permissions granted on schema: gold';
+    END IF;
+END
+\$\$;
+
+-- Grant read-only permissions on bronze schema (DLT default)
+DO \$\$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'bronze') THEN
+        GRANT USAGE ON SCHEMA bronze TO ${READONLY_USER};
+        GRANT SELECT ON ALL TABLES IN SCHEMA bronze TO ${READONLY_USER};
+        ALTER DEFAULT PRIVILEGES IN SCHEMA bronze GRANT SELECT ON TABLES TO ${READONLY_USER};
+        RAISE NOTICE '✅ Permissions granted on schema: bronze';
     END IF;
 END
 \$\$;
@@ -158,13 +170,13 @@ DECLARE
 BEGIN
     SELECT COUNT(*) INTO table_count
     FROM information_schema.tables
-    WHERE table_schema IN ('public', 'hubeau', 'staging');
+    WHERE table_schema IN ('public', 'bronze', 'silver', 'gold');
 
     RAISE NOTICE '================================================';
     RAISE NOTICE '✅ Read-only user created successfully';
     RAISE NOTICE '================================================';
     RAISE NOTICE 'Username: ${READONLY_USER}';
-    RAISE NOTICE 'Schemas: public, hubeau, staging';
+    RAISE NOTICE 'Schemas: public, bronze, silver, gold';
     RAISE NOTICE 'Tables accessible: %', table_count;
     RAISE NOTICE 'Permissions: SELECT only (read-only)';
     RAISE NOTICE '================================================';

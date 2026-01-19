@@ -1,3 +1,7 @@
+-- Staging model for piezometry chroniques
+-- Source: bronze.piezometry_chroniques_raw
+-- Silver layer: autocast + filtrage des observations nulles
+
 WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_chroniques_raw') }}
 )
@@ -12,3 +16,9 @@ SELECT
     qualification
 FROM source
 WHERE date_mesure IS NOT NULL
+  AND code_bss IS NOT NULL
+  -- Filtrer les lignes où toutes les observations sont nulles
+  AND (
+    niveau_nappe_eau IS NOT NULL 
+    OR profondeur_nappe IS NOT NULL
+  )

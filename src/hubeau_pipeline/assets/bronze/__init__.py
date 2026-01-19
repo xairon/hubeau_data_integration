@@ -20,6 +20,7 @@ from hubeau_pipeline.assets.bronze.dlt_assets import (
 from hubeau_pipeline.assets.bronze.era5_assets import (
     era5_france_meteo_raw,
     era5_france_timeseries,
+    ERA5_PARTITIONS_DEF,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "era5_france_meteo_raw",
     "era5_france_timeseries",
     "MODE_PARTITIONS",
+    "ERA5_PARTITIONS_DEF",
 ]

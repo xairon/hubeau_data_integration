@@ -26,7 +26,7 @@ from .era5_jobs import (
 )
 
 # Jobs dbt
-from .dbt_jobs import dbt_pipeline_job
+from .dbt_jobs import dbt_silver_gold_pipeline_job
 
 all_jobs = [
     # Jobs STATIONS (no partitions)
@@ -41,8 +41,8 @@ all_jobs = [
     # Jobs ERA5
     era5_meteo_job,
     era5_timeseries_job,
-    # Jobs dbt
-    dbt_pipeline_job,
+    # Jobs dbt (Silver/Gold layers)
+    dbt_silver_gold_pipeline_job,
 ]
 
 __all__ = [
@@ -58,8 +58,8 @@ __all__ = [
     # Jobs ERA5
     "era5_meteo_job",
     "era5_timeseries_job",
-    # Jobs dbt
-    "dbt_pipeline_job",
+    # Jobs dbt (Silver/Gold layers)
+    "dbt_silver_gold_pipeline_job",
     # Collections
     "all_jobs",
 ]

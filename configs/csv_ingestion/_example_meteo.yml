@@ -19,7 +19,7 @@ source:
 
 destination:
   # Table name in PostgreSQL (will be prefixed with "staging_")
-  # Result: staging.staging_meteo_data
+  # Result: bronze.staging_meteo_data
   table_name: meteo_data
 
   # Write mode:

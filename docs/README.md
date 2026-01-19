@@ -1,29 +1,46 @@
 # Documentation Hub'Eau Pipeline
 
-## Démarrage Rapide
+## 📖 Guide de Démarrage
 
-- [README principal](../README.md) - Installation et démarrage
-- [Configuration](CONFIGURATION.md) - Variables d'environnement
-- [CSV Ingestion](../configs/csv_ingestion/README.md) - Ingérer des CSVs
+- **[README principal](../README.md)** - Installation et utilisation rapide
+- **[Configuration](CONFIGURATION.md)** - Variables d'environnement et setup
 
-## Architecture & APIs
+## 🏗️ Architecture & Design
 
-- [Architecture](ARCHITECTURE.md) - Architecture détaillée du pipeline
-- [APIs Hub'Eau](APIS_HUBEAU.md) - Liste complète des APIs et endpoints
-- [Schéma BDD](SCHEMA_BDD.md) - Structure PostgreSQL
+- **[Architecture](ARCHITECTURE.md)** - Architecture détaillée du pipeline
+- **[Schéma BDD](SCHEMA_BDD.md)** - Structure des tables PostgreSQL
+- **[Stockage ERA5](ERA5_DATA_STORAGE.md)** - Détails sur le stockage ERA5
 
-## Administration
+## 🔧 Utilisation
 
-- [GitLab CI/CD](GITLAB_CI_VARIABLES_SETUP.md) - Configuration déploiement
-- [SANDRE & BD-LISA](SANDRE_BDLISA_INTEGRATION.md) - Données de référence
+### Workflow Standard
 
-## Interfaces
+1. **Ingestion** : Lancer les jobs DLT pour charger les données brutes dans `bronze`
+2. **Transformation** : Lancer le job dbt pour créer `silver` et `gold`
+3. **Analyse** : Utiliser `gold.hubeau_daily_chroniques` pour vos analyses
 
-- **Dagster UI** : http://localhost:8080 - Orchestration
-- **Adminer** : http://localhost:8081 - PostgreSQL
+### Exemples de Requêtes
 
-## Ressources Externes
+Voir [SCHEMA_BDD.md](SCHEMA_BDD.md#requêtes-courantes) pour des exemples de requêtes SQL.
+
+## 🚀 Déploiement
+
+### Local
+```bash
+docker compose up -d --build
+```
+
+### Production
+Voir [CONFIGURATION.md](CONFIGURATION.md#production) pour les détails de déploiement en production.
+
+## 📊 Interfaces
+
+- **Dagster UI** : http://localhost:49500 - Orchestration et monitoring
+- **Adminer** : http://localhost:49501 - Interface PostgreSQL
+
+## 🔗 Ressources Externes
 
 - [Hub'Eau](https://hubeau.eaufrance.fr) - APIs officielles
 - [Dagster Docs](https://docs.dagster.io) - Documentation Dagster
 - [DLT Docs](https://dlthub.com/docs) - Documentation DLT
+- [dbt Docs](https://docs.getdbt.com) - Documentation dbt

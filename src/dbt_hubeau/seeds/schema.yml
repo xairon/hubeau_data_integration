@@ -4,6 +4,7 @@ seeds:
   - name: tme_entites_hydrogeo
     description: "Table des Masses d'Eau - Référentiel des entités hydrogéologiques BDLISA"
     config:
+      schema: bronze  # Seed dans bronze layer
       column_types:
         id: varchar
         CodeEH: varchar

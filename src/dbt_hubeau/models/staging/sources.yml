@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: staging
-    schema: staging
+    schema: bronze
     tables:
       - name: era5_france_timeseries
         description: Données météo ERA5 brutes (timeseries)
@@ -10,3 +10,9 @@ sources:
         description: Métadonnées des stations piézométriques
       - name: piezometry_chroniques_raw
         description: Mesures piézométriques brutes
+      - name: hydrometry_sites_raw
+        description: Sites hydrométriques bruts
+      - name: hydrometry_stations_raw
+        description: Stations hydrométriques brutes
+      - name: hydrometry_obs_elab_raw
+        description: Observations hydrométriques élaborées brutes

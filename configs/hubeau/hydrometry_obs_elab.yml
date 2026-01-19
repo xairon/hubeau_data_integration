@@ -2,8 +2,8 @@ resource:
   name: hydrometry_observations_raw
   endpoint: /obs_elab.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
-  # Bronze layer: no PK/FK constraints, duplicates allowed
-  primary_key: null
+  # Primary key pour déduplication (merge) - évite les doublons si job relancé
+  primary_key: ["code_entite", "date_obs_elab"]
 extraction:
   default_params:
     grandeur_hydro_elab: QmnJ  # Daily mean flow (Débit moyen journalier)

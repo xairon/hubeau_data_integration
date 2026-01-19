@@ -30,6 +30,10 @@ filtered_era5 AS (
     INNER JOIN station_grid_points g
         ON e.latitude = g.latitude
         AND e.longitude = g.longitude
+    -- S'assurer que toutes les 3 colonnes météo sont non-nulles
+    WHERE e.temperature_2m IS NOT NULL
+      AND e.total_precipitation IS NOT NULL
+      AND e.potential_evaporation IS NOT NULL
 )
 
 SELECT * FROM filtered_era5

@@ -70,6 +70,7 @@ dependencies = [
     "cads-api-client>=1.0.0",
     "cdsapi>=0.7.7",  # Required by cads-api-client.legacy_api_client
     "xarray>=2023.12.0",  # NetCDF data processing
+    "h5py>=3.10.0",  # HDF5 support (required by h5netcdf)
     "h5netcdf>=1.3.0",  # NetCDF engine for xarray
     "netCDF4>=1.6.5",  # Alternative NetCDF engine
 
@@ -150,6 +151,7 @@ worker = [
     "cads-api-client>=1.0.0",  # Updated to new CADS API
     "cdsapi>=0.7.7",  # Required by cads-api-client
     "xarray>=2023.12.0",  # NetCDF data processing
+    "h5py>=3.10.0",  # HDF5 support (required by h5netcdf)
     "h5netcdf>=1.3.0",  # NetCDF engine for xarray
     "netCDF4>=1.6.5",  # Alternative NetCDF engine
     "dbt-core==1.7.0",

@@ -1,3 +1,7 @@
+-- Staging model for piezometry stations
+-- Source: bronze.piezometry_stations_raw
+-- Silver layer: autocast + filtrage des nulls
+
 WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_stations_raw') }}
 )

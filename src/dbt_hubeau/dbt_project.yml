@@ -17,11 +17,11 @@ clean-targets:
 
 # Hooks exécutés au début de chaque run dbt (idempotents)
 on-run-start:
-  - "CREATE INDEX IF NOT EXISTS idx_era5_lat_lon_time ON staging.era5_france_timeseries (latitude, longitude, time)"
-  - "CREATE INDEX IF NOT EXISTS idx_era5_time ON staging.era5_france_timeseries (time)"
-  - "CREATE INDEX IF NOT EXISTS idx_piezo_chroniques_full ON staging.piezometry_chroniques_raw (code_bss, date_mesure)"
-  - "CREATE INDEX IF NOT EXISTS idx_piezo_stations_coords ON staging.piezometry_stations_raw (x, y)"
-  - "CREATE INDEX IF NOT EXISTS idx_piezo_stations_code_bss ON staging.piezometry_stations_raw (code_bss)"
+  - "CREATE INDEX IF NOT EXISTS idx_era5_lat_lon_time ON bronze.era5_france_timeseries (latitude, longitude, time)"
+  - "CREATE INDEX IF NOT EXISTS idx_era5_time ON bronze.era5_france_timeseries (time)"
+  - "CREATE INDEX IF NOT EXISTS idx_piezo_chroniques_full ON bronze.piezometry_chroniques_raw (code_bss, date_mesure)"
+  - "CREATE INDEX IF NOT EXISTS idx_piezo_stations_coords ON bronze.piezometry_stations_raw (x, y)"
+  - "CREATE INDEX IF NOT EXISTS idx_piezo_stations_code_bss ON bronze.piezometry_stations_raw (code_bss)"
 
 models:
   hubeau_pipeline:
@@ -29,17 +29,21 @@ models:
     +materialized: view
     
     staging:
-      # Vues légères sur les tables raw (schéma source)
-      +schema: staging
-      +materialized: view
+      # Tables nettoyées (Silver Layer)
+      +schema: silver
+      +materialized: table
       
     intermediate:
-      # Tables temporaires pour calculs intermédiaires
-      +schema: hubeau
+      # Tables intermédiaires (Gold Layer)
+      +schema: gold
       +materialized: table
       
     marts:
-      # Tables finales propres pour l'analyse
-      +schema: hubeau
+      # Tables finales (Gold Layer)
+      +schema: gold
       +materialized: table
 
+seeds:
+  hubeau_pipeline:
+    # Seeds dans Bronze Layer (données de référence)
+    +schema: bronze

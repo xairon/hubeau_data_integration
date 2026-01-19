@@ -4,7 +4,8 @@ ERA5 Bronze Layer Assets
 Stockage NetCDF4 bruts en PostgreSQL
 - 1 timestep/jour (00:00 UTC)
 - Chunks de 2 ans (limite API)
-- ~43 fichiers pour 1940-2025
+- ~43 fichiers pour 1950-2025
+- Partitionné par chunks de 2 ans (ex: "2024_2025")
 """
 
 import yaml
@@ -14,13 +15,36 @@ import io
 import os
 import zipfile
 from typing import Dict, Any
-from dagster import asset, AssetExecutionContext
+from datetime import datetime
+from dagster import asset, AssetExecutionContext, StaticPartitionsDefinition
 from hubeau_pipeline.sources.era5_source import era5_france_meteo
 from dlt.destinations import postgres
 import psycopg2
+# Import h5py before xarray to ensure it's available for h5netcdf engine
+import h5py  # noqa: F401
 import xarray as xr
 import pandas as pd
 from psycopg2.extras import execute_values
+
+# ============================================================================
+# PARTITIONS - ERA5 (chunks de 2 ans)
+# ============================================================================
+
+CURRENT_YEAR = datetime.now().year
+ERA5_START_YEAR = 1950  # ERA5-Land commence en 1950
+ERA5_YEARS_PER_CHUNK = 2
+
+# Créer les partitions par chunks de 2 ans
+# Ex: ["1950_1951", "1952_1953", ..., "2024_2025"]
+ERA5_PARTITIONS = []
+year = ERA5_START_YEAR
+while year <= CURRENT_YEAR:
+    chunk_end = min(year + ERA5_YEARS_PER_CHUNK - 1, CURRENT_YEAR)
+    partition_key = f"{year}_{chunk_end}"
+    ERA5_PARTITIONS.append(partition_key)
+    year += ERA5_YEARS_PER_CHUNK
+
+ERA5_PARTITIONS_DEF = StaticPartitionsDefinition(ERA5_PARTITIONS)
 
 
 def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
@@ -37,7 +61,7 @@ def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
     return dlt.pipeline(
         pipeline_name=pipeline_name,
         destination=destination,
-        dataset_name=os.environ.get("DLT_BRONZE_DATASET", "staging"),
+        dataset_name=os.environ.get("DLT_BRONZE_DATASET", "bronze"),
         progress="log",
     )
 
@@ -45,11 +69,14 @@ def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
 @asset(
     compute_kind="era5",
     group_name="era5_meteo",
-    io_manager_key="noop_io_manager"
+    io_manager_key="noop_io_manager",
+    partitions_def=ERA5_PARTITIONS_DEF
 )
-def era5_france_meteo_raw(context):
+def era5_france_meteo_raw(context: AssetExecutionContext):
     """
     ERA5 France Météo - NetCDF4 daily data (00:00 UTC)
+    
+    Partitionné par chunks de 2 ans (ex: "2024_2025")
 
     Variables:
     - 2m_temperature (K)
@@ -59,70 +86,115 @@ def era5_france_meteo_raw(context):
     Coverage: France métropolitaine (0.25° grid)
     Period: 1950-present (ERA5-Land)
     Frequency: Daily at 00:00 UTC (previous day data)
-    Storage: PostgreSQL bytea (~38 files × 50-100 MB)
+    Storage: PostgreSQL bytea (~50-100 MB par chunk)
 
     Note: Downloads in 2-year chunks (API limitation)
-    Expected runtime: ~3-5 hours for full historical download
+    Expected runtime: ~5-10 minutes par chunk
 
     ⚠️ Each chunk is stored IMMEDIATELY in PostgreSQL after download (true incremental loading)
     """
+    # Récupérer la partition (ex: "2024_2025")
+    partition_key = context.partition_key
+    start_year, end_year = map(int, partition_key.split('_'))
+    
+    context.log.info(f"📅 Traitement de la partition ERA5: {partition_key} ({start_year}-{end_year})")
+    
     config_path = "configs/era5/era5_france_meteo.yml"
     with open(config_path) as f:
         config = yaml.safe_load(f)
+    
+    # Override time_range pour cette partition
+    config['extraction']['time_range']['start_year'] = start_year
+    config['extraction']['time_range']['end_year'] = end_year
 
-    context.log.info("🚀 Starting ERA5 download with TRUE incremental loading (chunk-by-chunk storage)...")
+    context.log.info(f"🚀 Starting ERA5 download for {partition_key}...")
 
-    total_files = 0
-    total_size_mb = 0.0
-
-    # Iterate through ERA5 generator and save EACH chunk individually
-    for chunk_index, record in enumerate(era5_france_meteo(config, dagster_context=context), start=1):
-
-        # ⚠️ MEMORY FIX: Recreate pipeline for each chunk to avoid memory accumulation
-        context.log.info(f"🔧 [{chunk_index}] Creating fresh DLT pipeline to avoid memory leaks...")
-        pipeline = _create_pipeline("era5_france_meteo", context=context)
-
-        # Create a single-record resource for this chunk
-        @dlt.resource(
-            name="era5_netcdf_files",
-            write_disposition="append",
-            primary_key="file_id"
-        )
-        def single_chunk():
-            """Single chunk resource for immediate storage"""
-            yield record
-
-        # Store THIS chunk immediately in PostgreSQL
-        context.log.info(
-            f"💾 [{chunk_index}] Storing chunk {record['file_id']} in PostgreSQL NOW "
-            f"({record['file_size_mb']:.2f} MB)..."
-        )
-
-        load_info = pipeline.run(single_chunk, table_name="era5_france_meteo_raw")
-
-        total_files += 1
-        total_size_mb += record.get('file_size_mb', 0)
-
-        context.log.info(
-            f"✅ [{chunk_index}] Chunk {record['file_id']} stored successfully in PostgreSQL! "
-            f"Total: {total_files} files, {total_size_mb:.2f} MB"
-        )
-
-        # ⚠️ MEMORY FIX: Force garbage collection after each chunk
-        del pipeline
-        del load_info
-        gc.collect()
-        context.log.info(f"🧹 [{chunk_index}] Memory cleaned (garbage collection completed)")
-
-    context.log.info(
-        f"🎉 ERA5 download complete! Stored {total_files} NetCDF4 files in PostgreSQL ({total_size_mb:.2f} MB)"
+    # Vérifier si ce chunk existe déjà
+    file_id = f"era5_france_{start_year}_{end_year}"
+    conn = psycopg2.connect(
+        host=os.getenv('PG_HOST', 'postgres'),
+        port=os.getenv('PG_PORT', '5432'),
+        database=os.getenv('PG_DB', 'postgres'),
+        user=os.getenv('PG_USER', 'postgres'),
+        password=os.getenv('PG_PASSWORD')
     )
+    try:
+        with conn.cursor() as cur:
+            # Vérifier si la table existe
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT 1 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'bronze' 
+                    AND table_name = 'era5_france_meteo_raw'
+                )
+            """)
+            table_exists = cur.fetchone()[0]
+            
+            if table_exists:
+                # Vérifier si le chunk existe déjà
+                cur.execute("""
+                    SELECT file_id FROM bronze.era5_france_meteo_raw 
+                    WHERE file_id = %s
+                """, (file_id,))
+                if cur.fetchone():
+                    context.log.info(f"✅ Chunk {file_id} already exists, skipping download")
+                    return {
+                        "rows_loaded": 0,
+                        "total_size_mb": 0.0,
+                        "status": "skipped",
+                        "table_name": "era5_france_meteo_raw",
+                        "file_id": file_id
+                    }
+    finally:
+        conn.close()
+
+    # Télécharger ce chunk uniquement
+    pipeline = _create_pipeline("era5_france_meteo", context=context)
+    
+    @dlt.resource(
+        name="era5_netcdf_files",
+        write_disposition="append",
+        primary_key="file_id"
+    )
+    def single_chunk():
+        """Single chunk resource for immediate storage"""
+        # La source ERA5 va générer un seul chunk pour cette période
+        for record in era5_france_meteo(config, dagster_context=context):
+            yield record
+            break  # Un seul chunk attendu pour cette partition
+
+    context.log.info(f"💾 Storing chunk {file_id} in PostgreSQL...")
+    
+    load_info = pipeline.run(single_chunk, table_name="era5_france_meteo_raw")
+    
+    # Récupérer la taille du fichier
+    conn = psycopg2.connect(
+        host=os.getenv('PG_HOST', 'postgres'),
+        port=os.getenv('PG_PORT', '5432'),
+        database=os.getenv('PG_DB', 'postgres'),
+        user=os.getenv('PG_USER', 'postgres'),
+        password=os.getenv('PG_PASSWORD')
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT file_size_mb FROM bronze.era5_france_meteo_raw 
+                WHERE file_id = %s
+            """, (file_id,))
+            result = cur.fetchone()
+            file_size_mb = result[0] if result else 0.0
+    finally:
+        conn.close()
+    
+    context.log.info(f"✅ Chunk {file_id} stored successfully! ({file_size_mb:.2f} MB)")
 
     return {
-        "rows_loaded": total_files,
-        "total_size_mb": total_size_mb,
+        "rows_loaded": 1,
+        "total_size_mb": file_size_mb,
         "status": "success",
-        "table_name": "era5_france_meteo_raw"
+        "table_name": "era5_france_meteo_raw",
+        "file_id": file_id
     }
 
 
@@ -136,11 +208,11 @@ def era5_france_timeseries(context: AssetExecutionContext):
     """
     ERA5 France Time Series - Normalized table from NetCDF bytea storage
 
-    Extracts NetCDF data from staging.era5_france_meteo_raw (bytea columns)
+    Extracts NetCDF data from bronze.era5_france_meteo_raw (bytea columns)
     and creates a queryable time series table with normalized structure.
 
-    Source: staging.era5_france_meteo_raw (38 files × 80 MB = 3 GB bytea)
-    Target: staging.era5_france_timeseries (~277M rows × 50 bytes = ~14 GB)
+    Source: bronze.era5_france_meteo_raw (38 files × 80 MB = 3 GB bytea)
+    Target: bronze.era5_france_timeseries (~277M rows × 50 bytes = ~14 GB)
 
     This asset:
     - Unpacks ZIP-compressed NetCDF files from bytea storage
@@ -223,7 +295,7 @@ def _create_timeseries_table(conn):
     """Create target time series table if not exists."""
     with conn.cursor() as cur:
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS staging.era5_france_timeseries (
+            CREATE TABLE IF NOT EXISTS bronze.era5_france_timeseries (
                 id BIGSERIAL PRIMARY KEY,
                 time TIMESTAMP NOT NULL,
                 latitude NUMERIC(6,3) NOT NULL,
@@ -236,18 +308,16 @@ def _create_timeseries_table(conn):
             );
 
             CREATE INDEX IF NOT EXISTS idx_era5_time
-                ON staging.era5_france_timeseries (time);
+                ON bronze.era5_france_timeseries (time);
 
             CREATE INDEX IF NOT EXISTS idx_era5_location
-                ON staging.era5_france_timeseries (latitude, longitude);
+                ON bronze.era5_france_timeseries (latitude, longitude);
 
             CREATE INDEX IF NOT EXISTS idx_era5_time_location
-                ON staging.era5_france_timeseries (time, latitude, longitude);
+                ON bronze.era5_france_timeseries (time, latitude, longitude);
 
             CREATE INDEX IF NOT EXISTS idx_era5_source_file
-                ON staging.era5_france_timeseries (source_file_id);
-
-            GRANT SELECT ON staging.era5_france_timeseries TO readonly;
+                ON bronze.era5_france_timeseries (source_file_id);
         """)
         conn.commit()
 
@@ -257,9 +327,9 @@ def _get_files_to_process(conn, context):
     with conn.cursor() as cur:
         cur.execute("""
             SELECT r.file_id, r.file_size_mb, r.start_year, r.end_year
-            FROM staging.era5_france_meteo_raw r
+            FROM bronze.era5_france_meteo_raw r
             WHERE NOT EXISTS (
-                SELECT 1 FROM staging.era5_france_timeseries t
+                SELECT 1 FROM bronze.era5_france_timeseries t
                 WHERE t.source_file_id = r.file_id
             )
             ORDER BY r.start_year
@@ -274,7 +344,7 @@ def _extract_netcdf(conn, file_id: str, context) -> xr.Dataset:
     with conn.cursor() as cur:
         cur.execute("""
             SELECT netcdf_data
-            FROM staging.era5_france_meteo_raw
+            FROM bronze.era5_france_meteo_raw
             WHERE file_id = %s
         """, (file_id,))
 
@@ -372,7 +442,7 @@ def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) 
             execute_values(
                 cur,
                 """
-                INSERT INTO staging.era5_france_timeseries
+                INSERT INTO bronze.era5_france_timeseries
                 (time, latitude, longitude, temperature_2m, total_precipitation, potential_evaporation, source_file_id)
                 VALUES %s
                 """,

@@ -70,9 +70,16 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
     # Build initial URL
     base_url = client.base_url + endpoint
     
+    # Fix: Remove 'size' parameter for API v1 (doesn't support it)
+    # API v1: https://hubeau.eaufrance.fr/api/v1/*
+    # API v2: https://hubeau.eaufrance.fr/api/v2/*
+    cleaned_params = params.copy() if params else {}
+    if '/api/v1/' in base_url and 'size' in cleaned_params:
+        del cleaned_params['size']
+    
     # First request
     try:
-        response = request_with_retry(base_url, params=params)
+        response = request_with_retry(base_url, params=cleaned_params)
     except Exception as e:
         log(f"❌ HTTP Request failed: {e}")
         raise e
@@ -95,6 +102,21 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
         if next_match and page_count > 0:
             next_url = next_match.group(1)
             page += 1
+            
+            # Fix: Remove unsupported 'size' parameter from pagination URL
+            # Hub'Eau API v1 doesn't support size parameter in pagination URLs
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            parsed = urlparse(next_url)
+            query_params = parse_qs(parsed.query)
+            # Remove 'size' parameter if present
+            if 'size' in query_params:
+                del query_params['size']
+                # Rebuild URL without size parameter
+                new_query = urlencode(query_params, doseq=True)
+                next_url = urlunparse((
+                    parsed.scheme, parsed.netloc, parsed.path,
+                    parsed.params, new_query, parsed.fragment
+                ))
             
             # Small delay between pages to avoid overwhelming API
             time_module.sleep(0.2)

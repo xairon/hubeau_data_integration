@@ -2,22 +2,25 @@
 Jobs ERA5 - Bronze Layer
 
 Job pour téléchargement historique ERA5
-- Durée estimée: 3-5 heures (43 requêtes × 5-10 min/requête)
+- Partitionné par chunks de 2 ans (ex: "2024_2025")
+- Durée estimée: 5-10 minutes par chunk
 - Mode: APPEND (idempotent par file_id)
 """
 
 from dagster import define_asset_job, AssetSelection, AssetKey
+from ..assets.bronze.era5_assets import ERA5_PARTITIONS_DEF
 
 
 era5_meteo_job = define_asset_job(
     name="era5_meteo_bronze",
     description=(
         "Bronze: ERA5 France météo NetCDF4 files (daily 00:00 UTC). "
-        "Downloads 2-year chunks. Runtime: ~3-5 hours for full history."
+        "Partitionné par chunks de 2 ans. Runtime: ~5-10 min par chunk."
     ),
     selection=AssetSelection.keys(
         AssetKey("era5_france_meteo_raw")
     ),
+    partitions_def=ERA5_PARTITIONS_DEF,
     tags={"dagster/concurrency_key": "era5_meteo_bronze"}
 )
 
@@ -27,7 +30,7 @@ era5_timeseries_job = define_asset_job(
     description=(
         "Extract ERA5 NetCDF bytea data to normalized time series table. "
         "Unpacks ZIP-compressed NetCDF, converts units (K→°C, m→mm), "
-        "creates staging.era5_france_timeseries (~277M rows). "
+        "creates bronze.era5_france_timeseries (~277M rows). "
         "Runtime: ~30-60 minutes for full dataset."
     ),
     selection=AssetSelection.keys(

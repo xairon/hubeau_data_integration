@@ -7,7 +7,7 @@ WORKFLOW:
 1. Drop CSV dans data/csv_inbox/
 2. Matérialiser l'asset "ingest_all_csvs"
 3. Tous les CSVs sont ingérés automatiquement
-4. Tables créées: staging.staging_<filename>
+4. Tables créées: bronze.staging_<filename>
 
 CONFIG OPTIONNELLE:
 - Si configs/csv_ingestion/<filename>.yml existe → utilise les params
@@ -63,7 +63,7 @@ def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
     return dlt.pipeline(
         pipeline_name=pipeline_name,
         destination=destination,
-        dataset_name="staging",
+        dataset_name="bronze",
         progress="log",
     )
 
@@ -210,7 +210,7 @@ def ingest_single_csv(
     # Prefix table with "staging_"
     full_table_name = f"staging_{table_name}"
 
-    context.log.info(f"Destination: staging.{full_table_name}")
+    context.log.info(f"Destination: bronze.{full_table_name}")
     context.log.info(f"Write mode: {write_disposition}")
 
     # Create DLT resource with generator for streaming
@@ -271,7 +271,7 @@ def ingest_single_csv(
     # DLT 'rows_loaded' is accurate for what was inserted.
     
     context.log.info(
-        f"✅ Ingested {csv_filename}: {metrics['rows_loaded']:,} rows → staging.{full_table_name}"
+        f"✅ Ingested {csv_filename}: {metrics['rows_loaded']:,} rows → bronze.{full_table_name}"
     )
 
     return {
@@ -301,7 +301,7 @@ def ingest_all_csvs_asset(context: AssetExecutionContext) -> Output:
 
     - No config YAML required (optional)
     - Auto-detects schema with DLT
-    - Creates tables: staging.staging_<filename>
+    - Creates tables: bronze.staging_<filename>
     - Always available in Dagster (permanent asset)
 
     Usage:

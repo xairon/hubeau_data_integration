@@ -10,8 +10,8 @@ Ce système permet d'ingérer **n'importe quel CSV** dans PostgreSQL sans écrir
 2. Déposer le CSV dans /app/data/csv_inbox/
 3. Asset Dagster automatiquement généré
 4. Sensor détecte le fichier et déclenche l'ingestion
-5. Données atterrissent dans staging.<table_name>
-6. DBT transforme staging → production
+5. Données atterrissent dans bronze.<table_name>
+6. DBT transforme bronze → silver → gold
 ```
 
 ## Quick Start
@@ -77,7 +77,7 @@ docker cp mon_fichier.csv brgm-dlt-worker:/app/data/csv_inbox/
 
 ```sql
 -- Connexion à PostgreSQL
-SELECT * FROM staging.staging_mon_fichier LIMIT 10;
+SELECT * FROM bronze.staging_mon_fichier LIMIT 10;
 ```
 
 ## Exemples
@@ -191,7 +191,7 @@ docker compose restart dlt_worker dagster_webserver
 
 **Solution:**
 - Utiliser `write_disposition: replace` pour full refresh
-- Ou supprimer la table manuellement: `DROP TABLE staging.staging_<table>;`
+- Ou supprimer la table manuellement: `DROP TABLE bronze.staging_<table>;`
 
 ## Avantages vs ancien système
 

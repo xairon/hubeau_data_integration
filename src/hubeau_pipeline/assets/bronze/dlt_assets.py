@@ -73,7 +73,7 @@ def _create_pipeline(name: str) -> dlt.Pipeline:
     return dlt.pipeline(
         pipeline_name=name,
         destination=destination,
-        dataset_name=os.environ.get("DLT_BRONZE_DATASET", "staging"),
+        dataset_name=os.environ.get("DLT_BRONZE_DATASET", "bronze"),
         progress="log",
     )
 
@@ -98,7 +98,7 @@ def create_referentiel_source(
 
 @dlt.source(name="hubeau_piezometry_stations")
 def piezometry_stations_source():
-    """DLT Source for Piezometry Stations (FULL load)."""
+    """DLT Source for Piezometry Stations (FULL load with replace)."""
     return create_referentiel_source(
         name="hubeau_piezometry_stations",
         config=_load_config("piezometry_stations"),
@@ -108,6 +108,95 @@ def piezometry_stations_source():
 # ============================================================================
 # LAZY LOADING RESOURCE - BEST PRACTICE
 # ============================================================================
+
+def _clean_partition_data(table_name: str, schema: str, year: str, date_column: str, logger=None) -> int:
+    """
+    Nettoie les données existantes pour une partition (année) avant rechargement.
+    
+    Args:
+        table_name: Nom de la table (ex: "piezometry_chroniques_raw")
+        schema: Schéma de la table (ex: "bronze")
+        year: Année de la partition (ex: "2020")
+        date_column: Nom de la colonne de date (ex: "date_mesure")
+        logger: Logger Dagster (optionnel)
+    
+    Returns:
+        Nombre de lignes supprimées
+    """
+    log = logger.info if logger else print
+    
+    try:
+        host = os.environ.get("PG_HOST", "postgres")
+        db = os.environ.get("PG_DB", "postgres")
+        user = os.environ.get("PG_USER", "postgres")
+        password = os.environ.get("PG_PASSWORD")
+        
+        conn = psycopg2.connect(
+            host=host,
+            port=int(os.environ.get("PG_PORT", "5432")),
+            database=db,
+            user=user,
+            password=password,
+        )
+        
+        with conn:
+            with conn.cursor() as cur:
+                # Vérifier si la table existe
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 
+                        FROM information_schema.tables 
+                        WHERE table_schema = %s AND table_name = %s
+                    )
+                """, (schema, table_name))
+                
+                table_exists = cur.fetchone()[0]
+                
+                if not table_exists:
+                    log(f"📋 Table {schema}.{table_name} n'existe pas encore, pas de nettoyage nécessaire")
+                    return 0
+                
+                # Compter les lignes existantes pour cette année
+                # Note: date_column peut être VARCHAR dans bronze
+                # On utilise LIKE pour filtrer par année (plus robuste que EXTRACT sur VARCHAR)
+                cur.execute(f"""
+                    SELECT COUNT(*) 
+                    FROM "{schema}"."{table_name}"
+                    WHERE "{date_column}" IS NOT NULL
+                      AND "{date_column}"::text LIKE %s
+                """, (f"{year}-%",))
+                
+                existing_count = cur.fetchone()[0]
+                
+                if existing_count == 0:
+                    log(f"📋 Aucune donnée existante pour l'année {year} dans {schema}.{table_name}")
+                    return 0
+                
+                # Supprimer les données de cette année
+                # Note: date_column peut être VARCHAR dans bronze
+                # On utilise LIKE pour filtrer par année (plus robuste que EXTRACT sur VARCHAR)
+                log(f"🧹 Suppression de {existing_count:,} lignes existantes pour l'année {year}...")
+                cur.execute(f"""
+                    DELETE FROM "{schema}"."{table_name}"
+                    WHERE "{date_column}" IS NOT NULL
+                      AND "{date_column}"::text LIKE %s
+                """, (f"{year}-%",))
+                
+                deleted_count = cur.rowcount
+                conn.commit()
+                
+                log(f"✅ {deleted_count:,} lignes supprimées pour l'année {year}")
+                return deleted_count
+                
+    except Exception as e:
+        error_msg = f"❌ Erreur lors du nettoyage de la partition {year}: {e}"
+        if logger:
+            logger.error(error_msg)
+        else:
+            print(error_msg, flush=True)
+        # Ne pas bloquer le chargement si le nettoyage échoue
+        return 0
+
 
 def _fetch_distinct_column_values(table_name: str, column_name: str, logger=None) -> List[str]:
     """
@@ -130,7 +219,7 @@ def _fetch_distinct_column_values(table_name: str, column_name: str, logger=None
         )
         with conn:
             with conn.cursor() as cur:
-                schema = os.environ.get("DLT_BRONZE_DATASET", "staging")
+                schema = os.environ.get("DLT_BRONZE_DATASET", "bronze")
                 query = f'SELECT DISTINCT "{column_name}" FROM "{schema}"."{table_name}" WHERE "{column_name}" IS NOT NULL'
                 cur.execute(query)
                 results = [str(row[0]) for row in cur.fetchall()]
@@ -148,12 +237,18 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
     """
     Factory that creates a resource with NO data arguments.
     The resource fetches its own data (stations) when it starts running.
+    
+    Note: Utilise append car il peut y avoir plusieurs chroniques légitimes
+    pour la même station/date (différents mode_obtention, statut, qualification).
+    Les doublons de relance sont évités via un hash des données dans _dlt_id.
     """
     config = _load_config("piezometry_chroniques")
     
     @dlt.resource(
         name="piezometry_chroniques_raw",
-        write_disposition="append",
+        write_disposition="append",  # append: doublons légitimes possibles (même station/date)
+        # Pas de primary_key: plusieurs mesures légitimes par station/date possibles
+        # Les doublons de relance sont gérés via _dlt_id (hash des données)
         parallelized=False
     )
     def _resource():
@@ -199,7 +294,7 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
 
 @dlt.source(name="hubeau_hydrometry_sites")
 def hydrometry_sites_source():
-    """DLT Source for Hydrometry Sites (FULL load)."""
+    """DLT Source for Hydrometry Sites (FULL load with replace)."""
     return create_referentiel_source(
         name="hubeau_hydrometry_sites",
         config=_load_config("hydrometry_sites"),
@@ -209,7 +304,7 @@ def hydrometry_sites_source():
 
 @dlt.source(name="hubeau_hydrometry_stations")
 def hydrometry_stations_source():
-    """DLT Source for Hydrometry Stations (FULL load)."""
+    """DLT Source for Hydrometry Stations (FULL load with replace)."""
     return create_referentiel_source(
         name="hubeau_hydrometry_stations",
         config=_load_config("hydrometry_stations"),
@@ -226,7 +321,7 @@ def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
     
     @dlt.resource(
         name="hydrometry_obs_elab_raw",
-        write_disposition="append",
+        write_disposition="append",  # append car doublons légitimes possibles
         parallelized=False
     )
     def _resource():
@@ -333,6 +428,19 @@ def piezometry_chroniques_raw(context: AssetExecutionContext) -> Output[Dict[str
     year = context.partition_key
     context.log.info(f"📅 Traitement de la partition: {year}")
 
+    # Nettoyer les données existantes pour cette année avant rechargement
+    # Cela évite les doublons de relance tout en permettant les doublons légitimes
+    deleted_count = _clean_partition_data(
+        table_name="piezometry_chroniques_raw",
+        schema="bronze",
+        year=year,
+        date_column="date_mesure",
+        logger=context.log
+    )
+    
+    if deleted_count > 0:
+        context.log.info(f"🧹 Nettoyage terminé: {deleted_count:,} lignes supprimées pour l'année {year}")
+
     # Create pipeline
     context.log.info("🔧 Création du pipeline DLT...")
     pipeline = _create_pipeline(f"hubeau_piezometry_chroniques_{year}")
@@ -401,6 +509,18 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
     
     year = context.partition_key
     context.log.info(f"📅 Traitement de la partition: {year}")
+    
+    # Nettoyer les données existantes pour cette année avant rechargement
+    deleted_count = _clean_partition_data(
+        table_name="hydrometry_obs_elab_raw",
+        schema="bronze",
+        year=year,
+        date_column="date_obs_elab",
+        logger=context.log
+    )
+    
+    if deleted_count > 0:
+        context.log.info(f"🧹 Nettoyage terminé: {deleted_count:,} lignes supprimées pour l'année {year}")
     
     # Create pipeline
     context.log.info("🔧 Création du pipeline DLT...")

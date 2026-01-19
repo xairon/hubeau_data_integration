@@ -1,12 +1,12 @@
 {{
   config(
-    materialized = 'view'
+    materialized = 'table'
   )
 }}
 
--- Staging view for TME (Table des Masses d'Eau / Entités Hydrogéologiques)
--- Source: SANDRE/BDLISA reference data
--- Note: "X" values in source are converted to NULL
+-- Staging model for TME (Table des Masses d'Eau / Entités Hydrogéologiques)
+-- Source: bronze.tme_entites_hydrogeo (seed)
+-- Silver layer: nettoyage des valeurs "X" (converties en NULL)
 
 SELECT
     "id" AS tme_id,
