@@ -212,7 +212,7 @@ def era5_france_timeseries(context: AssetExecutionContext):
     and creates a queryable time series table with normalized structure.
 
     Source: bronze.era5_france_meteo_raw (38 files × 80 MB = 3 GB bytea)
-    Target: bronze.era5_france_timeseries (~277M rows × 50 bytes = ~14 GB)
+    Target: bronze.era5_france_timeseries (~300M rows × 50 bytes = ~15 GB)
 
     This asset:
     - Unpacks ZIP-compressed NetCDF files from bytea storage

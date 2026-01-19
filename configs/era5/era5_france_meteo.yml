@@ -20,6 +20,12 @@ extraction:
     start_year: 1950  # ⚠️ ERA5-Land commence en 1950 (ERA5 standard commence en 1940)
     end_year: null    # null = année courante
 
+  # Options utiles pour réparer un trou (ex: 2006 manquant) sans tout re-télécharger
+  # - skip_existing_in_db: true -> saute les chunks déjà présents dans staging.era5_france_meteo_raw (si PG_* est configuré)
+  # - continue_on_error: true -> n'arrête pas tout le run si un chunk échoue (laisse un trou à réparer ensuite)
+  skip_existing_in_db: true
+  continue_on_error: false
+
   # ⚠️ IMPORTANT: 1 seul timestep par jour
   temporal_config:
     time: "00:00"  # Uniquement 00:00 UTC (données veille 23:00 UTC)
@@ -32,6 +38,10 @@ extraction:
   chunking:
     years_per_request: 2  # Requêtes par blocs de 2 ans
     request_timeout: 600  # 10 minutes max par requête
+    # Pour télécharger un seul chunk (ex: réparer 2006):
+    # only_chunk_start_years: [2006]   # -> télécharge era5_france_2006_2007
+    # Ou pour cibler explicitement:
+    # only_file_ids: ["era5_france_2006_2007"]
 
 storage:
   format: netcdf4
