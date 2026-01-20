@@ -66,12 +66,7 @@ try:
 except Exception as e:
     print(f"⚠️  Warning: Could not read manifest at {manifest_path}: {e}")
 
-@dbt_assets(
-    manifest=manifest_path,
-    # Enable selection by model name (not just FQN)
-    # This makes it easier to select dbt models in jobs
-    enable_dbt_selection_by_name=True
-)
+@dbt_assets(manifest=manifest_path)
 def hubeau_dbt_assets(context: AssetExecutionContext, dbt: DbtCliResource):
     """
     dbt models for Hub'Eau pipeline.
