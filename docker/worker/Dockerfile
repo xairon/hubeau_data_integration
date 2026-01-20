@@ -43,6 +43,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Copy remaining application code
 COPY configs /app/configs
 
+# Generate dbt manifest at build time (best practice for production)
+# This ensures the manifest is always in sync with the dbt models
+# and doesn't need to be regenerated at runtime
+# --skip-profile-validation: Don't require DB connection during build
+RUN cd /app/src/dbt_hubeau && \
+    dbt parse --profiles-dir . --project-dir . --skip-profile-validation && \
+    echo "✅ dbt manifest generated successfully"
+
 ENV PYTHONPATH=/app/src:/app
 ENV DAGSTER_HOME=/app/dagster_home
 

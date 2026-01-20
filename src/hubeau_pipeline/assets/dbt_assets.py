@@ -13,26 +13,65 @@ dbt_project = DbtProject(
 )
 
 # Compile dbt manifest (required for Dagster to know the assets)
+# 
+# BEST PRACTICES:
+# - In PRODUCTION: Manifest is generated in Dockerfile at build time (see docker/worker/Dockerfile)
+#   This ensures the manifest is always in sync with dbt models and doesn't require DB connection
+# - In DEVELOPMENT: Manifest can be auto-generated if missing (fallback)
+#
+# The manifest should be versioned with the code and regenerated whenever dbt models change.
 if os.getenv("DAGSTER_DBT_PARSE_PROJECT_ON_LOAD"):
+    # Development mode: auto-parse on load
     dbt_project.prepare_if_dev()
 elif not dbt_project.manifest_path.exists():
-    # In dev, if manifest missing, force parse
+    # Fallback: Generate manifest if missing (useful for local dev or if Dockerfile step failed)
     import subprocess
     print(f"⚠️ dbt manifest not found at {dbt_project.manifest_path}. Running 'dbt parse'...")
+    print("💡 In production, the manifest should be generated in the Dockerfile at build time.")
     try:
         subprocess.run(
-            ["dbt", "parse", "--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)],
+            [
+                "dbt", "parse",
+                "--project-dir", str(DBT_PROJECT_DIR),
+                "--profiles-dir", str(DBT_PROJECT_DIR),
+                "--skip-profile-validation"  # Don't require DB connection
+            ],
             check=True,
             capture_output=True
         )
         print("✅ dbt parse completed successfully.")
     except Exception as e:
         print(f"❌ Failed to run dbt parse: {e}")
+        print("⚠️  Dagster will still work, but dbt assets may not be available.")
 
 # Create the Dagster resource for dbt
 dbt_resource = DbtCliResource(project_dir=dbt_project)
 
-@dbt_assets(manifest=dbt_project.manifest_path)
+# Verify manifest exists before creating assets
+manifest_path = dbt_project.manifest_path
+if not manifest_path.exists():
+    raise FileNotFoundError(
+        f"dbt manifest not found at {manifest_path}. "
+        "Please run 'dbt parse' or rebuild the Docker image. "
+        "See docs/DBT_MANIFEST_MANAGEMENT.md for details."
+    )
+
+# Log manifest info for debugging
+import json
+try:
+    with open(manifest_path, 'r') as f:
+        manifest_data = json.load(f)
+        model_count = len(manifest_data.get('nodes', {}))
+        print(f"✅ dbt manifest loaded: {model_count} models found in {manifest_path}")
+except Exception as e:
+    print(f"⚠️  Warning: Could not read manifest at {manifest_path}: {e}")
+
+@dbt_assets(
+    manifest=manifest_path,
+    # Enable selection by model name (not just FQN)
+    # This makes it easier to select dbt models in jobs
+    enable_dbt_selection_by_name=True
+)
 def hubeau_dbt_assets(context: AssetExecutionContext, dbt: DbtCliResource):
     """
     dbt models for Hub'Eau pipeline.
