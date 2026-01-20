@@ -33,8 +33,8 @@ elif not dbt_project.manifest_path.exists():
             [
                 "dbt", "parse",
                 "--project-dir", str(DBT_PROJECT_DIR),
-                "--profiles-dir", str(DBT_PROJECT_DIR),
-                "--skip-profile-validation"  # Don't require DB connection
+                "--profiles-dir", str(DBT_PROJECT_DIR)
+                # Note: dbt parse doesn't require DB connection, it only parses files
             ],
             check=True,
             capture_output=True

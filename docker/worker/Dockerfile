@@ -46,9 +46,9 @@ COPY configs /app/configs
 # Generate dbt manifest at build time (best practice for production)
 # This ensures the manifest is always in sync with the dbt models
 # and doesn't need to be regenerated at runtime
-# --skip-profile-validation: Don't require DB connection during build
+# Note: dbt parse doesn't require a DB connection, it only parses the project files
 RUN cd /app/src/dbt_hubeau && \
-    dbt parse --profiles-dir . --project-dir . --skip-profile-validation && \
+    dbt parse --profiles-dir . --project-dir . && \
     echo "✅ dbt manifest generated successfully"
 
 ENV PYTHONPATH=/app/src:/app
