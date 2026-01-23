@@ -4,7 +4,7 @@ from dagster_dbt import build_dbt_asset_selection
 from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
 
 # Common hooks for all jobs
-FAILURE_HOOKS = [log_failure_hook, slack_failure_hook, email_failure_hook]
+# FAILURE_HOOKS removed as per request
 
 # Select all assets from the dbt AssetsDefinition
 # Using build_dbt_asset_selection without dbt_select selects all dbt models
@@ -21,6 +21,6 @@ dbt_silver_gold_pipeline_job = define_asset_job(
         # No dbt_select means: select all models from the manifest
     ),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 

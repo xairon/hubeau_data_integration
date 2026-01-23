@@ -254,7 +254,7 @@ def bootstrap_complete(context: OpExecutionContext):
         "dagster/priority": "1",
         "environment": "bootstrap",
     },
-    hooks=[log_failure_hook, slack_failure_hook, email_failure_hook],
+    hooks=set(),
 )
 def full_bootstrap_job():
     """Full sequential bootstrap pipeline."""

@@ -22,7 +22,7 @@ from dagster import (
 )
 from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
 
-FAILURE_HOOKS = [log_failure_hook, slack_failure_hook, email_failure_hook]
+# FAILURE_HOOKS removed as per request
 
 
 # ==============================================================================
@@ -44,7 +44,7 @@ master_bronze_stations_job = define_asset_job(
         "hydrometry_stations",
     ),
     tags={"dagster/priority": "1", "dagster/concurrency_key": "master_setup"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
@@ -60,7 +60,7 @@ master_bronze_recent_job = define_asset_job(
         "era5_weekly",
     ),
     tags={"dagster/priority": "2", "dagster/concurrency_key": "master_setup"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
@@ -72,7 +72,7 @@ master_dbt_transform_job = define_asset_job(
     ),
     selection=AssetSelection.groups("dbt"),
     tags={"dagster/priority": "3", "dagster/concurrency_key": "master_setup"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 

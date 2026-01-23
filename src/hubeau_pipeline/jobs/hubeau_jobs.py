@@ -11,8 +11,8 @@ from dagster import define_asset_job, AssetSelection
 from ..assets.bronze.dlt_assets import MODE_PARTITIONS
 from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
 
-# Common hooks for all jobs
-FAILURE_HOOKS = [log_failure_hook, slack_failure_hook, email_failure_hook]
+# Common hooks for all jobs (must be a set, not a list!)
+# FAILURE_HOOKS removed as per request
 
 
 # ====================================
@@ -24,7 +24,7 @@ piezometry_stations_job = define_asset_job(
     description="Bronze: Piezometry stations (FULL load)",
     selection=AssetSelection.groups("piezometry_stations"),
     tags={"dagster/concurrency_key": "piezometry_stations_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 hydrometry_stations_job = define_asset_job(
@@ -32,7 +32,7 @@ hydrometry_stations_job = define_asset_job(
     description="Bronze: Hydrometry sites + stations (FULL load)",
     selection=AssetSelection.groups("hydrometry_sites", "hydrometry_stations"),
     tags={"dagster/concurrency_key": "hydrometry_stations_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
@@ -46,7 +46,7 @@ piezometry_chroniques_job = define_asset_job(
     selection=AssetSelection.groups("piezometry_chroniques"),
     partitions_def=MODE_PARTITIONS,
     tags={"dagster/concurrency_key": "piezometry_chroniques_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 hydrometry_chroniques_job = define_asset_job(
@@ -55,7 +55,7 @@ hydrometry_chroniques_job = define_asset_job(
     selection=AssetSelection.groups("hydrometry_chroniques"),
     partitions_def=MODE_PARTITIONS,
     tags={"dagster/concurrency_key": "hydrometry_chroniques_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
@@ -72,7 +72,7 @@ all_stations_job = define_asset_job(
         "hydrometry_stations",
     ),
     tags={"dagster/concurrency_key": "all_stations_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 all_chroniques_job = define_asset_job(
@@ -84,7 +84,7 @@ all_chroniques_job = define_asset_job(
     ),
     partitions_def=MODE_PARTITIONS,
     tags={"dagster/concurrency_key": "all_chroniques_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
@@ -97,7 +97,7 @@ daily_piezometry_bronze_job = define_asset_job(
     description="Bronze: Piezometry chroniques (last 7 days, incremental)",
     selection=AssetSelection.groups("piezometry_chroniques_daily"),
     tags={"dagster/concurrency_key": "daily_piezometry_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 daily_hydrometry_bronze_job = define_asset_job(
@@ -105,6 +105,6 @@ daily_hydrometry_bronze_job = define_asset_job(
     description="Bronze: Hydrometry observations (last 7 days, incremental)",
     selection=AssetSelection.groups("hydrometry_chroniques_daily"),
     tags={"dagster/concurrency_key": "daily_hydrometry_bronze"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 

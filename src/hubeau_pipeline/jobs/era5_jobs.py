@@ -13,7 +13,7 @@ from ..assets.bronze.era5_assets import ERA5_PARTITIONS_DEF
 from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
 
 # Common hooks for all jobs
-FAILURE_HOOKS = [log_failure_hook, slack_failure_hook, email_failure_hook]
+# FAILURE_HOOKS removed as per request
 
 
 era5_meteo_job = define_asset_job(
@@ -27,7 +27,7 @@ era5_meteo_job = define_asset_job(
     ),
     partitions_def=ERA5_PARTITIONS_DEF,
     tags={"dagster/concurrency_key": "era5_historical"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
@@ -37,7 +37,7 @@ era5_weekly_job = define_asset_job(
     description="Mise à jour hebdomadaire ERA5 (Last N days -> Timeseries)",
     selection=AssetSelection.keys(AssetKey("era5_weekly_update")),
     tags={"dagster/concurrency_key": "era5_weekly"},
-    hooks=FAILURE_HOOKS,
+    hooks=set(),
 )
 
 
