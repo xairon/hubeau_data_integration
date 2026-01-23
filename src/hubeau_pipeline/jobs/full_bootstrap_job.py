@@ -93,7 +93,7 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     pipeline = dlt.pipeline(
         pipeline_name="hubeau_stations_bootstrap",
         destination=postgres(credentials=db_creds),
-        dataset_name=os.getenv("HUBEAU_SCHEMA", "hubeau"),
+        dataset_name="bronze",
     )
 
     # Load configs and run pipeline
