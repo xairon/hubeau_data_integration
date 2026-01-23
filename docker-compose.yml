@@ -172,17 +172,15 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # CloudBeaver - DBeaver Web UI (Replaces Adminer)
-  cloudbeaver:
-    image: dbeaver/cloudbeaver:latest
-    container_name: brgm-cloudbeaver
+  # Adminer - Database Management UI
+  adminer:
+    image: adminer:latest
+    container_name: brgm-adminer
     restart: unless-stopped
     depends_on:
       - postgres
     ports:
-      - "8978:8978" # CloudBeaver standard port
-    volumes:
-      - ./cloudbeaver_home:/opt/cloudbeaver/workspace
+      - "49501:8080" # Adminer UI
 
 volumes:
   postgres_data:

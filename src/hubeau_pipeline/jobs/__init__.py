@@ -31,13 +31,6 @@ from .era5_jobs import (
 # Jobs dbt
 from .dbt_jobs import dbt_silver_gold_pipeline_job
 
-# Master Setup Jobs (One-Click)
-from .master_setup_job import (
-    master_bronze_stations_job,
-    master_bronze_recent_job,
-    master_dbt_transform_job,
-)
-
 # Full Bootstrap Job (Complete population with partition iteration)
 from .full_bootstrap_job import full_bootstrap_job
 
@@ -59,10 +52,6 @@ all_jobs = [
     era5_weekly_job,
     # Jobs dbt (Silver/Gold layers)
     dbt_silver_gold_pipeline_job,
-    # Master Setup Jobs
-    master_bronze_stations_job,
-    master_bronze_recent_job,
-    master_dbt_transform_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
 ]
@@ -85,10 +74,6 @@ __all__ = [
     "era5_weekly_job",
     # Jobs dbt (Silver/Gold layers)
     "dbt_silver_gold_pipeline_job",
-    # Master Setup Jobs
-    "master_bronze_stations_job",
-    "master_bronze_recent_job",
-    "master_dbt_transform_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
     # Collections
