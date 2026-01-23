@@ -73,31 +73,45 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     from ..sources.hubeau_csv_source import hubeau_stations
     from dlt.sources.helpers.rest_client import RESTClient
     
+    import dlt
+
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
-    context.log.info("📍 STEP 1/4: Loading ALL station metadata...")
+    context.log.info("📍 STEP 1/4: Loading ALL station metadata (via DLT)...")
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
     
-    # Load configs
+    # Configure DLT Pipeline
+    pipeline = dlt.pipeline(
+        pipeline_name="hubeau_stations_bootstrap",
+        destination="postgres",
+        dataset_name=os.getenv("HUBEAU_SCHEMA", "hubeau"),
+    )
+
+    # Load configs and run pipeline
     configs = [
-        ("piezometry", "configs/hubeau/piezometry_stations.yml"),
+        ("piezometry_stations", "configs/hubeau/piezometry_stations.yml"),
         ("hydrometry_sites", "configs/hubeau/hydrometry_sites.yml"),
         ("hydrometry_stations", "configs/hubeau/hydrometry_stations.yml"),
     ]
     
-    for name, config_path in configs:
-        context.log.info(f"  📍 Loading {name}...")
+    for table_name, config_path in configs:
+        context.log.info(f"  📍 Loading {table_name}...")
         try:
             with open(config_path) as f:
                 config = yaml.safe_load(f)
             
-            count = 0
-            for record in hubeau_stations(config, dagster_context=context):
-                count += 1
+            # Wrap the generator in a DLT resource
+            @dlt.resource(name=table_name, write_disposition="replace")
+            def resource_wrapper():
+                yield from hubeau_stations(config, dagster_context=context)
+
+            # RUN PIPELINE
+            info = pipeline.run(resource_wrapper())
+            context.log.info(f"  ✅ {table_name}: {info}")
             
-            context.log.info(f"  ✅ {name}: {count:,} records loaded")
             time.sleep(DELAY_BETWEEN_PARTITIONS)
         except Exception as e:
-            context.log.error(f"  ❌ {name} failed: {e}")
+            context.log.error(f"  ❌ {table_name} failed: {e}")
+            raise e
     
     context.log.info("📍 Station loading complete!")
 
@@ -107,11 +121,20 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     """Load ALL chroniques SEQUENTIALLY (1990-present)."""
     from ..sources.hubeau_csv_source import hubeau_chroniques_year, hubeau_stations
     
+    import dlt
+
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
-    context.log.info("📊 STEP 2/4: Loading ALL chroniques (SEQUENTIAL)...")
+    context.log.info("📊 STEP 2/4: Loading ALL chroniques (SEQUENTIAL, via DLT)...")
     context.log.info(f"📊 Period: {START_YEAR} → {CURRENT_YEAR}")
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
     
+    # Configure DLT Pipeline
+    pipeline = dlt.pipeline(
+        pipeline_name="hubeau_chroniques_bootstrap",
+        destination="postgres",
+        dataset_name=os.getenv("HUBEAU_SCHEMA", "hubeau"),
+    )
+
     # Load station codes first
     apis = [
         {
@@ -119,12 +142,14 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
             "stations_config": "configs/hubeau/piezometry_stations.yml",
             "chroniques_config": "configs/hubeau/piezometry_chroniques.yml",
             "station_code_field": "code_bss",
+            "table_name": "piezometry_chroniques"
         },
         {
             "name": "hydrometry",
             "stations_config": "configs/hubeau/hydrometry_stations.yml",
             "chroniques_config": "configs/hubeau/hydrometry_obs_elab.yml",
             "station_code_field": "code_site",
+            "table_name": "hydrometry_observations"
         },
     ]
     
@@ -150,16 +175,19 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
         for year in range(START_YEAR, CURRENT_YEAR + 1):
             context.log.info(f"  📅 {api['name']} - Year {year}...")
             try:
-                count = 0
-                for record in hubeau_chroniques_year(
-                    chroniques_config, 
-                    str(year), 
-                    station_codes, 
-                    dagster_context=context
-                ):
-                    count += 1
-                
-                context.log.info(f"  ✅ {year}: {count:,} records")
+                # Wrap generator in DLT resource
+                @dlt.resource(name=api["table_name"], write_disposition="append")
+                def resource_wrapper():
+                    yield from hubeau_chroniques_year(
+                        chroniques_config, 
+                        str(year), 
+                        station_codes, 
+                        dagster_context=context
+                    )
+
+                # RUN PIPELINE
+                info = pipeline.run(resource_wrapper())
+                context.log.info(f"  ✅ {year}: {info}")
                 
                 # Rate limit: wait between years
                 time.sleep(DELAY_BETWEEN_PARTITIONS)
@@ -174,6 +202,7 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
 @op(ins={"chroniques": In(Nothing)}, out=Out(Nothing))
 def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
     """Load ALL ERA5 data SEQUENTIALLY (1990-present, 2-year chunks)."""
+    # Fix: Import direct function, not asset
     from ..assets.bronze.era5_assets import process_era5_range_to_timeseries
     
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
@@ -192,6 +221,7 @@ def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
         context.log.info(f"  🌤️  Loading ERA5 {year}-{chunk_end}...")
         
         try:
+            # Direct insertion function (handles DB connection internally)
             rows = process_era5_range_to_timeseries(context, start_date, end_date, file_id)
             context.log.info(f"  ✅ {year}-{chunk_end}: {rows:,} rows inserted")
         except Exception as e:
