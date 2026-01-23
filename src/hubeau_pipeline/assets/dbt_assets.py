@@ -20,6 +20,24 @@ dbt_project = DbtProject(
 # - In DEVELOPMENT: Manifest can be auto-generated if missing (fallback)
 #
 # The manifest should be versioned with the code and regenerated whenever dbt models change.
+# Check if dbt_packages exists, if not run dbt deps (handles dev volume mount issue)
+dbt_packages_dir = DBT_PROJECT_DIR.joinpath("dbt_packages")
+packages_yml = DBT_PROJECT_DIR.joinpath("packages.yml")
+
+# If packages.yml exists but dbt_packages is empty or missing, run dbt deps
+if packages_yml.exists() and (not dbt_packages_dir.exists() or not any(dbt_packages_dir.iterdir())):
+    import subprocess
+    print(f"⚠️ dbt packages not found in {dbt_packages_dir}. Running 'dbt deps'...")
+    try:
+        subprocess.run(
+            ["dbt", "deps", "--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)],
+            check=True,
+            capture_output=True
+        )
+        print("✅ dbt deps completed successfully.")
+    except Exception as e:
+        print(f"❌ Failed to run dbt deps: {e}")
+
 if os.getenv("DAGSTER_DBT_PARSE_PROJECT_ON_LOAD"):
     # Development mode: auto-parse on load
     dbt_project.prepare_if_dev()
@@ -43,6 +61,35 @@ elif not dbt_project.manifest_path.exists():
     except Exception as e:
         print(f"❌ Failed to run dbt parse: {e}")
         print("⚠️  Dagster will still work, but dbt assets may not be available.")
+else:
+    # Check if manifest is stale (fewer models than actual .sql files)
+    import json
+    import glob
+    
+    try:
+        with open(dbt_project.manifest_path, 'r') as f:
+            manifest_data = json.load(f)
+            manifest_models = {k for k in manifest_data.get('nodes', {}).keys() if k.startswith('model.')}
+        
+        # Count actual model files
+        models_dir = DBT_PROJECT_DIR / "models"
+        actual_sql_files = set(glob.glob(str(models_dir / "**/*.sql"), recursive=True))
+        
+        # If we have more SQL files than manifest models, reparse
+        if len(actual_sql_files) > len(manifest_models):
+            import subprocess
+            print(f"⚠️ Manifest stale: {len(manifest_models)} models in manifest, {len(actual_sql_files)} .sql files. Running 'dbt parse'...")
+            try:
+                subprocess.run(
+                    ["dbt", "parse", "--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)],
+                    check=True,
+                    capture_output=True
+                )
+                print("✅ dbt parse completed successfully (manifest refreshed).")
+            except Exception as e:
+                print(f"❌ Failed to reparse: {e}")
+    except Exception as e:
+        print(f"⚠️ Could not check manifest freshness: {e}")
 
 # Create the Dagster resource for dbt
 dbt_resource = DbtCliResource(project_dir=dbt_project)

@@ -1,23 +1,43 @@
+{{
+  config(
+    materialized = 'table',
+    indexes = [
+      {'columns': ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
+      {'columns': ['code_site']},
+      {'columns': ['date_obs_elab'], 'type': 'brin'}
+    ]
+  )
+}}
+
 -- Staging model for hydrometry observations élaborées
 -- Source: bronze.hydrometry_obs_elab_raw
--- Silver layer: autocast + filtrage des observations nulles
+-- Silver layer: copie bronze + typage + déduplication + suppression métadonnées dlt
+-- Primary Key: code_site + date_obs_elab + grandeur_hydro_elab
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'hydrometry_obs_elab_raw') }}
+    WHERE date_obs_elab IS NOT NULL
+      AND code_site IS NOT NULL
+),
+
+deduplicated AS (
+    SELECT DISTINCT ON (code_site, date_obs_elab::date, grandeur_hydro_elab)
+        -- Champs castés explicitement
+        date_obs_elab::date AS date_obs_elab,
+        resultat_obs_elab::numeric AS resultat_obs_elab,
+
+        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
+        {{ dbt_utils.star(
+            from=source('staging', 'hydrometry_obs_elab_raw'), 
+            except=[
+                "date_obs_elab",
+                "resultat_obs_elab",
+                "_dlt_load_id",
+                "_dlt_id"
+            ]
+        ) }}
+    FROM source
+    ORDER BY code_site, date_obs_elab::date, grandeur_hydro_elab, resultat_obs_elab DESC NULLS LAST
 )
 
-SELECT
-    code_site AS code_entite,  -- code_entite n'existe pas, utiliser code_site
-    date_obs_elab::date AS date_obs_elab,
-    grandeur_hydro_elab,
-    resultat_obs_elab::numeric AS resultat_obs_elab,
-    code_qualification,
-    libelle_qualification,
-    code_statut AS code_statut_elab,  -- utiliser code_statut
-    libelle_statut AS libelle_statut_elab,  -- utiliser libelle_statut
-    code_methode AS code_methode_elab,  -- utiliser code_methode
-    libelle_methode AS libelle_methode_elab  -- utiliser libelle_methode
-FROM source
-WHERE date_obs_elab IS NOT NULL
-  AND resultat_obs_elab IS NOT NULL
-  AND code_site IS NOT NULL
+SELECT * FROM deduplicated

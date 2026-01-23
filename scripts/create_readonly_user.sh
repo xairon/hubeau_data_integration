@@ -122,62 +122,46 @@ END
 -- Grant connect permission
 GRANT CONNECT ON DATABASE ${PG_DB} TO ${READONLY_USER};
 
--- Grant read-only permissions on public schema
-GRANT USAGE ON SCHEMA public TO ${READONLY_USER};
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${READONLY_USER};
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${READONLY_USER};
-
--- Grant read-only permissions on silver schema (if exists)
-DO \$\$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'silver') THEN
-        GRANT USAGE ON SCHEMA silver TO ${READONLY_USER};
-        GRANT SELECT ON ALL TABLES IN SCHEMA silver TO ${READONLY_USER};
-        ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT SELECT ON TABLES TO ${READONLY_USER};
-        RAISE NOTICE '✅ Permissions granted on schema: silver';
-    END IF;
-END
-\$\$;
-
--- Grant read-only permissions on gold schema (if exists)
-DO \$\$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'gold') THEN
-        GRANT USAGE ON SCHEMA gold TO ${READONLY_USER};
-        GRANT SELECT ON ALL TABLES IN SCHEMA gold TO ${READONLY_USER};
-        ALTER DEFAULT PRIVILEGES IN SCHEMA gold GRANT SELECT ON TABLES TO ${READONLY_USER};
-        RAISE NOTICE '✅ Permissions granted on schema: gold';
-    END IF;
-END
-\$\$;
-
--- Grant read-only permissions on bronze schema (DLT default)
-DO \$\$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'bronze') THEN
-        GRANT USAGE ON SCHEMA bronze TO ${READONLY_USER};
-        GRANT SELECT ON ALL TABLES IN SCHEMA bronze TO ${READONLY_USER};
-        ALTER DEFAULT PRIVILEGES IN SCHEMA bronze GRANT SELECT ON TABLES TO ${READONLY_USER};
-        RAISE NOTICE '✅ Permissions granted on schema: bronze';
-    END IF;
-END
-\$\$;
-
--- Summary
+-- Dynamic permission granting for all non-system schemas
 DO \$\$
 DECLARE
-    table_count INT;
+    schema_name text;
+    table_count int;
 BEGIN
+    -- Loop through all schemas except system ones
+    FOR schema_name IN
+        SELECT nspname 
+        FROM pg_namespace 
+        WHERE nspname NOT LIKE 'pg_%' 
+        AND nspname <> 'information_schema'
+    LOOP
+        RAISE NOTICE 'Processing schema: %', schema_name;
+        
+        -- Grant usage on schema
+        EXECUTE format('GRANT USAGE ON SCHEMA %I TO ${READONLY_USER}', schema_name);
+        
+        -- Grant select on all existing tables
+        EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO ${READONLY_USER}', schema_name);
+        
+        -- Set default privileges for future tables (created by current user)
+        EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO ${READONLY_USER}', schema_name);
+        
+        RAISE NOTICE '✅ Permissions granted on schema: %', schema_name;
+    END LOOP;
+
+    -- Summary
     SELECT COUNT(*) INTO table_count
     FROM information_schema.tables
-    WHERE table_schema IN ('public', 'bronze', 'silver', 'gold');
+    WHERE table_schema NOT LIKE 'pg_%' 
+    AND table_schema <> 'information_schema'
+    AND table_type = 'BASE TABLE';
 
     RAISE NOTICE '================================================';
-    RAISE NOTICE '✅ Read-only user created successfully';
+    RAISE NOTICE '✅ Read-only user setup complete';
     RAISE NOTICE '================================================';
     RAISE NOTICE 'Username: ${READONLY_USER}';
-    RAISE NOTICE 'Schemas: public, bronze, silver, gold';
-    RAISE NOTICE 'Tables accessible: %', table_count;
+    RAISE NOTICE 'Target: All user schemas';
+    RAISE NOTICE 'Total tables exposed: %', table_count;
     RAISE NOTICE 'Permissions: SELECT only (read-only)';
     RAISE NOTICE '================================================';
 END

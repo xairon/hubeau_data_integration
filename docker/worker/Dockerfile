@@ -48,6 +48,7 @@ COPY configs /app/configs
 # and doesn't need to be regenerated at runtime
 # Note: dbt parse doesn't require a DB connection, it only parses the project files
 RUN cd /app/src/dbt_hubeau && \
+    dbt deps --profiles-dir . --project-dir . && \
     dbt parse --profiles-dir . --project-dir . && \
     echo "✅ dbt manifest generated successfully"
 

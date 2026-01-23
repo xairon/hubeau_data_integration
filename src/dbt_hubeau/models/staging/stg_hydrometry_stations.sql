@@ -1,32 +1,57 @@
+{{
+  config(
+    materialized = 'table',
+    indexes = [
+      {'columns': ['code_station'], 'unique': True},
+      {'columns': ['code_site']},
+      {'columns': ['code_departement']},
+      {'columns': ['geom'], 'type': 'gist'}
+    ]
+  )
+}}
+
 -- Staging model for hydrometry stations
 -- Source: bronze.hydrometry_stations_raw
--- Silver layer: autocast + filtrage des nulls
+-- Silver layer: copie bronze + typage + déduplication + PostGIS + suppression métadonnées dlt
+-- Primary Key: code_station
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'hydrometry_stations_raw') }}
+    WHERE code_station IS NOT NULL
+      AND date_debut_mesure IS NOT NULL
+),
+
+deduplicated AS (
+    SELECT DISTINCT ON (code_station)
+        -- Champs castés explicitement (pour assurer le bon type)
+        date_ouverture_station::date AS date_ouverture_station,
+        date_fermeture_station::date AS date_fermeture_station,
+        date_debut_mesure::date AS date_debut_mesure,
+        date_fin_mesure::date AS date_fin_mesure,
+        longitude_station::numeric AS longitude_station,
+        latitude_station::numeric AS latitude_station,
+        altitude_ref_alti_station::numeric AS altitude_ref_alti_station,
+        
+        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
+        {{ dbt_utils.star(
+            from=source('staging', 'hydrometry_stations_raw'), 
+            except=[
+                "date_ouverture_station",
+                "date_fermeture_station",
+                "date_debut_mesure",
+                "date_fin_mesure",
+                "longitude_station",
+                "latitude_station",
+                "altitude_ref_alti_station",
+                "_dlt_load_id",
+                "_dlt_id"
+            ]
+        ) }}
+    FROM source
+    ORDER BY code_station, date_fin_mesure DESC NULLS LAST
 )
 
-SELECT
-    code_station,
-    libelle_station,
-    code_site AS code_entite,  -- code_entite n'existe pas, utiliser code_site
-    libelle_site AS libelle_entite,  -- libelle_entite n'existe pas, utiliser libelle_site
-    code_site,
-    libelle_site,
-    longitude_station::numeric AS station_longitude,  -- utiliser longitude_station au lieu de x
-    latitude_station::numeric AS station_latitude,    -- utiliser latitude_station au lieu de y
-    code_commune_station AS code_commune_insee,  -- utiliser code_commune_station
-    libelle_commune AS nom_commune,  -- utiliser libelle_commune
-    code_departement,
-    libelle_departement AS nom_departement,  -- utiliser libelle_departement
-    code_region,
-    libelle_region AS nom_region,  -- utiliser libelle_region
-    altitude_ref_alti_station::numeric AS altitude_station,  -- utiliser altitude_ref_alti_station
-    type_station AS type_entite,  -- utiliser type_station
-    en_service AS statut_station,  -- utiliser en_service
-    date_ouverture_station::date AS date_ouverture_station,
-    date_fermeture_station::date AS date_fermeture_station
-FROM source
-WHERE latitude_station IS NOT NULL 
-  AND longitude_station IS NOT NULL
-  AND code_station IS NOT NULL
+SELECT 
+    *,
+    {{ make_point('longitude_station', 'latitude_station') }} AS geom
+FROM deduplicated
