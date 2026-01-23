@@ -1,6 +1,7 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = 'code_bss',
     indexes=[
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['era5_latitude', 'era5_longitude']},
@@ -12,6 +13,7 @@
 -- Mapping spatial: Stations piézo → Point de grille ERA5 le plus proche
 -- Utilise PostGIS KNN (opérateur <->) pour trouver le vrai nearest neighbor
 -- Beaucoup plus précis que le ROUND(0.1) précédent
+-- Incremental: on ne calcule que pour les nouvelles stations
 
 WITH stations AS (
     SELECT * FROM {{ ref('stg_piezo_stations') }}
@@ -20,6 +22,11 @@ WITH stations AS (
       -- Les DOM-TOM n'ont pas de couverture ERA5 dans ce dataset
       AND y >= 41.0 AND y <= 51.5 
       AND x >= -5.5 AND x <= 10.0
+      
+      {% if is_incremental() %}
+      -- On ne traite que les stations qu'on ne connait pas encore
+      AND code_bss NOT IN (SELECT code_bss FROM {{ this }})
+      {% endif %}
 ),
 
 era5_grid AS (

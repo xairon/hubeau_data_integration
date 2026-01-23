@@ -1,6 +1,7 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss', 'date_mesure'],
     indexes = [
       {'columns': ['code_bss', 'date_mesure'], 'unique': True},
       {'columns': ['code_bss']},
@@ -12,12 +13,17 @@
 -- Staging model for piezometry chroniques
 -- Source: bronze.piezometry_chroniques_raw
 -- Silver layer: copie bronze + typage + déduplication + suppression métadonnées dlt
+-- Incremental: basé sur _dlt_load_id
 -- Primary Key: code_bss + date_mesure
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_chroniques_raw') }}
     WHERE date_mesure IS NOT NULL
       AND code_bss IS NOT NULL
+      {% if is_incremental() %}
+      -- We only process rows from new load batches
+      AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
+      {% endif %}
 ),
 
 deduplicated AS (
@@ -26,6 +32,7 @@ deduplicated AS (
         date_mesure::date AS date_mesure,
         niveau_nappe_eau::numeric AS niveau_nappe_eau,
         profondeur_nappe::numeric AS profondeur_nappe,
+        _dlt_load_id, -- Keep for incremental logic
 
         -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
         {{ dbt_utils.star(

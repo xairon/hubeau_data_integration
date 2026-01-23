@@ -1,6 +1,7 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'],
     indexes = [
       {'columns': ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
@@ -12,12 +13,17 @@
 -- Staging model for hydrometry observations élaborées
 -- Source: bronze.hydrometry_obs_elab_raw
 -- Silver layer: copie bronze + typage + déduplication + suppression métadonnées dlt
+-- Incremental: basé sur _dlt_load_id
 -- Primary Key: code_site + date_obs_elab + grandeur_hydro_elab
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'hydrometry_obs_elab_raw') }}
     WHERE date_obs_elab IS NOT NULL
       AND code_site IS NOT NULL
+      {% if is_incremental() %}
+      -- We only process rows from new load batches
+      AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
+      {% endif %}
 ),
 
 deduplicated AS (
@@ -25,6 +31,7 @@ deduplicated AS (
         -- Champs castés explicitement
         date_obs_elab::date AS date_obs_elab,
         resultat_obs_elab::numeric AS resultat_obs_elab,
+        _dlt_load_id, -- Keep for incremental logic
 
         -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
         {{ dbt_utils.star(
