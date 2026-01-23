@@ -60,4 +60,6 @@ credentials:
   # Old URL (deprecated): https://cds.climate.copernicus.eu/api/v2
   # New URL: https://cds.climate.copernicus.eu/api
   cds_api_url: https://cds.climate.copernicus.eu/api
-  cds_api_key: REDACTED  # Format: API key WITHOUT <UID>: prefix
+  # ⚠️ SECURITY: API key MUST be set via environment variable COPERNICUS_API_KEY
+  # Do NOT commit API keys to this file!
+  cds_api_key: null  # Loaded from env var

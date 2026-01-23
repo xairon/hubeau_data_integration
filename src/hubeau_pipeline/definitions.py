@@ -9,11 +9,13 @@ from .jobs import all_jobs
 from .resources import RESOURCES
 from .io.io_managers import noop_io_manager
 from .assets.dbt_assets import dbt_resource
+from .schedules import all_schedules
 
 
 defs = Definitions(
     assets=all_assets,
     jobs=all_jobs,
+    schedules=all_schedules,
     resources={
         **RESOURCES, 
         "noop_io_manager": noop_io_manager,

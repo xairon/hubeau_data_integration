@@ -1,23 +1,30 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['latitude', 'longitude', 'time'],
+    incremental_strategy = 'merge',
     indexes = [
       {'columns': ['latitude', 'longitude', 'time'], 'unique': True},
       {'columns': ['time'], 'type': 'brin'},
-      {'columns': ['geom'], 'type': 'gist'}
+      {'columns': ['geom'], 'type': 'gist'},
+      {'columns': ['source_file_id']}
     ]
   )
 }}
 
 -- Staging model for ERA5 timeseries
 -- Source: bronze.era5_france_timeseries
--- Silver layer: copie bronze + typage + déduplication + PostGIS + suppression métadonnées dlt
--- Incremental: DÉSACTIVÉ (colonne _dlt_load_id manquante sur le serveur)
+-- Silver layer: copie bronze + typage + déduplication + PostGIS
+-- Incremental: basé sur source_file_id (identifiant unique par batch d'insertion)
 -- Primary Key: latitude + longitude + time
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'era5_france_timeseries') }}
     WHERE time IS NOT NULL
+    {% if is_incremental() %}
+      -- Only process new source_file_ids not yet in Silver
+      AND source_file_id NOT IN (SELECT DISTINCT source_file_id FROM {{ this }})
+    {% endif %}
 ),
 
 deduplicated AS (
@@ -28,20 +35,9 @@ deduplicated AS (
         temperature_2m::numeric AS temperature_2m,
         total_precipitation::numeric AS total_precipitation,
         potential_evaporation::numeric AS potential_evaporation,
-
-        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
-        {{ dbt_utils.star(
-            from=source('staging', 'era5_france_timeseries'), 
-            except=[
-                "latitude",
-                "longitude",
-                "temperature_2m",
-                "total_precipitation",
-                "potential_evaporation",
-                "_dlt_load_id",
-                "_dlt_id"
-            ]
-        ) }}
+        source_file_id,
+        time,
+        created_at
     FROM source
     ORDER BY latitude::numeric, longitude::numeric, time
 )
@@ -50,3 +46,4 @@ SELECT
     *,
     {{ make_point('longitude', 'latitude') }} AS geom
 FROM deduplicated
+

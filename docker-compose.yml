@@ -19,9 +19,9 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Hub'Eau database (PostGIS)
+  # Hub'Eau database (PostGIS + TimescaleDB)
   postgres:
-    image: postgis/postgis:16-3.4-alpine
+    image: timescale/timescaledb-ha:pg16
     container_name: brgm-postgres
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-REDACTED}
@@ -29,8 +29,9 @@ services:
       POSTGRES_USER: ${PG_USER:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
-      - "49502:5432"  # PostgreSQL - fixed port
+      - "49502:5432" # PostgreSQL - fixed port
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
       interval: 10s
@@ -124,7 +125,7 @@ services:
       - ./scripts:/app/scripts:ro
     command: [ "dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster_home/workspace.yaml" ]
     ports:
-      - "49500:3000"  # Dagster UI - fixed port
+      - "49500:3000" # Dagster UI - fixed port
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:3000/server_info || exit 1" ]
       interval: 30s
@@ -171,18 +172,17 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Adminer - PostgreSQL Web UI
-  adminer:
-    image: adminer:latest
-    container_name: brgm-adminer
+  # CloudBeaver - DBeaver Web UI (Replaces Adminer)
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: brgm-cloudbeaver
     restart: unless-stopped
     depends_on:
       - postgres
     ports:
-      - "49501:8080"  # Adminer - fixed port
-    environment:
-      ADMINER_DEFAULT_SERVER: postgres
-      ADMINER_DESIGN: pepa-linha-dark
+      - "8978:8978" # CloudBeaver standard port
+    volumes:
+      - ./cloudbeaver_home:/opt/cloudbeaver/workspace
 
 volumes:
   postgres_data:

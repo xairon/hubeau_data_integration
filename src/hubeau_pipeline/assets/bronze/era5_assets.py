@@ -1,30 +1,29 @@
 """
-ERA5 Bronze Layer Assets
+ERA5 Bronze Layer Assets (Direct-to-Timeseries)
 
-Stockage NetCDF4 bruts en PostgreSQL
-- 1 timestep/jour (00:00 UTC)
-- Chunks de 2 ans (limite API)
-- ~43 fichiers pour 1950-2025
-- Partitionné par chunks de 2 ans (ex: "2024_2025")
+Pipeline unifié pour l'ingestion des données ERA5 :
+1. Téléchargement NetCDF (temporaire)
+2. Insertion DIRECTE dans `bronze.era5_france_timeseries`
+3. Suppression immédiate du fichier temporaire
+
+Plus de stockage intermédiaire "RAW" en base de données pour économiser de l'espace.
 """
 
 import yaml
-import dlt
 import gc
 import io
 import os
+import logging
 import zipfile
-from typing import Dict, Any
-from datetime import datetime
-from dagster import asset, AssetExecutionContext, StaticPartitionsDefinition
-from hubeau_pipeline.sources.era5_source import era5_france_meteo
-from dlt.destinations import postgres
+import tempfile
+import cdsapi
 import psycopg2
-# Import h5py before xarray to ensure it's available for h5netcdf engine
-import h5py  # noqa: F401
 import xarray as xr
 import pandas as pd
+from typing import Dict, Any, List, Tuple
+from datetime import datetime, timedelta
 from psycopg2.extras import execute_values
+from dagster import asset, AssetExecutionContext, StaticPartitionsDefinition, Output, MetadataValue
 
 # ============================================================================
 # PARTITIONS - ERA5 (chunks de 2 ans)
@@ -47,249 +46,9 @@ while year <= CURRENT_YEAR:
 ERA5_PARTITIONS_DEF = StaticPartitionsDefinition(ERA5_PARTITIONS)
 
 
-def _create_pipeline(pipeline_name: str, context=None) -> dlt.Pipeline:
-    """Create DLT pipeline with PostgreSQL destination."""
-    destination = postgres(
-        credentials={
-            "database": os.environ.get("PG_DB", "postgres"),
-            "username": os.environ.get("PG_USER", "postgres"),
-            "password": os.environ.get("PG_PASSWORD"),
-            "host": os.environ.get("PG_HOST", "postgres"),
-            "port": int(os.environ.get("PG_PORT", "5432")),
-        }
-    )
-    return dlt.pipeline(
-        pipeline_name=pipeline_name,
-        destination=destination,
-        dataset_name=os.environ.get("DLT_BRONZE_DATASET", "bronze"),
-        progress="log",
-    )
-
-
-@asset(
-    compute_kind="era5",
-    group_name="era5_meteo",
-    io_manager_key="noop_io_manager",
-    partitions_def=ERA5_PARTITIONS_DEF
-)
-def era5_france_meteo_raw(context: AssetExecutionContext):
-    """
-    ERA5 France Météo - NetCDF4 daily data (00:00 UTC)
-    
-    Partitionné par chunks de 2 ans (ex: "2024_2025")
-
-    Variables:
-    - 2m_temperature (K)
-    - total_precipitation (m)
-    - potential_evaporation (m)
-
-    Coverage: France métropolitaine (0.25° grid)
-    Period: 1950-present (ERA5-Land)
-    Frequency: Daily at 00:00 UTC (previous day data)
-    Storage: PostgreSQL bytea (~50-100 MB par chunk)
-
-    Note: Downloads in 2-year chunks (API limitation)
-    Expected runtime: ~5-10 minutes par chunk
-
-    ⚠️ Each chunk is stored IMMEDIATELY in PostgreSQL after download (true incremental loading)
-    """
-    # Récupérer la partition (ex: "2024_2025")
-    partition_key = context.partition_key
-    start_year, end_year = map(int, partition_key.split('_'))
-    
-    context.log.info(f"📅 Traitement de la partition ERA5: {partition_key} ({start_year}-{end_year})")
-    
-    config_path = "configs/era5/era5_france_meteo.yml"
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-    
-    # Override time_range pour cette partition
-    config['extraction']['time_range']['start_year'] = start_year
-    config['extraction']['time_range']['end_year'] = end_year
-
-    context.log.info(f"🚀 Starting ERA5 download for {partition_key}...")
-
-    # Vérifier si ce chunk existe déjà
-    file_id = f"era5_france_{start_year}_{end_year}"
-    conn = psycopg2.connect(
-        host=os.getenv('PG_HOST', 'postgres'),
-        port=os.getenv('PG_PORT', '5432'),
-        database=os.getenv('PG_DB', 'postgres'),
-        user=os.getenv('PG_USER', 'postgres'),
-        password=os.getenv('PG_PASSWORD')
-    )
-    try:
-        with conn.cursor() as cur:
-            # Vérifier si la table existe
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT 1 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'bronze' 
-                    AND table_name = 'era5_france_meteo_raw'
-                )
-            """)
-            table_exists = cur.fetchone()[0]
-            
-            if table_exists:
-                # Vérifier si le chunk existe déjà
-                cur.execute("""
-                    SELECT file_id FROM bronze.era5_france_meteo_raw 
-                    WHERE file_id = %s
-                """, (file_id,))
-                if cur.fetchone():
-                    context.log.info(f"✅ Chunk {file_id} already exists, skipping download")
-                    return {
-                        "rows_loaded": 0,
-                        "total_size_mb": 0.0,
-                        "status": "skipped",
-                        "table_name": "era5_france_meteo_raw",
-                        "file_id": file_id
-                    }
-    finally:
-        conn.close()
-
-    # Télécharger ce chunk uniquement
-    pipeline = _create_pipeline("era5_france_meteo", context=context)
-    
-    @dlt.resource(
-        name="era5_netcdf_files",
-        write_disposition="append",
-        primary_key="file_id"
-    )
-    def single_chunk():
-        """Single chunk resource for immediate storage"""
-        # La source ERA5 va générer un seul chunk pour cette période
-        for record in era5_france_meteo(config, dagster_context=context):
-            yield record
-            break  # Un seul chunk attendu pour cette partition
-
-    context.log.info(f"💾 Storing chunk {file_id} in PostgreSQL...")
-    
-    load_info = pipeline.run(single_chunk, table_name="era5_france_meteo_raw")
-    
-    # Récupérer la taille du fichier
-    conn = psycopg2.connect(
-        host=os.getenv('PG_HOST', 'postgres'),
-        port=os.getenv('PG_PORT', '5432'),
-        database=os.getenv('PG_DB', 'postgres'),
-        user=os.getenv('PG_USER', 'postgres'),
-        password=os.getenv('PG_PASSWORD')
-    )
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT file_size_mb FROM bronze.era5_france_meteo_raw 
-                WHERE file_id = %s
-            """, (file_id,))
-            result = cur.fetchone()
-            file_size_mb = result[0] if result else 0.0
-    finally:
-        conn.close()
-    
-    context.log.info(f"✅ Chunk {file_id} stored successfully! ({file_size_mb:.2f} MB)")
-
-    return {
-        "rows_loaded": 1,
-        "total_size_mb": file_size_mb,
-        "status": "success",
-        "table_name": "era5_france_meteo_raw",
-        "file_id": file_id
-    }
-
-
-@asset(
-    compute_kind="era5",
-    group_name="era5_meteo",
-    io_manager_key="noop_io_manager",
-    deps=["era5_france_meteo_raw"]
-)
-def era5_france_timeseries(context: AssetExecutionContext):
-    """
-    ERA5 France Time Series - Normalized table from NetCDF bytea storage
-
-    Extracts NetCDF data from bronze.era5_france_meteo_raw (bytea columns)
-    and creates a queryable time series table with normalized structure.
-
-    Source: bronze.era5_france_meteo_raw (38 files × 80 MB = 3 GB bytea)
-    Target: bronze.era5_france_timeseries (~300M rows × 50 bytes = ~15 GB)
-
-    This asset:
-    - Unpacks ZIP-compressed NetCDF files from bytea storage
-    - Extracts time series data (time, lat, lon, temp, precip, evap)
-    - Converts units (Kelvin → Celsius, meters → millimeters)
-    - Creates indexed table for efficient SQL queries
-    - Skips files already processed (incremental)
-
-    Expected runtime: ~30-60 minutes for full dataset
-    """
-    import os
-
-    # Get database connection from environment
-    conn = psycopg2.connect(
-        host=os.getenv('PG_HOST', 'postgres'),
-        port=os.getenv('PG_PORT', '5432'),
-        database=os.getenv('PG_DB', 'postgres'),
-        user=os.getenv('PG_USER', 'postgres'),
-        password=os.getenv('PG_PASSWORD')
-    )
-
-    try:
-        # Create target table
-        context.log.info("📊 Creating target table...")
-        _create_timeseries_table(conn)
-        context.log.info("✅ Target table created with indexes")
-
-        # Get files to process
-        files = _get_files_to_process(conn, context)
-        context.log.info(f"📁 Found {len(files)} files to process")
-
-        if len(files) == 0:
-            context.log.info("✅ All files already processed!")
-            return {"status": "success", "rows_inserted": 0, "files_processed": 0}
-
-        total_rows = 0
-        files_processed = 0
-
-        # Process each file
-        for idx, (file_id, file_size_mb, start_year, end_year) in enumerate(files, 1):
-            context.log.info(f"\n[{idx}/{len(files)}] Processing {file_id} ({start_year}-{end_year}, {file_size_mb:.2f} MB)")
-
-            try:
-                # Extract NetCDF
-                ds = _extract_netcdf(conn, file_id, context)
-
-                # Convert to DataFrame
-                df = _netcdf_to_dataframe(ds, file_id, context)
-
-                # Insert into database
-                rows = _insert_dataframe(conn, df, context)
-
-                total_rows += rows
-                files_processed += 1
-
-                context.log.info(f"✅ [{idx}/{len(files)}] {file_id} complete! {rows:,} rows inserted")
-
-                # Force garbage collection
-                del ds, df
-                gc.collect()
-
-            except Exception as e:
-                context.log.error(f"❌ Failed to process {file_id}: {e}")
-                continue
-
-        context.log.info(f"\n🎉 Extraction complete! {files_processed} files processed, {total_rows:,} rows inserted")
-
-        return {
-            "status": "success",
-            "rows_inserted": total_rows,
-            "files_processed": files_processed,
-            "total_files": len(files)
-        }
-
-    finally:
-        conn.close()
-
+# ============================================================================
+# SHARED HELPERS
+# ============================================================================
 
 def _create_timeseries_table(conn):
     """Create target time series table if not exists."""
@@ -313,106 +72,45 @@ def _create_timeseries_table(conn):
             CREATE INDEX IF NOT EXISTS idx_era5_location
                 ON bronze.era5_france_timeseries (latitude, longitude);
 
-            CREATE INDEX IF NOT EXISTS idx_era5_time_location
-                ON bronze.era5_france_timeseries (time, latitude, longitude);
-
             CREATE INDEX IF NOT EXISTS idx_era5_source_file
                 ON bronze.era5_france_timeseries (source_file_id);
         """)
+        
+        # TimescaleDB Optimization (if extension enabled)
+        try:
+            cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'")
+            if cur.fetchone():
+                context = logging.getLogger("dagster") # Fallback logger
+                # Note: chunk_time_interval set to 1 year for ERA5 (adjust as needed)
+                cur.execute("""
+                    SELECT create_hypertable(
+                        'bronze.era5_france_timeseries', 
+                        'time', 
+                        chunk_time_interval => INTERVAL '1 year', 
+                        if_not_exists => TRUE,
+                        migrate_data => TRUE
+                    );
+                """)
+                # Enable compression (policy to be added separately or defaults)
+                cur.execute("""
+                    ALTER TABLE bronze.era5_france_timeseries SET (
+                        timescaledb.compress,
+                        timescaledb.compress_segmentby = 'source_file_id'
+                    );
+                """)
+                # Add automatic compression policy (compress chunks older than 30 days)
+                cur.execute("""
+                    SELECT add_compression_policy(
+                        'bronze.era5_france_timeseries', 
+                        INTERVAL '30 days',
+                        if_not_exists => TRUE
+                    );
+                """)
+        except Exception as e:
+            # Non-blocking: standard Postgres fallback
+            pass
+
         conn.commit()
-
-
-def _get_files_to_process(conn, context):
-    """Get list of files that haven't been processed yet."""
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT r.file_id, r.file_size_mb, r.start_year, r.end_year
-            FROM bronze.era5_france_meteo_raw r
-            WHERE NOT EXISTS (
-                SELECT 1 FROM bronze.era5_france_timeseries t
-                WHERE t.source_file_id = r.file_id
-            )
-            ORDER BY r.start_year
-        """)
-        return cur.fetchall()
-
-
-def _extract_netcdf(conn, file_id: str, context) -> xr.Dataset:
-    """Extract NetCDF data from PostgreSQL bytea column."""
-    context.log.info(f"📥 Fetching NetCDF data for {file_id}...")
-
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT netcdf_data
-            FROM bronze.era5_france_meteo_raw
-            WHERE file_id = %s
-        """, (file_id,))
-
-        row = cur.fetchone()
-        if not row:
-            raise ValueError(f"File {file_id} not found")
-
-        netcdf_bytes = row[0]
-        context.log.info(f"✅ Fetched {len(netcdf_bytes) / (1024*1024):.2f} MB")
-
-    # Convert memoryview to bytes if needed
-    if isinstance(netcdf_bytes, memoryview):
-        netcdf_bytes = bytes(netcdf_bytes)
-
-    # Check for ZIP signature and extract if needed
-    if netcdf_bytes[:4] == b'PK\x03\x04':
-        context.log.info(f"🔓 File is ZIP compressed, extracting...")
-        with zipfile.ZipFile(io.BytesIO(netcdf_bytes)) as zf:
-            nc_filename = zf.namelist()[0]
-            context.log.info(f"📦 Extracting {nc_filename} from ZIP...")
-            with zf.open(nc_filename) as nc_file:
-                netcdf_bytes = nc_file.read()
-                context.log.info(f"✅ Extracted {len(netcdf_bytes) / (1024*1024):.2f} MB")
-
-    # Load NetCDF
-    ds = xr.open_dataset(io.BytesIO(netcdf_bytes), engine='h5netcdf')
-    time_dim = 'valid_time' if 'valid_time' in ds.dims else 'time'
-    context.log.info(f"✅ Loaded NetCDF: {len(ds[time_dim])} timesteps, {len(ds.latitude)} lats, {len(ds.longitude)} lons")
-
-    return ds
-
-
-def _netcdf_to_dataframe(ds: xr.Dataset, file_id: str, context) -> pd.DataFrame:
-    """Convert NetCDF dataset to pandas DataFrame."""
-    context.log.info("🔄 Converting NetCDF to DataFrame...")
-
-    df = ds.to_dataframe().reset_index()
-
-    # Rename columns
-    df = df.rename(columns={
-        't2m': 'temperature_2m',
-        'tp': 'total_precipitation',
-        'pev': 'potential_evaporation',
-        'valid_time': 'time'
-    })
-
-    # Convert units
-    if 'temperature_2m' in df.columns:
-        df['temperature_2m'] = df['temperature_2m'] - 273.15  # K → °C
-
-    if 'total_precipitation' in df.columns:
-        df['total_precipitation'] = df['total_precipitation'] * 1000  # m → mm
-
-    if 'potential_evaporation' in df.columns:
-        df['potential_evaporation'] = df['potential_evaporation'] * 1000  # m → mm
-
-    # Add source file reference
-    df['source_file_id'] = file_id
-
-    # Select needed columns
-    columns = ['time', 'latitude', 'longitude', 'temperature_2m', 'total_precipitation', 'potential_evaporation', 'source_file_id']
-    df = df[columns]
-
-    # Drop NaN rows
-    df = df.dropna(subset=['temperature_2m', 'total_precipitation', 'potential_evaporation'], how='all')
-
-    context.log.info(f"✅ Created DataFrame with {len(df):,} rows")
-    return df
 
 
 def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) -> int:
@@ -448,14 +146,308 @@ def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) 
                 """,
                 values
             )
-
-            # Commit after each batch to avoid transaction bloat
             conn.commit()
-
             rows_inserted += len(batch)
             if rows_inserted % 100000 == 0 or rows_inserted == total_rows:
                 context.log.info(f"  💾 {rows_inserted:,}/{total_rows:,} rows inserted ({rows_inserted/total_rows*100:.1f}%)")
 
     context.log.info(f"✅ All {rows_inserted:,} rows committed to database")
-
     return rows_inserted
+
+
+def process_era5_range_to_timeseries(
+    context: AssetExecutionContext,
+    start_date: datetime,
+    end_date: datetime,
+    file_id: str
+) -> int:
+    """
+    Télécharge, traite et insère les données ERA5 directement dans la table timeseries.
+    Retourne le nombre de lignes insérées.
+    """
+    tmp_path = None
+    conn = None
+    
+    try:
+        # 1. Connexion DB Check
+        conn = psycopg2.connect(
+            host=os.getenv('PG_HOST', 'postgres'),
+            port=os.getenv('PG_PORT', '5432'),
+            database=os.getenv('PG_DB', 'postgres'),
+            user=os.getenv('PG_USER', 'postgres'),
+            password=os.getenv('PG_PASSWORD'),
+            sslmode=os.getenv('PG_SSLMODE', 'prefer')
+        )
+        
+        # Ensure table exists
+        _create_timeseries_table(conn)
+        
+        # Check idempotency - use DATE RANGE not file_id (more robust)
+        with conn.cursor() as cur:
+            # Check if we have data covering this date range
+            cur.execute("""
+                SELECT COUNT(*) FROM bronze.era5_france_timeseries 
+                WHERE time >= %s AND time <= %s
+            """, (start_date, end_date))
+            existing_count = cur.fetchone()[0]
+            
+            if existing_count > 0:
+                context.log.info(f"✅ Données pour période {start_date.date()} → {end_date.date()} déjà présentes ({existing_count:,} rows), skipping.")
+                return 0
+
+        # 2. Download from CDS
+        context.log.info(f"🌐 Downloading ERA5 data for {file_id}...")
+        
+        # Load config
+        config_path = "configs/era5/era5_france_meteo.yml"
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+
+        cds_api_key = config['credentials'].get('cds_api_key') or os.getenv('COPERNICUS_API_KEY')
+        client = cdsapi.Client(url=config['credentials']['cds_api_url'], key=cds_api_key, verify=False)
+        
+        # Build request - FIXED: proper enumeration of years and months
+        # Generate all years in range
+        years = list(range(start_date.year, end_date.year + 1))
+        
+        # Generate all months in range (for multi-year spans, we need all 12 months)
+        if start_date.year == end_date.year:
+            months = list(range(start_date.month, end_date.month + 1))
+        else:
+            # Multi-year: request all months (CDS will filter by actual data)
+            months = list(range(1, 13))
+        
+        days_list = list(range(1, 32))
+        
+        request_params = {
+            'product_type': 'reanalysis',
+            'data_format': 'netcdf',
+            'variable': config['resource']['variables'],
+            'year': [str(y) for y in years],
+            'month': [f'{m:02d}' for m in months],
+            'day': [f'{d:02d}' for d in days_list],
+            'time': config['extraction']['temporal_config']['time'],
+            'area': config['resource']['area'],
+        }
+        
+        with tempfile.NamedTemporaryFile(suffix='.nc', delete=False) as tmp:
+            tmp_path = tmp.name
+        
+        # Retry logic for CDS API (transient failures)
+        max_retries = 3
+        retry_delay = 30  # seconds
+        for attempt in range(max_retries):
+            try:
+                client.retrieve(config['resource']['dataset'], request_params, tmp_path)
+                context.log.info(f"✅ Download complete: {tmp_path}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    context.log.warning(f"⚠️ CDS API failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {retry_delay}s...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    context.log.error(f"❌ CDS API failed after {max_retries} attempts: {e}")
+                    raise
+
+        # 3. Process NetCDF (Handle ZIP or Direct NetCDF)
+        context.log.info("📊 Processing file signature...")
+        
+        # Check signature
+        with open(tmp_path, 'rb') as f:
+            header = f.read(4)
+        
+        actual_nc_path = tmp_path
+        
+        # If ZIP file (PK..)
+        if header == b'PK\x03\x04':
+            context.log.info("📦 Format détecté: ZIP. Extraction en cours...")
+            with zipfile.ZipFile(tmp_path, 'r') as zf:
+                # Find first .nc file
+                nc_files = [n for n in zf.namelist() if n.endswith('.nc')]
+                if not nc_files:
+                    raise ValueError("❌ Aucun fichier .nc trouvé dans le ZIP CDS.")
+                
+                target_file = nc_files[0]
+                context.log.info(f"  📂 Extraction de {target_file}...")
+                
+                # Extract to same dir
+                zf.extract(target_file, os.path.dirname(tmp_path))
+                actual_nc_path = os.path.join(os.path.dirname(tmp_path), target_file)
+        else:
+            context.log.info("📄 Format détecté: NetCDF direct.")
+
+        context.log.info(f"📊 Opening NetCDF: {actual_nc_path}")
+        ds = xr.open_dataset(actual_nc_path, engine='h5netcdf')
+        
+        # Filter exact dates
+        time_dim = 'valid_time' if 'valid_time' in ds.dims else 'time'
+        ds = ds.sel({time_dim: slice(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))})
+        
+        # Rename & Convert
+        df = ds.to_dataframe().reset_index()
+        df = df.rename(columns={
+            't2m': 'temperature_2m',
+            'tp': 'total_precipitation',
+            'pev': 'potential_evaporation',
+            'valid_time': 'time'
+        })
+        
+        if 'temperature_2m' in df.columns:
+            df['temperature_2m'] = df['temperature_2m'] - 273.15
+        if 'total_precipitation' in df.columns:
+            df['total_precipitation'] = df['total_precipitation'] * 1000
+        if 'potential_evaporation' in df.columns:
+            df['potential_evaporation'] = df['potential_evaporation'] * 1000
+            
+        df['source_file_id'] = file_id
+        
+        columns = ['time', 'latitude', 'longitude', 'temperature_2m', 'total_precipitation', 'potential_evaporation', 'source_file_id']
+        df = df[columns].dropna(subset=['temperature_2m', 'total_precipitation', 'potential_evaporation'], how='all')
+        
+        context.log.info(f"📊 DataFrame ready: {len(df):,} rows")
+
+        # 4. Insert
+        rows_inserted = _insert_dataframe(conn, df, context)
+        return rows_inserted
+
+    finally:
+        if conn:
+            conn.close()
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        # Clean up extracted .nc file if different from tmp_path
+        if actual_nc_path and actual_nc_path != tmp_path and os.path.exists(actual_nc_path):
+            os.remove(actual_nc_path)
+        gc.collect()
+
+
+# ============================================================================
+# ASSETS
+# ============================================================================
+
+@asset(
+    compute_kind="era5",
+    group_name="era5_historical",
+    io_manager_key="noop_io_manager",
+    partitions_def=ERA5_PARTITIONS_DEF
+)
+def era5_france_timeseries_historical(context: AssetExecutionContext):
+    """
+    Historique ERA5 (1950-Present) - Direct to Timeseries.
+    
+    Partitionné par chunks de 2 ans.
+    Télécharge et insère directement dans `era5_france_timeseries`.
+    Pas de stockage intermédiaire "RAW".
+    """
+    partition_key = context.partition_key
+    start_year, end_year = map(int, partition_key.split('_'))
+    
+    start_date = datetime(start_year, 1, 1)
+    end_date = datetime(end_year, 12, 31)
+    file_id = f"era5_hist_{start_year}_{end_year}"
+    
+    context.log.info(f"📅 Traitement historique: {start_year}-{end_year}")
+    
+    rows = process_era5_range_to_timeseries(context, start_date, end_date, file_id)
+    
+    return Output(
+        {"rows_inserted": rows, "partition": partition_key},
+        metadata={"rows": MetadataValue.int(rows)}
+    )
+
+
+@asset(
+    compute_kind="era5",
+    group_name="era5_weekly",
+    io_manager_key="noop_io_manager",
+    deps=["era5_france_timeseries_historical"]  # Dépendance explicite pour dagster
+)
+def era5_weekly_update(context: AssetExecutionContext):
+    """
+    Mise à jour Hebdomadaire ERA5 - Smart Update.
+    
+    Logique:
+    1. Vérifie la dernière donnée présente en base (MAX(time)).
+    2. Si données récentes présentes, ne télécharge que le delta (+ tampon sécurité).
+    3. Si vide, télécharge les 14 derniers jours par défaut.
+    
+    Cela économise les appels API et le réseau en ne demandant que ce qu'on n'a pas encore.
+    """
+    days_back_default = 14
+    
+    # 1. Déterminer date de fin (Today - 5 jours délai ERA5)
+    end_date = datetime.now() - timedelta(days=5)
+    
+    # 2. Chercher MAX(time) en base
+    last_date_in_db = None
+    conn = psycopg2.connect(
+        host=os.getenv('PG_HOST', 'postgres'),
+        port=os.getenv('PG_PORT', '5432'),
+        database=os.getenv('PG_DB', 'postgres'),
+        user=os.getenv('PG_USER', 'postgres'),
+        password=os.getenv('PG_PASSWORD'),
+        sslmode=os.getenv('PG_SSLMODE', 'prefer')
+    )
+    try:
+        with conn.cursor() as cur:
+            # Vérifier si table existe
+            cur.execute("""
+                SELECT EXISTS (
+                   SELECT 1 FROM information_schema.tables 
+                   WHERE table_schema = 'bronze' AND table_name = 'era5_france_timeseries'
+                )
+            """)
+            if cur.fetchone()[0]:
+                cur.execute("SELECT MAX(time) FROM bronze.era5_france_timeseries")
+                res = cur.fetchone()
+                if res and res[0]:
+                    last_date_in_db = res[0]
+                    context.log.info(f"📅 Dernière donnée en base: {last_date_in_db}")
+    finally:
+        conn.close()
+
+    # 3. Calculer start_date optimisée avec SAFETY CAP
+    max_lookback_days = 60  # Sécurité pour éviter timeout CDS si gros trou
+    safety_start_date = end_date - timedelta(days=max_lookback_days)
+
+    if last_date_in_db:
+        # On tente de reprendre là où on s'est arrêté
+        proposed_start_date = last_date_in_db - timedelta(days=2)
+        
+        if proposed_start_date < safety_start_date:
+            context.log.warning(
+                f"⚠️ GAP DÉTÉCTÉ: La base date de {last_date_in_db}, ce qui est trop vieux pour le job weekly (> {max_lookback_days} jours). "
+                f"Le job ne chargera que les {max_lookback_days} derniers jours. "
+                "Veuillez lancer un BACKFILL MANUEL (job historique) pour combler le trou."
+            )
+            start_date = safety_start_date
+        else:
+            start_date = proposed_start_date
+            context.log.info(f"⚡ Smart Update activé: Reprise à {start_date.date()}")
+    else:
+        # Fallback table vide : on charge juste le récent pour initier
+        start_date = safety_start_date
+        context.log.info(f"⚠️ Table vide: Initialisation avec les {max_lookback_days} derniers jours.")
+
+    # Si la période est incohérente (déjà à jour), on arrête
+    if start_date >= end_date:
+        context.log.info("✅ Données déjà à jour (Start >= End). Rien à faire.")
+        return Output(
+            {"rows_inserted": 0, "status": "up_to_date"},
+            metadata={"status": MetadataValue.text("up_to_date")}
+        )
+
+    file_id = f"era5_weekly_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+    
+    context.log.info(f"📅 Traitement weekly: {start_date.date()} -> {end_date.date()}")
+    
+    rows = process_era5_range_to_timeseries(context, start_date, end_date, file_id)
+    
+    return Output(
+        {"rows_inserted": rows, "mode": "weekly_smart"},
+        metadata={"rows": MetadataValue.int(rows)}
+    )
+
+

@@ -10,32 +10,40 @@ Job pour téléchargement historique ERA5
 
 from dagster import define_asset_job, AssetSelection, AssetKey
 from ..assets.bronze.era5_assets import ERA5_PARTITIONS_DEF
+from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
+
+# Common hooks for all jobs
+FAILURE_HOOKS = [log_failure_hook, slack_failure_hook, email_failure_hook]
 
 
 era5_meteo_job = define_asset_job(
-    name="era5_meteo_bronze",
+    name="era5_historical_load",
     description=(
-        "Bronze: ERA5 France météo NetCDF4 files (daily 00:00 UTC). "
-        "Partitionné par chunks de 2 ans (ex: 2024_2025). Runtime: ~5-10 min par chunk."
+        "Historique ERA5 (1950-Present) - Direct to Timeseries. "
+        "Partitionné par chunks de 2 ans. Télécharge & Insère directement."
     ),
     selection=AssetSelection.keys(
-        AssetKey("era5_france_meteo_raw")
+        AssetKey("era5_france_timeseries_historical")
     ),
     partitions_def=ERA5_PARTITIONS_DEF,
-    tags={"dagster/concurrency_key": "era5_meteo_bronze"}
+    tags={"dagster/concurrency_key": "era5_historical"},
+    hooks=FAILURE_HOOKS,
 )
 
 
-era5_timeseries_job = define_asset_job(
-    name="era5_timeseries_extract",
-    description=(
-        "Extract ERA5 NetCDF bytea data to normalized time series table. "
-        "Unpacks ZIP-compressed NetCDF, converts units (K→°C, m→mm), "
-        "creates bronze.era5_france_timeseries (~300M rows). "
-        "Runtime: ~30-60 minutes for full dataset, ~1-2 min per chunk."
-    ),
-    selection=AssetSelection.keys(
-        AssetKey("era5_france_timeseries")
-    ),
-    tags={"dagster/concurrency_key": "era5_timeseries"}
+# Job Weekly (Direct update)
+era5_weekly_job = define_asset_job(
+    name="era5_weekly_update_job",  # Renommé pour éviter conflit avec l'asset
+    description="Mise à jour hebdomadaire ERA5 (Last N days -> Timeseries)",
+    selection=AssetSelection.keys(AssetKey("era5_weekly_update")),
+    tags={"dagster/concurrency_key": "era5_weekly"},
+    hooks=FAILURE_HOOKS,
 )
+
+
+# L'ancien job d'extraction est obsolète car intégré dans l'ingestion directe
+# On garde juste meteor et weekly
+
+
+# L'ancien job d'extraction est obsolète car intégré dans l'ingestion directe
+# On garde juste meteor et weekly

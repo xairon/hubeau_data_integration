@@ -3,16 +3,35 @@ version: 2
 sources:
   - name: staging
     schema: bronze
+    # Default freshness for all tables (can be overridden per table)
+    freshness:
+      warn_after: {count: 3, period: day}
+      error_after: {count: 7, period: day}
     tables:
       - name: era5_france_timeseries
         description: Données météo ERA5 brutes (timeseries)
+        freshness:
+          warn_after: {count: 14, period: day}  # ERA5 updated weekly
+          error_after: {count: 21, period: day}
+        loaded_at_field: "time"  # Column in table (not valid_time)
       - name: piezometry_stations_raw
         description: Métadonnées des stations piézométriques
+        freshness: null  # Static reference data
       - name: piezometry_chroniques_raw
         description: Mesures piézométriques brutes
+        freshness:
+          warn_after: {count: 3, period: day}
+          error_after: {count: 7, period: day}
+        loaded_at_field: "date_mesure::timestamp"
       - name: hydrometry_sites_raw
         description: Sites hydrométriques bruts
+        freshness: null  # Static reference data
       - name: hydrometry_stations_raw
         description: Stations hydrométriques brutes
+        freshness: null  # Static reference data
       - name: hydrometry_obs_elab_raw
         description: Observations hydrométriques élaborées brutes
+        freshness:
+          warn_after: {count: 3, period: day}
+          error_after: {count: 7, period: day}
+        loaded_at_field: "date_obs_elab::timestamp"

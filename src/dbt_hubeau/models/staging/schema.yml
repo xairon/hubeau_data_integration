@@ -1,0 +1,87 @@
+version: 2
+
+models:
+  # ==============================================================================
+  # STAGING MODELS - Data Quality Tests
+  # ==============================================================================
+
+  - name: stg_piezo_stations
+    description: "Stations piézométriques (Silver)"
+    columns:
+      - name: code_bss
+        description: "Code BSS unique de la station"
+        tests:
+          - not_null
+          - unique
+      - name: geometry
+        description: "Point géographique PostGIS"
+        tests:
+          - not_null
+
+  - name: stg_piezo_chroniques
+    description: "Mesures piézométriques (Silver)"
+    columns:
+      - name: code_bss
+        tests:
+          - not_null
+      - name: date_mesure
+        tests:
+          - not_null
+    tests:
+      - unique:
+          column_name: "code_bss || '-' || date_mesure"
+
+  - name: stg_hydrometry_sites
+    description: "Sites hydrométriques (Silver)"
+    columns:
+      - name: code_site
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_hydrometry_stations
+    description: "Stations hydrométriques (Silver)"
+    columns:
+      - name: code_station
+        tests:
+          - not_null
+          - unique
+      - name: code_site
+        tests:
+          - not_null
+
+  - name: stg_hydrometry_obs_elab
+    description: "Observations hydrométriques élaborées (Silver)"
+    columns:
+      - name: code_site
+        tests:
+          - not_null
+      - name: date_obs_elab
+        tests:
+          - not_null
+      - name: grandeur_hydro_elab
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['QmnJ', 'QmxJ', 'H']
+
+  - name: stg_era5_timeseries
+    description: "Données météo ERA5 (Silver)"
+    columns:
+      - name: time
+        tests:
+          - not_null
+      - name: latitude
+        tests:
+          - not_null
+      - name: longitude
+        tests:
+          - not_null
+      - name: temperature_2m
+        description: "Température en °C"
+        tests:
+          - not_null
+      - name: geom
+        description: "Point géographique PostGIS"
+        tests:
+          - not_null

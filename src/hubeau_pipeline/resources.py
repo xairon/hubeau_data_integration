@@ -100,7 +100,8 @@ class PostgreSQLResource(ConfigurableResource):
                 port=self.port,
                 database=self.database,
                 user=self.user,
-                password=self.password
+                password=self.password,
+                sslmode=os.getenv('PG_SSLMODE', 'prefer')  # prefer=SSL if available
             )
 
             yield conn

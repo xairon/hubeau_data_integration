@@ -22,6 +22,7 @@ from typing import Dict, Any, List
 from hubeau_pipeline.sources.hubeau_csv_source import (
     hubeau_stations,
     hubeau_chroniques_year,
+    hubeau_chroniques_daily,
 )
 from hubeau_pipeline.resources import PostgreSQLResource
 
@@ -566,6 +567,192 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
         metadata={
             "rows_loaded": MetadataValue.int(rows),
             "partition": MetadataValue.text(year),
+            "execution_time_seconds": MetadataValue.float(elapsed_time),
+        }
+    )
+
+
+# ============================================================================
+# DAILY ASSETS (Incremental - for scheduled streaming)
+# ============================================================================
+
+def create_piezometry_chroniques_daily_resource(days_back: int = 7, dagster_context=None):
+    """
+    Factory for daily piezometry chroniques resource.
+    Fetches last N days of data for incremental loading.
+    """
+    config = _load_config("piezometry_chroniques")
+    
+    @dlt.resource(
+        name="piezometry_chroniques_raw",
+        write_disposition="append",
+        parallelized=False
+    )
+    def _resource():
+        logger = dagster_context.log if dagster_context else None
+        log = logger.info if logger else print
+        
+        log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
+        
+        station_codes = _fetch_distinct_column_values(
+            "piezometry_stations_raw", 
+            "code_bss", 
+            logger=logger
+        )
+        
+        if not station_codes:
+            log("⚠️ Aucun code de station trouvé!")
+            return
+
+        log(f"📊 [DAILY] {len(station_codes):,} stations à traiter")
+        
+        yield from hubeau_chroniques_daily(
+            config, 
+            days_back=days_back,
+            station_codes=station_codes,
+            dagster_context=dagster_context
+        )
+    
+    return _resource
+
+
+def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=None):
+    """
+    Factory for daily hydrometry observations resource.
+    Fetches last N days of data for incremental loading.
+    """
+    config = _load_config("hydrometry_obs_elab")
+    
+    @dlt.resource(
+        name="hydrometry_obs_elab_raw",
+        write_disposition="append",
+        parallelized=False
+    )
+    def _resource():
+        logger = dagster_context.log if dagster_context else None
+        log = logger.info if logger else print
+        
+        log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
+        
+        station_codes = _fetch_distinct_column_values(
+            "hydrometry_stations_raw",
+            "code_station",
+            logger=logger
+        )
+        
+        if not station_codes:
+            log("⚠️ Aucun code de station trouvé!")
+            return
+
+        log(f"📊 [DAILY] {len(station_codes):,} stations à traiter")
+        
+        yield from hubeau_chroniques_daily(
+            config, 
+            days_back=days_back,
+            station_codes=station_codes,
+            dagster_context=dagster_context
+        )
+    
+    return _resource
+
+
+@asset(
+    compute_kind="dlt",
+    group_name="piezometry_chroniques_daily",
+    deps=["piezometry_stations_raw"]
+)
+def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Dict[str, Any]]:
+    """
+    Piezometry chroniques - Daily incremental load (last 7 days).
+    Used by scheduled daily pipeline.
+    """
+    import time
+    
+    context.log.info("📅 [DAILY] Chargement incrémental piézométrie")
+    
+    pipeline = _create_pipeline("hubeau_piezometry_chroniques_daily")
+    resource = create_piezometry_chroniques_daily_resource(days_back=7, dagster_context=context)
+    
+    start_time = time.time()
+    load_info = pipeline.run(resource)
+    elapsed_time = time.time() - start_time
+    
+    context.log.info(f"📋 DLT Load Info:\n{load_info}")
+    
+    rows = 0
+    try:
+        packages = getattr(load_info, "load_packages", []) or []
+        for pkg in packages:
+            jobs = getattr(pkg, "jobs", [])
+            if isinstance(jobs, dict):
+                all_jobs = []
+                for job_list in jobs.values():
+                    if isinstance(job_list, list):
+                        all_jobs.extend(job_list)
+                jobs = all_jobs
+            for job in jobs:
+                rows += getattr(job, "metrics", {}).get("items", 0)
+    except Exception as e:
+        context.log.error(f"⚠️ Failed to extract metrics: {e}")
+    
+    context.log.info(f"✅ [DAILY] Terminé: {rows:,} lignes chargées en {elapsed_time:.1f}s")
+    
+    return Output(
+        {"rows_loaded": rows, "mode": "daily"},
+        metadata={
+            "rows_loaded": MetadataValue.int(rows),
+            "mode": MetadataValue.text("daily_incremental"),
+            "execution_time_seconds": MetadataValue.float(elapsed_time),
+        }
+    )
+
+
+@asset(
+    compute_kind="dlt",
+    group_name="hydrometry_chroniques_daily",
+    deps=["hydrometry_stations_raw"]
+)
+def hydrometry_obs_daily_raw(context: AssetExecutionContext) -> Output[Dict[str, Any]]:
+    """
+    Hydrometry observations - Daily incremental load (last 7 days).
+    Used by scheduled daily pipeline.
+    """
+    import time
+    
+    context.log.info("📅 [DAILY] Chargement incrémental hydrométrie")
+    
+    pipeline = _create_pipeline("hubeau_hydrometry_obs_daily")
+    resource = create_hydrometry_obs_daily_resource(days_back=7, dagster_context=context)
+    
+    start_time = time.time()
+    load_info = pipeline.run(resource)
+    elapsed_time = time.time() - start_time
+    
+    context.log.info(f"📋 DLT Load Info:\n{load_info}")
+    
+    rows = 0
+    try:
+        packages = getattr(load_info, "load_packages", []) or []
+        for pkg in packages:
+            jobs = getattr(pkg, "jobs", [])
+            if isinstance(jobs, dict):
+                all_jobs = []
+                for job_list in jobs.values():
+                    if isinstance(job_list, list):
+                        all_jobs.extend(job_list)
+                jobs = all_jobs
+            for job in jobs:
+                rows += getattr(job, "metrics", {}).get("items", 0)
+    except Exception as e:
+        context.log.error(f"⚠️ Failed to extract metrics: {e}")
+    
+    context.log.info(f"✅ [DAILY] Terminé: {rows:,} lignes chargées en {elapsed_time:.1f}s")
+    
+    return Output(
+        {"rows_loaded": rows, "mode": "daily"},
+        metadata={
+            "rows_loaded": MetadataValue.int(rows),
+            "mode": MetadataValue.text("daily_incremental"),
             "execution_time_seconds": MetadataValue.float(elapsed_time),
         }
     )

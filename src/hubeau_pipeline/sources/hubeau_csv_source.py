@@ -233,3 +233,84 @@ def hubeau_chroniques_year(
 
     elapsed_total = time.time() - batch_start_time
     log(f"✅ Année {year} terminée: {total_records:,} enregistrements au total en {elapsed_total/60:.1f} minutes")
+
+
+def hubeau_chroniques_daily(
+    config: Dict[str, Any],
+    days_back: int = 7,
+    station_codes: List[str] = None,
+    dagster_context=None
+) -> Iterator[Dict[str, Any]]:
+    """
+    Generator that fetches chroniques for the last N days (incremental mode).
+    Used for daily streaming integration.
+    
+    Args:
+        config: API configuration dict
+        days_back: Number of days to look back (default 7 for overlap)
+        station_codes: List of station codes to fetch
+        dagster_context: Dagster context for logging
+    """
+    from datetime import datetime, timedelta
+    
+    base_url = config["resource"]["base_url"]
+    endpoint = config["resource"]["endpoint"]
+    
+    extraction = config.get("extraction", {})
+    date_filter = extraction.get("date_filter_params", {})
+    date_debut_param = date_filter.get("date_debut", "date_debut_mesure")
+    date_fin_param = date_filter.get("date_fin", "date_fin_mesure")
+    
+    batching = extraction.get("station_slicing", {})
+    station_field = batching.get("station_param", "code_bss")
+    batch_size = batching.get("batch_size", 30)
+    
+    client = RESTClient(base_url=base_url)
+    log = dagster_context.log.info if dagster_context else logger.info
+    
+    # Calculate date range
+    date_end = datetime.now().strftime("%Y-%m-%d")
+    date_start = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    
+    if not station_codes:
+        log("⚠️ Aucun code de station fourni à hubeau_chroniques_daily.")
+        return
+
+    total_stations = len(station_codes)
+    total_batches = (total_stations + batch_size - 1) // batch_size
+    log(f"📊 [DAILY] Traitement de {total_stations:,} stations en {total_batches} lots")
+    log(f"📅 Période: {date_start} → {date_end} ({days_back} jours)")
+    
+    total_records = 0
+    batch_start_time = time.time()
+    
+    for batch_idx, station_batch in enumerate(batch_stations(station_codes, batch_size), 1):
+        codes_str = ','.join(station_batch)
+        progress_pct = (batch_idx / total_batches) * 100
+        
+        default_params = extraction.get("default_params", {})
+        params = {
+            **default_params,
+            date_debut_param: date_start,
+            date_fin_param: date_end,
+            station_field: codes_str
+        }
+        
+        batch_records = 0
+        for record in fetch_all_pages(client, endpoint, params=params, context=dagster_context):
+            total_records += 1
+            batch_records += 1
+            yield record
+        
+        elapsed = time.time() - batch_start_time
+        if batch_idx > 1:
+            eta_seconds = (elapsed / batch_idx) * (total_batches - batch_idx)
+            eta_str = f"ETA: {eta_seconds/60:.1f}min"
+        else:
+            eta_str = "ETA: calculating..."
+        
+        log(f"📊 Lot {batch_idx}/{total_batches} ({progress_pct:.1f}%) | {batch_records:,} records | Total: {total_records:,} | {eta_str}")
+
+    elapsed_total = time.time() - batch_start_time
+    log(f"✅ [DAILY] Terminé: {total_records:,} enregistrements en {elapsed_total/60:.1f} minutes")
+
