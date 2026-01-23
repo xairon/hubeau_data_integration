@@ -152,7 +152,7 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     pipeline = dlt.pipeline(
         pipeline_name="hubeau_chroniques_bootstrap",
         destination=postgres(credentials=db_creds),
-        dataset_name=os.getenv("HUBEAU_SCHEMA", "hubeau"),
+        dataset_name="bronze",
     )
 
     # Load station codes first
