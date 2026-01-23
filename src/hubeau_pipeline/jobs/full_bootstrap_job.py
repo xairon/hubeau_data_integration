@@ -74,15 +74,25 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     from dlt.sources.helpers.rest_client import RESTClient
     
     import dlt
+    from dlt.destinations import postgres
 
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
     context.log.info("📍 STEP 1/4: Loading ALL station metadata (via DLT)...")
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
     
+    # Credentials from standard env vars (available in all containers)
+    db_creds = {
+        "database": os.getenv("PG_DB", "postgres"),
+        "password": os.getenv("PG_PASSWORD", "postgres"),
+        "username": os.getenv("PG_USER", "postgres"),
+        "host": os.getenv("PG_HOST", "postgres"),
+        "port": int(os.getenv("PG_PORT", "5432")),
+    }
+
     # Configure DLT Pipeline
     pipeline = dlt.pipeline(
         pipeline_name="hubeau_stations_bootstrap",
-        destination="postgres",
+        destination=postgres(credentials=db_creds),
         dataset_name=os.getenv("HUBEAU_SCHEMA", "hubeau"),
     )
 
@@ -122,16 +132,26 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     from ..sources.hubeau_csv_source import hubeau_chroniques_year, hubeau_stations
     
     import dlt
+    from dlt.destinations import postgres
 
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
     context.log.info("📊 STEP 2/4: Loading ALL chroniques (SEQUENTIAL, via DLT)...")
     context.log.info(f"📊 Period: {START_YEAR} → {CURRENT_YEAR}")
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
     
+    # Credentials from standard env vars
+    db_creds = {
+        "database": os.getenv("PG_DB", "postgres"),
+        "password": os.getenv("PG_PASSWORD", "postgres"),
+        "username": os.getenv("PG_USER", "postgres"),
+        "host": os.getenv("PG_HOST", "postgres"),
+        "port": int(os.getenv("PG_PORT", "5432")),
+    }
+
     # Configure DLT Pipeline
     pipeline = dlt.pipeline(
         pipeline_name="hubeau_chroniques_bootstrap",
-        destination="postgres",
+        destination=postgres(credentials=db_creds),
         dataset_name=os.getenv("HUBEAU_SCHEMA", "hubeau"),
     )
 
