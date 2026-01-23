@@ -1,7 +1,6 @@
 {{
   config(
-    materialized = 'incremental',
-    unique_key = ['latitude', 'longitude', 'time'],
+    materialized = 'table',
     indexes = [
       {'columns': ['latitude', 'longitude', 'time'], 'unique': True},
       {'columns': ['time'], 'type': 'brin'},
@@ -13,16 +12,12 @@
 -- Staging model for ERA5 timeseries
 -- Source: bronze.era5_france_timeseries
 -- Silver layer: copie bronze + typage + déduplication + PostGIS + suppression métadonnées dlt
--- Incremental: basé sur _dlt_load_id
+-- Incremental: DÉSACTIVÉ (colonne _dlt_load_id manquante sur le serveur)
 -- Primary Key: latitude + longitude + time
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'era5_france_timeseries') }}
     WHERE time IS NOT NULL
-      {% if is_incremental() %}
-      -- We only process rows from new load batches
-      AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
-      {% endif %}
 ),
 
 deduplicated AS (
@@ -33,7 +28,6 @@ deduplicated AS (
         temperature_2m::numeric AS temperature_2m,
         total_precipitation::numeric AS total_precipitation,
         potential_evaporation::numeric AS potential_evaporation,
-        _dlt_load_id, -- Keep for incremental logic
 
         -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
         {{ dbt_utils.star(

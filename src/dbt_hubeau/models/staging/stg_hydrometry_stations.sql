@@ -21,6 +21,7 @@ WITH source AS (
       -- AND date_debut_mesure IS NOT NULL -- Column missing in source on server
 ),
 
+deduplicated AS (
     SELECT DISTINCT ON (code_station)
         -- Champs castés explicitement (pour assurer le bon type)
         date_ouverture_station::date AS date_ouverture_station,

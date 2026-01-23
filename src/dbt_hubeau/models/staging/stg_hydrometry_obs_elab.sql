@@ -21,19 +21,16 @@ WITH source AS (
     WHERE date_obs_elab IS NOT NULL
       AND code_site IS NOT NULL
       {% if is_incremental() %}
-      -- We only process rows from new load batches
       AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
       {% endif %}
 ),
 
 deduplicated AS (
     SELECT DISTINCT ON (code_site, date_obs_elab::date, grandeur_hydro_elab)
-        -- Champs castés explicitement
         date_obs_elab::date AS date_obs_elab,
         resultat_obs_elab::numeric AS resultat_obs_elab,
-        _dlt_load_id, -- Keep for incremental logic
+        _dlt_load_id,
 
-        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
         {{ dbt_utils.star(
             from=source('staging', 'hydrometry_obs_elab_raw'), 
             except=[

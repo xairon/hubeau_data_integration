@@ -21,20 +21,17 @@ WITH source AS (
     WHERE date_mesure IS NOT NULL
       AND code_bss IS NOT NULL
       {% if is_incremental() %}
-      -- We only process rows from new load batches
       AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
       {% endif %}
 ),
 
 deduplicated AS (
     SELECT DISTINCT ON (code_bss, date_mesure::date)
-        -- Champs castés explicitement
         date_mesure::date AS date_mesure,
         niveau_nappe_eau::numeric AS niveau_nappe_eau,
         profondeur_nappe::numeric AS profondeur_nappe,
-        _dlt_load_id, -- Keep for incremental logic
+        _dlt_load_id,
 
-        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
         {{ dbt_utils.star(
             from=source('staging', 'piezometry_chroniques_raw'), 
             except=[
