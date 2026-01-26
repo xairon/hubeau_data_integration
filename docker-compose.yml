@@ -4,6 +4,7 @@
 
 services:
   # Dagster metadata database
+  # Dagster metadata database
   dagster_postgres:
     image: postgres:16-alpine
     container_name: brgm-dagster-postgres
