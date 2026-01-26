@@ -262,7 +262,7 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
         log("🔄 Démarrage du générateur de ressource DLT...")
         
         station_codes = _fetch_distinct_column_values(
-            "piezometry_stations", 
+            "piezometry_stations_raw", 
             "code_bss", 
             logger=logger
         )
@@ -333,7 +333,7 @@ def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
         log("🔄 Démarrage du générateur de ressource DLT (hydrometry obs_elab)...")
         
         station_codes = _fetch_distinct_column_values(
-            "hydrometry_stations",
+            "hydrometry_stations_raw",
             "code_station",
             logger=logger
         )
@@ -595,7 +595,7 @@ def create_piezometry_chroniques_daily_resource(days_back: int = 7, dagster_cont
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
         
         station_codes = _fetch_distinct_column_values(
-            "piezometry_stations", 
+            "piezometry_stations_raw", 
             "code_bss", 
             logger=logger
         )
@@ -635,7 +635,7 @@ def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=Non
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
         
         station_codes = _fetch_distinct_column_values(
-            "hydrometry_stations",
+            "hydrometry_stations_raw",
             "code_station",
             logger=logger
         )
