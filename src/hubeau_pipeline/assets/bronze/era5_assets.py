@@ -53,6 +53,10 @@ ERA5_PARTITIONS_DEF = StaticPartitionsDefinition(ERA5_PARTITIONS)
 def _create_timeseries_table(conn):
     """Create target time series table if not exists."""
     with conn.cursor() as cur:
+        # 1. Ensure schema exists
+        cur.execute("CREATE SCHEMA IF NOT EXISTS bronze;")
+        
+        # 2. Create table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS bronze.era5_france_timeseries (
                 id BIGSERIAL PRIMARY KEY,
@@ -65,16 +69,18 @@ def _create_timeseries_table(conn):
                 source_file_id TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW()
             );
-
-            CREATE INDEX IF NOT EXISTS idx_era5_time
-                ON bronze.era5_france_timeseries (time);
-
-            CREATE INDEX IF NOT EXISTS idx_era5_location
-                ON bronze.era5_france_timeseries (latitude, longitude);
-
-            CREATE INDEX IF NOT EXISTS idx_era5_source_file
-                ON bronze.era5_france_timeseries (source_file_id);
         """)
+        
+        # 3. Create indexes (one by one for safety)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_era5_time ON bronze.era5_france_timeseries (time);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_era5_location ON bronze.era5_france_timeseries (latitude, longitude);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_era5_source_file ON bronze.era5_france_timeseries (source_file_id);")
+        
+    # Commit table creation IMMEDIATELY to save it even if TimescaleDB setup fails
+    conn.commit()
+    
+    # Separate transaction for optional TimescaleDB setup
+    with conn.cursor() as cur:
         
         # TimescaleDB Optimization (if extension enabled)
         try:
