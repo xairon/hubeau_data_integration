@@ -215,6 +215,13 @@ def process_era5_range_to_timeseries(
             config = yaml.safe_load(f)
 
         cds_api_key = config['credentials'].get('cds_api_key') or os.getenv('COPERNICUS_API_KEY')
+        
+        if not cds_api_key:
+            raise ValueError(
+                "❌ CDS API Key Missing! Please set the 'COPERNICUS_API_KEY' environment variable "
+                "or configure 'cds_api_key' in configs/era5/era5_france_meteo.yml."
+            )
+
         client = cdsapi.Client(url=config['credentials']['cds_api_url'], key=cds_api_key, verify=False)
         
         # Build request - FIXED: proper enumeration of years and months

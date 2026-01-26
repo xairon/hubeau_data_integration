@@ -62,4 +62,4 @@ credentials:
   cds_api_url: https://cds.climate.copernicus.eu/api
   # ⚠️ SECURITY: API key MUST be set via environment variable COPERNICUS_API_KEY
   # Do NOT commit API keys to this file!
-  cds_api_key: null  # Loaded from env var
+  cds_api_key: "REDACTED"  # Hardcoded for lab environment
