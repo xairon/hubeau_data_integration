@@ -266,7 +266,7 @@ def run_dbt_full(context: OpExecutionContext) -> Nothing:
     
     try:
         result = subprocess.run(
-            ["dbt", "run", "--project-dir", "/app/src/dbt_hubeau"],
+            ["dbt", "run", "--project-dir", "/app/src/dbt_hubeau", "--profiles-dir", "/app/src/dbt_hubeau"],
             capture_output=True,
             text=True,
             timeout=3600  # 1 hour timeout

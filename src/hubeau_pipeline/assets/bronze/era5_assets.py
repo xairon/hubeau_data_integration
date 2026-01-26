@@ -166,6 +166,7 @@ def process_era5_range_to_timeseries(
     Retourne le nombre de lignes insérées.
     """
     tmp_path = None
+    actual_nc_path = None
     conn = None
     
     try:
