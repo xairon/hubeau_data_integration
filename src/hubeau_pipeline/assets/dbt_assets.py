@@ -92,7 +92,7 @@ else:
         print(f"⚠️ Could not check manifest freshness: {e}")
 
 # Create the Dagster resource for dbt
-dbt_resource = DbtCliResource(project_dir=dbt_project)
+dbt_resource = DbtCliResource(project_dir=dbt_project, profiles_dir=DBT_PROJECT_DIR)
 
 # Verify manifest exists before creating assets
 manifest_path = dbt_project.manifest_path
