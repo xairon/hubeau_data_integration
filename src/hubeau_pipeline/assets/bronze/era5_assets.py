@@ -59,7 +59,7 @@ def _create_timeseries_table(conn):
         # 2. Create table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS bronze.era5_france_timeseries (
-                id BIGSERIAL PRIMARY KEY,
+                id BIGSERIAL,
                 time TIMESTAMP NOT NULL,
                 latitude NUMERIC(6,3) NOT NULL,
                 longitude NUMERIC(6,3) NOT NULL,
@@ -67,7 +67,8 @@ def _create_timeseries_table(conn):
                 total_precipitation NUMERIC(8,4),
                 potential_evaporation NUMERIC(8,4),
                 source_file_id TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (time, id)
             );
         """)
         
