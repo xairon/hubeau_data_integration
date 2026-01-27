@@ -191,27 +191,7 @@ def process_era5_range_to_timeseries(
         _create_timeseries_table(conn)
         
         # Check idempotency - use DATE RANGE not file_id (more robust)
-        with conn.cursor() as cur:
-            # First check if table exists (in case _create_timeseries_table failed silently)
-            cur.execute("""
-                SELECT EXISTS (
-                   SELECT 1 FROM information_schema.tables 
-                   WHERE table_schema = 'bronze' AND table_name = 'era5_france_timeseries'
-                )
-            """)
-            table_exists = cur.fetchone()[0]
-            
-            if table_exists:
-                # Check if we have data covering this date range
-                cur.execute("""
-                    SELECT COUNT(*) FROM bronze.era5_france_timeseries 
-                    WHERE time >= %s AND time <= %s
-                """, (start_date, end_date))
-                existing_count = cur.fetchone()[0]
-                
-                if existing_count > 0:
-                    context.log.info(f"✅ Données pour période {start_date.date()} → {end_date.date()} déjà présentes ({existing_count:,} rows), skipping.")
-                    return 0
+        # 2. Download from CDS (Logic moved up: no early skip, we handle overlaps by deletion)
 
         # 2. Download from CDS
         context.log.info(f"🌐 Downloading ERA5 data for {file_id}...")
@@ -332,6 +312,16 @@ def process_era5_range_to_timeseries(
         df = df[columns].dropna(subset=['temperature_2m', 'total_precipitation', 'potential_evaporation'], how='all')
         
         context.log.info(f"📊 DataFrame ready: {len(df):,} rows")
+
+        # 4. Insert (with Delete Overlap first)
+        with conn.cursor() as cur:
+            context.log.info(f"🧹 Clearing existing data for range {start_date} -> {end_date} to prevent duplicates...")
+            cur.execute("""
+                DELETE FROM bronze.era5_france_timeseries
+                WHERE time >= %s AND time <= %s
+            """, (start_date, end_date))
+            conn.commit()
+            context.log.info(f"   (Deleted {cur.rowcount} overlapping rows)")
 
         # 4. Insert
         rows_inserted = _insert_dataframe(conn, df, context)
