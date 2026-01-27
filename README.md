@@ -4,11 +4,6 @@ Pipeline d'ingestion et de transformation de données hydrologiques françaises,
 
 ## 🚀 Démarrage Rapide
 
-### Prérequis
-- Docker Desktop (Windows/Mac) ou Docker + Docker Compose (Linux)
-- 8 GB RAM minimum
-- 20 GB espace disque
-
 ### Installation
 
 ```bash
@@ -47,168 +42,54 @@ docker compose ps
 
 > **[Voir le Graphique Complet du Projet (Mermaid)](docs/PROJECT_GRAPH.md)**
 
+Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** pour la performance temporelle.
+
 ```
-┌─────────────────┐     ┌─────────────────┐
-│  APIs Hub'Eau   │     │  ERA5 (CDS)     │
-│  Piézo/Hydro    │     │  Météo          │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         └───────────┬───────────┘
-                     ▼
-         ┌───────────────────────┐
-         │   DLT (Ingestion)     │
-         │   → bronze.*_raw      │
-         └───────────┬───────────┘
-                     ▼
-         ┌───────────────────────┐
-         │   dbt (Transformation)│
-         │   → silver.stg_*      │
-         │   → gold.int_*        │
-         │   → gold.marts        │
-         └───────────────────────┘
+┌─────────────┐    ┌─────────────┐
+│ Sources API │    │   Datalake  │
+│ (Hub'Eau)   │───▶│   (Bronze)  │
+└─────────────┘    └──────┬──────┘
+                          │ (dbt + TimescaleDB)
+                          ▼
+                   ┌─────────────┐
+                   │  Warehouse  │
+                   │   (Gold)    │
+                   └──────┬──────┘
+                          │ (BI)
+                          ▼
+                   ┌─────────────┐
+                   │  Superset   │
+                   │ (Analytics) │
+                   └─────────────┘
 ```
 
-**Couches de données** :
-- **`bronze`** : Données brutes (DLT + seeds dbt)
-- **`silver`** : Données nettoyées (dbt staging)
-- **`gold`** : Données transformées prêtes pour l'analyse (dbt intermediate + marts)
+## ✨ Fonctionnalités Clés
 
-## 🔄 Utilisation
-
-### Premier Run - Ingestion des Données
-
-1. **Ouvrir Dagster UI** : http://localhost:49500
-
-2. **Lancer les jobs d'ingestion** (dans l'ordre) :
-   - `piezometry_stations_job` (sans partition)
-   - `hydrometry_stations_job` (sans partition)
-   - `piezometry_chroniques_job` → sélectionner partition `2024`
-   - `hydrometry_chroniques_job` → sélectionner partition `2024`
-   - `era5_meteo_job` → sélectionner partition `2024_2025`
-   - `era5_timeseries_job` (extraction des time series depuis les NetCDF)
-
-3. **Lancer la transformation** :
-   - `dbt_silver_gold_pipeline_job` (crée les tables silver et gold)
-
-### Jobs Disponibles
-
-#### Ingestion (DLT)
-
-| Job | Description | Partitions |
-|-----|-------------|------------|
-| `piezometry_stations_job` | Stations piézométriques BSS | Non |
-| `piezometry_chroniques_job` | Mesures piézométriques | Oui (par année) |
-| `hydrometry_stations_job` | Stations hydrométriques | Non |
-| `hydrometry_chroniques_job` | Observations hydrométriques | Oui (par année) |
-| `era5_meteo_job` | Téléchargement NetCDF ERA5 | Oui (chunks 2 ans) |
-| `era5_timeseries_job` | Extraction time series ERA5 | Non |
-
-#### Transformation (dbt)
-
-| Job | Description |
-|-----|-------------|
-| `dbt_silver_gold_pipeline_job` | Pipeline complet bronze → silver → gold |
-
-### Partitions
-
-Les jobs partitionnés permettent de traiter les données par période :
-
-- **Piézométrie/Hydrométrie** : Partitions par année (ex: `2024`, `2023`)
-- **ERA5** : Partitions par chunks de 2 ans (ex: `2024_2025`, `2022_2023`)
-
-**Pour lancer un job avec partition** :
-1. Dans Dagster UI, cliquer sur le job
-2. Cliquer sur "Launch Run"
-3. Sélectionner la partition dans le dropdown
-4. Cliquer sur "Launch"
-
-## 📈 Configuration Apache Superset
-
-**🚀 ZÉRO CONFIGURATION REQUISE !**
-
-Le service Superset est **automatisé**. Au démarrage, un script :
-1. Crée le compte admin (`admin`/`admin`)
-2. Met à jour la base de données
-3. **Connecte automatiquement** la base Hub'Eau
-4. Importe les tables *Gold* (`hubeau_daily_chroniques`, `dim_piezo_stations`)
-
-Tu n'as plus rien à faire : connecte-toi simplement sur http://localhost:49504 et commence à créer des charts !
+- **Ingestion Automatique** : Pipelines DLT résilients avec gestion de la pagination et des retries.
+- **Performance TimeSeries** : Utilisation de **TimescaleDB** (Hypertables + Compression 90%) pour les chroniques.
+- **Automation** : Sensors Dagster pour déclencher les transformations dbt dès l'arrivée des données.
+- **Zero-Touch BI** : Stack de visualisation (Superset, CloudBeaver) pré-configurée et connectée.
 
 ---
 
-## 💻 Configuration CloudBeaver
+## � Tables Principales
 
-**🚀 ZÉRO CONFIGURATION REQUISE !**
+### Bronze (Raw Data)
+Données brutes, partitionnées par année. Dédupliquées automatiquement.
 
-CloudBeaver est pré-configuré pour se connecter à PostgreSQL.
-- Ouvre http://localhost:49503
-- Connecte-toi avec `cbadmin` / `cbadmin`
-- La connexion **"Hub'Eau Data Warehouse"** est déjà là !
+### Silver (Clean Data)
+Données nettoyées, typées, avec index spataux.
 
-## 📁 Structure du Projet
+### Gold (Analytics Marts)
+Tables optimisées pour le reporting et l'analyse.
 
-```
-brgm/
-├── src/
-│   ├── hubeau_pipeline/          # Code Dagster
-│   │   ├── assets/               # Assets (DLT + dbt)
-│   │   │   ├── bronze/           # Assets d'ingestion
-│   │   │   └── dbt_assets.py     # Assets dbt
-│   │   ├── jobs/                 # Définition des jobs
-│   │   ├── sources/              # Sources de données (APIs)
-│   │   └── definitions.py        # Point d'entrée Dagster
-│   └── dbt_hubeau/               # Projet dbt
-│       ├── models/
-│       │   ├── staging/          # → silver
-│       │   ├── intermediate/     # → gold
-│       │   └── marts/            # → gold (tables finales)
-│       └── seeds/                # Données de référence
-├── configs/                      # Configuration YAML
-│   ├── hubeau/                   # Configs APIs Hub'Eau
-│   └── era5/                     # Config ERA5
-├── docker/                       # Dockerfiles
-├── docs/                         # Documentation
-└── docker-compose.yml            # Configuration Docker
-```
-
-## 📊 Tables Principales
-
-### Bronze (Données brutes)
-
-| Table | Description | Volume estimé |
-|-------|-------------|---------------|
-| `piezometry_stations_raw` | Stations BSS | ~23k |
-| `piezometry_chroniques_raw` | Mesures piézo | ~23M |
-| `hydrometry_stations_raw` | Stations hydro | ~5k |
-| `hydrometry_obs_elab_raw` | Observations hydro | ~15M |
-| `era5_france_meteo_raw` | Fichiers NetCDF ERA5 | ~38 fichiers |
-| `era5_france_timeseries` | Time series ERA5 extraites | ~300M |
-| `tme_entites_hydrogeo` | Référentiel TME (seed) | ~2k |
-
-### Silver (Données nettoyées)
-
-| Table | Description |
-|-------|-------------|
-| `stg_piezo_chroniques` | Chroniques piézo nettoyées |
-| `stg_piezo_stations` | Stations piézo nettoyées |
-| `stg_hydrometry_stations` | Stations hydro nettoyées |
-| `stg_hydrometry_obs_elab` | Observations hydro nettoyées |
-| `stg_era5_timeseries` | Time series ERA5 nettoyées |
-| `stg_tme_entites` | TME nettoyé |
-
-### Gold (Données transformées)
-
-| Table | Description |
-|-------|-------------|
-| `int_daily_measurements` | Mesures quotidiennes agrégées |
-| `int_station_era5_mapping` | Mapping stations → grille ERA5 |
-| `int_era5_for_stations` | ERA5 filtré pour stations |
-| **`hubeau_daily_chroniques`** | **Table finale : Piézo + Météo + TME** |
-
-**Table principale** : `gold.hubeau_daily_chroniques`
-- Combine piézométrie + météo ERA5 + métadonnées TME
-- Toutes les colonnes d'observation sont non-nulles (INNER JOIN)
-- Prête pour l'analyse
+| Table | Description | Granularité |
+|-------|-------------|-------------|
+| **`hubeau_daily_chroniques`** | **Fact Table Principale** (Piézo + Météo) | Jour |
+| `fct_monthly_chroniques` | Agrégats mensuels et variations | Mois |
+| `fct_yearly_stats` | Bilans annuels, hydrologie, classifications | Année |
+| `agg_station_trends` | Analyse des tendances saisonnières (pentes) | Saison |
+| `dim_piezo_stations` | Station master avec KPIs et alertes | Station |
 
 ## 🔧 Commandes Utiles
 

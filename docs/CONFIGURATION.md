@@ -13,6 +13,7 @@ Guide de configuration des variables d'environnement et du déploiement.
 | `PG_DB` | Nom de la base | `postgres` | ✅ |
 | `PG_USER` | Utilisateur | `postgres` | ✅ |
 | `PG_PASSWORD` | Mot de passe | `REDACTED` | ✅ |
+| `POSTGRES_EXTENSIONS` | Extensions à activer | `postgis,timescaledb` | (Géré par init.sql) |
 
 ### Dagster - Orchestration
 
@@ -29,7 +30,7 @@ Guide de configuration des variables d'environnement et du déploiement.
 
 | Variable | Description | Valeur par défaut | Obligatoire |
 |----------|-------------|-------------------|-------------|
-| `SUPERSET_SECRET_KEY` | Clé secrète Flask | `your-secret-key...` (dev) | ✅ (Prod) |
+| `SUPERSET_SECRET_KEY` | Clé secrète Flask | `your-secret-key...` | ⚠️ CRITIQUE en Prod |
 | `SUPERSET_SQLALCHEMY_DATABASE_URI` | Base métadonnées Superset | `postgresql://...` | ✅ |
 | `REDIS_HOST` | Hôte Redis (Cache) | `redis` | ✅ |
 

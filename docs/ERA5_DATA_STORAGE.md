@@ -235,9 +235,10 @@ WHERE source_file_id = 'era5_france_2020_2021';
 
 ### Optimisations
 
-1. **Index sur (latitude, longitude, time)** : Recherche spatiale et temporelle rapide
+### 1. **Index sur (latitude, longitude, time)** : Recherche spatiale et temporelle rapide
 2. **Filtrage précoce** : `int_era5_for_stations` ne garde que les points de grille utilisés
 3. **Agrégation** : Agrégation quotidienne dans `int_daily_measurements`
+4. **TimescaleDB** : `stg_era5_timeseries` et `int_era5_for_stations` sont des **Hypertables**, optimisant drastiquement les requêtes par plage de date.
 
 ### Volumes
 

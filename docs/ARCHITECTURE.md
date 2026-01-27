@@ -56,7 +56,8 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
          ┌──────────────────────────────────────────────────────┐
          │         PostgreSQL - Schéma: gold                    │
          │  Tables transformées : int_* + marts                 │
-         │  Table finale : hubeau_daily_chroniques              │
+         │  Fact Tables : hubeau_daily, fct_monthly, fct_yearly │
+         │  Optimisation : Hypertables TimescaleDB + Compression│
          └──────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -143,6 +144,13 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 ### 5. Visualisation
 - **CloudBeaver** (Admin SQL) : Interface pour requêter la base directement.
 - **Apache Superset** (BI) : Création de tableaux de bord connectés aux tables `Gold`. Utilise **Redis** pour le cache.
+
+### 6. TimescaleDB (Performance)
+- **Rôle** : Optimiser le stockage et la requête des séries temporelles.
+- **Fonctionnalités** :
+  - **Hypertables** : Partitionnement automatique par temps.
+  - **Compression** : Réduction de la taille de stockage (90%+) sur les données historiques.
+  - **Chunk Exclusion** : Scan uniquement les partitions nécessaires pour une requête donnée.
 
 ## Flux de Données
 
@@ -250,7 +258,13 @@ era5_longitude = ROUND(station_longitude * 10) / 10
 **Table principale** : `gold.hubeau_daily_chroniques`
 - Combine piézométrie + météo ERA5 + métadonnées TME
 - **Toutes les colonnes d'observation sont non-nulles** (INNER JOIN)
-- Prête pour l'analyse
+- **Hypertable** : Partitionnée par date (1 an) + Compressée (après 1 an)
+
+**Nouveaux Marts Analytiques** :
+- `fct_monthly_chroniques` : Agrégats mensuels + variations (Hypertable 5 ans)
+- `fct_yearly_stats` : Bilans annuels + classifications (Hypertable 10 ans)
+- `dim_piezo_stations` : Master data stations enrichi
+- `agg_station_trends` : Tendances saisonnières et projections
 
 ## Docker Services
 

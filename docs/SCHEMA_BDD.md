@@ -18,6 +18,13 @@ ERA5 API ──────┘
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
 
+## 🔥 Optimisations TimescaleDB
+
+Les tables suivantes sont converties en **Hypertables** pour la performance :
+- **Silver** : `stg_piezo_chroniques`, `stg_hydrometry_obs_elab`, `stg_era5_timeseries`
+- **Gold** : `int_daily_measurements`, `int_era5_for_stations`
+- **Marts** : `hubeau_daily_chroniques` (Compressée), `fct_monthly_chroniques`, `fct_yearly_stats`
+
 ---
 
 ## Tables Bronze (DLT)
