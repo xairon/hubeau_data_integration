@@ -31,8 +31,9 @@ models:
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              min_value: -40
-              max_value: 50
+              arguments:
+                min_value: -40
+                max_value: 50
               config:
                 severity: warn
       
@@ -40,8 +41,9 @@ models:
         description: "Précipitations totales journalières en m"
         tests:
           - dbt_utils.accepted_range:
-              min_value: 0
-              max_value: 0.5
+              arguments:
+                min_value: 0
+                max_value: 0.5
               config:
                 severity: warn
       
@@ -50,16 +52,18 @@ models:
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              min_value: 41.0
-              max_value: 52.0
+              arguments:
+                 min_value: 41.0
+                 max_value: 52.0
       
       - name: longitude
         description: "Longitude de la station"
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              min_value: -5.5
-              max_value: 10.0
+              arguments:
+                 min_value: -5.5
+                 max_value: 10.0
     
     tests:
       # Unicité station + date

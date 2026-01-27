@@ -27,8 +27,10 @@ pages:
     - dbt deps --project-dir src/dbt_hubeau
 
     # 5. Génération de la documentation
-    # --profiles-dir . force dbt à utiliser le profiles.yml créé à l'étape 3
-    - dbt docs generate --project-dir src/dbt_hubeau --profiles-dir .
+    # --profiles-dir . force dbt à utiliser le profiles.yml créé
+    # --empty-catalog permet de générer le site sans se connecter à la base (contourne le firewall)
+    # Les stats (lignes, taille) seront vides, mais le lineage et les descriptions seront là.
+    - dbt docs generate --project-dir src/dbt_hubeau --profiles-dir . --empty-catalog
 
     # 6. Préparation du dossier public pour GitLab Pages
     - mkdir public
