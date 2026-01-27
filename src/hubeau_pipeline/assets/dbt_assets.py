@@ -40,7 +40,24 @@ if packages_yml.exists() and (not dbt_packages_dir.exists() or not any(dbt_packa
 
 if os.getenv("DAGSTER_DBT_PARSE_PROJECT_ON_LOAD"):
     # Development mode: auto-parse on load
-    dbt_project.prepare_if_dev()
+    # Force explicit parse to ensure we catch errors and don't rely on opaque internal logic
+    import subprocess
+    print(f"🔄 DAGSTER_DBT_PARSE_PROJECT_ON_LOAD is set. Force running 'dbt parse'...")
+    try:
+        subprocess.run(
+            ["dbt", "parse", "--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)],
+            check=True,
+            capture_output=True
+        )
+        print("✅ dbt parse completed successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to run dbt parse: {e.stderr.decode('utf-8') if e.stderr else str(e)}")
+        # In dev mode, we want to fail hard if parse fails
+        raise e
+    except Exception as e:
+        print(f"❌ Failed to run dbt parse: {e}")
+        raise e
+
 elif not dbt_project.manifest_path.exists():
     # Fallback: Generate manifest if missing (useful for local dev or if Dockerfile step failed)
     import subprocess
@@ -62,23 +79,28 @@ elif not dbt_project.manifest_path.exists():
         print(f"❌ Failed to run dbt parse: {e}")
         print("⚠️  Dagster will still work, but dbt assets may not be available.")
 else:
-    # Check if manifest is stale (fewer models than actual .sql files)
-    import json
+    # Check if manifest is stale using modification timestamps
+    # This is more robust than counting files
     import glob
     
     try:
-        with open(dbt_project.manifest_path, 'r') as f:
-            manifest_data = json.load(f)
-            manifest_models = {k for k in manifest_data.get('nodes', {}).keys() if k.startswith('model.')}
-        
-        # Count actual model files
+        manifest_mtime = dbt_project.manifest_path.stat().st_mtime
         models_dir = DBT_PROJECT_DIR / "models"
-        actual_sql_files = set(glob.glob(str(models_dir / "**/*.sql"), recursive=True))
         
-        # If we have more SQL files than manifest models, reparse
-        if len(actual_sql_files) > len(manifest_models):
+        is_stale = False
+        # Check both SQL and YML files (tests are often in YML)
+        for ext in ["**/*.sql", "**/*.yml", "**/*.yaml"]:
+            for source_file in models_dir.glob(ext):
+                if source_file.stat().st_mtime > manifest_mtime:
+                    print(f"🔄 Detected change in {source_file.name}, manifest is stale.")
+                    is_stale = True
+                    break
+            if is_stale:
+                break
+        
+        if is_stale:
             import subprocess
-            print(f"⚠️ Manifest stale: {len(manifest_models)} models in manifest, {len(actual_sql_files)} .sql files. Running 'dbt parse'...")
+            print("⚠️ Manifest stale. Running 'dbt parse'...")
             try:
                 subprocess.run(
                     ["dbt", "parse", "--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)],
