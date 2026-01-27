@@ -12,7 +12,7 @@ Guide de configuration des variables d'environnement et du déploiement.
 | `PG_PORT` | Port PostgreSQL | `5432` | ✅ |
 | `PG_DB` | Nom de la base | `postgres` | ✅ |
 | `PG_USER` | Utilisateur | `postgres` | ✅ |
-| `PG_PASSWORD` | Mot de passe | `REDACTED` | ✅ |
+| `PG_PASSWORD` | Mot de passe | `(Définir dans .env)` | ✅ |
 | `POSTGRES_EXTENSIONS` | Extensions à activer | `postgis,timescaledb` | (Géré par init.sql) |
 
 ### Dagster - Orchestration
@@ -23,7 +23,7 @@ Guide de configuration des variables d'environnement et du déploiement.
 | `DAGSTER_PG_PORT` | Port PostgreSQL Dagster | `5432` | ✅ |
 | `DAGSTER_PG_DB` | Base Dagster | `dagster` | ✅ |
 | `DAGSTER_PG_USER` | Utilisateur Dagster | `postgres` | ✅ |
-| `DAGSTER_PG_PASSWORD` | Mot de passe Dagster | `REDACTED` | ✅ |
+| `DAGSTER_PG_PASSWORD` | Mot de passe Dagster | `(Définir dans .env)` | ✅ |
 | `DAGSTER_HOME` | Répertoire Dagster | `/app/dagster_home` | ❌ |
 
 ### Superset - Visualisation
@@ -33,6 +33,9 @@ Guide de configuration des variables d'environnement et du déploiement.
 | `SUPERSET_SECRET_KEY` | Clé secrète Flask | `your-secret-key...` | ⚠️ CRITIQUE en Prod |
 | `SUPERSET_SQLALCHEMY_DATABASE_URI` | Base métadonnées Superset | `postgresql://...` | ✅ |
 | `REDIS_HOST` | Hôte Redis (Cache) | `redis` | ✅ |
+| `SUPERSET_ADMIN_USER` | Admin Username | `(Définir dans .env)` | ❌ (Optionnel) |
+| `SUPERSET_ADMIN_PASSWORD` | Admin Password | `(Définir dans .env)` | ⚠️ CRITIQUE en Prod |
+| `SUPERSET_ADMIN_EMAIL` | Admin Email | `admin@hubeau.com` | ❌ (Optionnel) |
 
 ### DLT - Ingestion
 
@@ -194,8 +197,8 @@ docker exec -it brgm-postgres psql -U postgres -d postgres
 
 ```bash
 # .env
-PG_PASSWORD=dev123456
-DAGSTER_PG_PASSWORD=dev123456
+PG_PASSWORD=ChangeMeDev123!
+DAGSTER_PG_PASSWORD=ChangeMeDev123!
 ```
 
 ### Configuration Complète (Production)

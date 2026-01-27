@@ -91,6 +91,7 @@ Tables nettoyées et standardisées depuis bronze.
 | `stg_piezo_chroniques` | Chroniques piézo nettoyées | `bronze.piezometry_chroniques_raw` | NULL filtrés |
 | `stg_piezo_stations` | Stations piézo nettoyées | `bronze.piezometry_stations_raw` | Coordonnées non-nulles |
 | `stg_hydrometry_stations` | Stations hydro nettoyées | `bronze.hydrometry_stations_raw` | Coordonnées non-nulles |
+| `stg_hydrometry_sites` | Sites hydro nettoyés | `bronze.hydrometry_sites_raw` | - |
 | `stg_hydrometry_obs_elab` | Observations hydro nettoyées | `bronze.hydrometry_obs_elab_raw` | Observations non-nulles |
 | `stg_era5_timeseries` | Time series ERA5 nettoyées | `bronze.era5_france_timeseries` | Observations non-nulles |
 | `stg_tme_entites` | TME nettoyé | `bronze.tme_entites_hydrogeo` | Valeurs 'X' converties en NULL |
@@ -113,6 +114,7 @@ Tables transformées et prêtes pour l'analyse.
 |-------|-------------|--------|
 | `int_daily_measurements` | Mesures quotidiennes agrégées (piézo) | `silver.stg_piezo_chroniques` |
 | `int_station_era5_mapping` | Mapping stations → grille ERA5 + métadonnées TME | `silver.stg_piezo_stations` + `silver.stg_tme_entites` |
+| `int_era5_grid_points` | Points de grille ERA5 uniques (pour jointure spatiale) | `silver.stg_era5_timeseries` |
 | `int_era5_for_stations` | ERA5 filtré pour les points de grille utilisés | `silver.stg_era5_timeseries` |
 
 **Détails** :
@@ -167,6 +169,44 @@ Tables transformées et prêtes pour l'analyse.
 **Contraintes** :
 - **Toutes les colonnes d'observation sont NON NULL** (INNER JOIN)
 - Une ligne = une mesure piézo + météo ERA5 + métadonnées TME pour une date donnée
+
+**Table principale** : `gold.hubeau_daily_chroniques`
+- Combine piézométrie + météo ERA5 + métadonnées TME
+- **Toutes les colonnes d'observation sont non-nulles** (INNER JOIN)
+- Prête pour l'analyse
+- **Hypertable (1 an)** + Compression active
+
+### Nouveaux Marts Analytiques
+
+#### `fct_monthly_chroniques`
+**Granularité** : Station x Mois
+- Agrégats : Moyennes, Min, Max, Ecart-type
+- Variations : vs mois précédent, vs annee précédente
+- Moyennes mobiles : 3 mois, 12 mois
+- **Hypertable (5 ans)**
+
+#### `fct_yearly_stats`
+**Granularité** : Station x Année
+- Agrégats : Moyennes annuelles, Bilan hydrique
+- Percentiles historiques (Rank)
+- Classification annuelle : `TRES_BAS` ... `TRES_HAUT`
+- **Hypertable (10 ans)**
+
+#### `agg_station_trends`
+**Granularité** : Station x Saison
+- Régression linéaire (Slope) sur la saison
+- Classification tendance : `HAUSSE_FORTE`, `STABLE`, etc.
+
+#### `dim_piezo_stations`
+**Granularité** : Station
+- Table dimensionnelle enrichie
+- Statistiques globales (Date début/fin, nb mesures)
+- Indicateurs techniques
+
+#### `dim_hydro_stations`
+**Granularité** : Station Hydro
+- Dimension des stations hydrométriques
+- Enrichissement géographique et administratif
 
 ---
 

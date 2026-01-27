@@ -9,8 +9,8 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 │                      SOURCES DE DONNÉES                         │
 ├────────────────────────────────┬────────────────────────────────┤
 │         APIs Hub'Eau           │      ERA5 (Copernicus CDS)     │
-│  • Piézométrie (v1)            │      • Météo France            │
-│  • Hydrométrie (v2)          │      • 1950-2025                │
+│  • Piézométrie (v1)            │      • Temps/Météo             │
+│  • Hydrométrie (v2)            │      • 1950-2025 (Historique)  │
 └────────────────────────────────┴────────────────────────────────┘
                     │                            │
                     ▼                            ▼
@@ -157,7 +157,8 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 ### Ingestion (DLT)
 
 ```
-Job Dagster → Asset DLT → API Hub'Eau/ERA5 → PostgreSQL bronze.*_raw
+Job Hub'Eau → Asset DLT → API Hub'Eau → PostgreSQL bronze.*_raw
+Job ERA5 → API CDS → (In-Memory Processing) → PostgreSQL bronze.era5_france_timeseries
 ```
 
 **Exemple** :
@@ -181,38 +182,40 @@ Job Dagster → dbt build → PostgreSQL silver.* → gold.*
 
 ### Principe
 
-Les données ERA5 sont sur une **grille régulière** de 0.1° (~11 km).
-Les stations piézométriques sont à des coordonnées précises.
+Les données ERA5 sont sur une grille régulière de 0.1° (~11 km).
+Pour chaque station piézométrique, nous cherchons le point de grille ERA5 le plus proche (Nearest Neighbor) pour lui attribuer les données météo locales.
 
-**Algorithme** : Arrondir les coordonnées de la station au point de grille le plus proche.
+**Algorithme** : Recherche du voisin le plus proche via **PostGIS KNN** (opérateur `<->`).
+Cela garantit une précision géodésique bien supérieure à un simple arrondissement de coordonnées.
 
 ```sql
-era5_latitude  = ROUND(station_latitude * 10) / 10
-era5_longitude = ROUND(station_longitude * 10) / 10
+SELECT ...
+FROM stations s
+CROSS JOIN LATERAL (
+    SELECT latitude, longitude
+    FROM era5_grid e
+    ORDER BY s.geom <-> e.geom  -- Nearest Neighbor (KNN)
+    LIMIT 1
+) e
 ```
-
-### Exemple
-
-| Station | Lat originale | Lon originale | → ERA5 Lat | → ERA5 Lon |
-|---------|---------------|---------------|------------|------------|
-| BSS001 | 48.723 | 2.598 | 48.7 | 2.6 |
-| BSS002 | 48.756 | 2.612 | 48.8 | 2.6 |
 
 ### Visualisation
 
 ```
-      2.5       2.6       2.7
-       │         │         │
- 48.8 ─┼─────────●─────────┼─  ← Point grille ERA5 (48.8, 2.6)
-       │         │  •BSS002│
-       │    •BSS001        │
- 48.7 ─┼─────────●─────────┼─  ← Point grille ERA5 (48.7, 2.6)
-       │         │         │
+      Grid Point A      Grid Point B
+           ●                 ●
+           │                 │
+           │        Station S│
+           │           ★     │     Distance(S, A) = 4.2 km
+           │          / \    │     Distance(S, B) = 3.1 km
+           │         /   \---|---▶ Selected: B (Nearest)
+           │        /        │
+           ●                 ●
+      Grid Point C      Grid Point D
 ```
 
 **Résultat** :
-- BSS001 (48.723, 2.598) → arrondi → (48.7, 2.6)
-- BSS002 (48.756, 2.612) → arrondi → (48.8, 2.6)
+Chaque station est reliée à son point de grille "réellement" le plus proche géographiquement.
 
 ## Tables Principales
 
@@ -224,8 +227,8 @@ era5_longitude = ROUND(station_longitude * 10) / 10
 | `piezometry_chroniques_raw` | Mesures piézo | ~23M |
 | `hydrometry_stations_raw` | Stations hydro | ~5k |
 | `hydrometry_obs_elab_raw` | Observations hydro | ~15M |
-| `era5_france_meteo_raw` | Fichiers NetCDF ERA5 | ~38 fichiers |
-| `era5_france_timeseries` | Time series ERA5 | ~300M |
+| `hydrometry_obs_elab_raw` | Observations hydro | ~15M |
+| `era5_france_timeseries` | Time series ERA5 (Direct Load) | ~300M |
 | `tme_entites_hydrogeo` | Référentiel TME (seed) | ~2k |
 
 ### Silver (dbt staging)
