@@ -17,7 +17,8 @@ defs = Definitions(
     assets=all_assets,
     jobs=all_jobs,
     schedules=all_schedules,
-    sensors=all_sensors,
+    schedules=all_schedules,
+    # sensors=all_sensors,  # Sensors disabled (Batch mode only)
     resources={
         **RESOURCES, 
         "noop_io_manager": noop_io_manager,

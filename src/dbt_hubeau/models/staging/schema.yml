@@ -37,7 +37,12 @@ models:
       - name: code_site
         tests:
           - not_null
+          - not_null
           - unique
+      - name: geometry
+        description: "Point géographique PostGIS"
+        tests:
+          - not_null
 
   - name: stg_hydrometry_stations
     description: "Stations hydrométriques (Silver)"
@@ -47,6 +52,10 @@ models:
           - not_null
           - unique
       - name: code_site
+        tests:
+          - not_null
+      - name: geometry
+        description: "Point géographique PostGIS"
         tests:
           - not_null
 
@@ -81,7 +90,7 @@ models:
         description: "Température en °C"
         tests:
           - not_null
-      - name: geom
+      - name: geometry
         description: "Point géographique PostGIS"
         tests:
           - not_null

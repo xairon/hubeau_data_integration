@@ -31,14 +31,14 @@ from .jobs import (
 
 daily_piezometry_schedule = ScheduleDefinition(
     job=daily_piezometry_bronze_job,
-    cron_schedule="0 6 * * *",  # 6h00 UTC every day
+    cron_schedule="0 4 * * *",  # 4h00 UTC every day
     default_status=DefaultScheduleStatus.STOPPED,  # Manual activation in prod
     description="Daily: Piezometry chroniques (last 7 days)",
 )
 
 daily_hydrometry_schedule = ScheduleDefinition(
     job=daily_hydrometry_bronze_job,
-    cron_schedule="0 6 * * *",  # 6h00 UTC every day
+    cron_schedule="0 4 * * *",  # 4h00 UTC every day
     default_status=DefaultScheduleStatus.STOPPED,
     description="Daily: Hydrometry observations (last 7 days)",
 )
@@ -50,7 +50,7 @@ daily_hydrometry_schedule = ScheduleDefinition(
 
 daily_dbt_schedule = ScheduleDefinition(
     job=dbt_silver_gold_pipeline_job,
-    cron_schedule="0 7 * * *",  # 7h00 UTC (after Bronze completes)
+    cron_schedule="0 6 * * *",  # 6h00 UTC (after Bronze completes)
     default_status=DefaultScheduleStatus.STOPPED,
     description="Daily: dbt Silver/Gold layer incremental refresh",
 )
@@ -62,7 +62,7 @@ daily_dbt_schedule = ScheduleDefinition(
 
 @schedule(
     job=era5_weekly_job,
-    cron_schedule="0 4 * * *",  # Daily 4h00 UTC
+    cron_schedule="0 3 * * *",  # Daily 3h00 UTC
     default_status=DefaultScheduleStatus.STOPPED,
     description="Daily: ERA5 Smart Update (Target Timeseries)",
 )

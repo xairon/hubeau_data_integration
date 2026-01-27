@@ -4,7 +4,7 @@
     indexes = [
       {'columns': ['code_site'], 'unique': True},
       {'columns': ['code_departement']},
-      {'columns': ['geom'], 'type': 'gist'}
+      {'columns': ['geometry'], 'type': 'gist'}
     ]
   )
 }}
@@ -17,6 +17,8 @@
 WITH source AS (
     SELECT * FROM {{ source('staging', 'hydrometry_sites_raw') }}
     WHERE code_site IS NOT NULL
+      AND longitude_site IS NOT NULL
+      AND latitude_site IS NOT NULL
 ),
 
 deduplicated AS (
@@ -43,5 +45,5 @@ deduplicated AS (
 
 SELECT 
     *,
-    {{ make_point('longitude_site', 'latitude_site') }} AS geom
+    {{ make_point('longitude_site', 'latitude_site') }} AS geometry
 FROM deduplicated

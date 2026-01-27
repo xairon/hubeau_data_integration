@@ -55,5 +55,5 @@ deduplicated AS (
 SELECT 
     *,
     -- PostGIS geometry column (SRID 4326 = WGS84)
-    {{ make_point('x', 'y') }} AS geom
+    {{ make_point('x', 'y') }} AS geometry
 FROM deduplicated

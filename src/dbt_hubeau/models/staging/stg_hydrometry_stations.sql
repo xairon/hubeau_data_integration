@@ -5,7 +5,7 @@
       {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['code_departement']},
-      {'columns': ['geom'], 'type': 'gist'}
+      {'columns': ['geometry'], 'type': 'gist'}
     ]
   )
 }}
@@ -19,6 +19,8 @@ WITH source AS (
     SELECT * FROM {{ source('staging', 'hydrometry_stations_raw') }}
     WHERE code_station IS NOT NULL
       -- AND date_debut_mesure IS NOT NULL -- Column missing in source on server
+      AND longitude_station IS NOT NULL
+      AND latitude_station IS NOT NULL
 ),
 
 deduplicated AS (
@@ -51,5 +53,5 @@ deduplicated AS (
 
 SELECT 
     *,
-    {{ make_point('longitude_station', 'latitude_station') }} AS geom
+    {{ make_point('longitude_station', 'latitude_station') }} AS geometry
 FROM deduplicated

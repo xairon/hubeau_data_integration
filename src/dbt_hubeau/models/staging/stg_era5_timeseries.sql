@@ -6,7 +6,7 @@
     indexes = [
       {'columns': ['latitude', 'longitude', 'time'], 'unique': True},
       {'columns': ['time'], 'type': 'brin'},
-      {'columns': ['geom'], 'type': 'gist'},
+      {'columns': ['geometry'], 'type': 'gist'},
       {'columns': ['source_file_id']}
     ],
     post_hook=[
@@ -47,6 +47,6 @@ deduplicated AS (
 
 SELECT 
     *,
-    {{ make_point('longitude', 'latitude') }} AS geom
+    {{ make_point('longitude', 'latitude') }} AS geometry
 FROM deduplicated
 
