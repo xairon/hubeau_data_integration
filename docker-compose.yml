@@ -183,8 +183,56 @@ services:
     ports:
       - "49501:8080" # Adminer UI
 
+  # Redis - Cache for Superset
+  redis:
+    image: redis:7-alpine
+    container_name: brgm-redis
+    restart: unless-stopped
+
+  # CloudBeaver - Web SQL Client
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:24.3.0
+    container_name: brgm-cloudbeaver
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "49503:8978"
+    volumes:
+      - cloudbeaver_data:/opt/cloudbeaver/workspace
+      # Mount initial configuration to workspace (auto-configure)
+      - ./docker/cloudbeaver/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/data-sources.json
+    restart: unless-stopped
+
+  # Apache Superset - BI & Visualization
+  superset:
+    image: apache/superset:4.0.0
+    container_name: brgm-superset
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SUPERSET_SECRET_KEY: "${SUPERSET_SECRET_KEY:-your-secret-key-change-in-production}"
+      # Connect to the main postgres container, separate DB 'superset'
+      SUPERSET_SQLALCHEMY_DATABASE_URI: "postgresql://postgres:${PG_PASSWORD:-REDACTED}@postgres:5432/superset"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      SUPERSET_CONFIG_PATH: "/app/superset_config.py"
+    volumes:
+      - ./docker/superset/superset_config.py:/app/superset_config.py
+      - ./docker/superset/docker-init.sh:/app/docker-init.sh
+      - ./docker/superset/datasources.yaml:/app/datasources.yaml
+    ports:
+      - "49504:8088"
+    entrypoint: [ "/bin/bash", "/app/docker-init.sh" ]
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local
   dagster_pg_data:
+    driver: local
+  cloudbeaver_data:
     driver: local

@@ -32,7 +32,9 @@ docker compose ps
 | Service | URL | Description |
 |---------|-----|-------------|
 | **Dagster UI** | http://localhost:49500 | Orchestration et monitoring des pipelines |
-| **Adminer** | http://localhost:49501 | Interface web PostgreSQL |
+| **Adminer** | http://localhost:49501 | Interface web PostgreSQL (léger) |
+| **CloudBeaver** | http://localhost:49503 | Interface SQL Universelle (avancé) **Utilisateur/MdP admin: `cbadmin`/`cbadmin`** |
+| **Apache Superset** | http://localhost:49504 | Business Intelligence & Dashboards **Utilisateur/MdP admin: `admin`/`admin`** |
 
 **Identifiants Adminer** :
 - Système : PostgreSQL
@@ -117,6 +119,29 @@ Les jobs partitionnés permettent de traiter les données par période :
 2. Cliquer sur "Launch Run"
 3. Sélectionner la partition dans le dropdown
 4. Cliquer sur "Launch"
+
+## 📈 Configuration Apache Superset
+
+**🚀 ZÉRO CONFIGURATION REQUISE !**
+
+Le service Superset est **automatisé**. Au démarrage, un script :
+1. Crée le compte admin (`admin`/`admin`)
+2. Met à jour la base de données
+3. **Connecte automatiquement** la base Hub'Eau
+4. Importe les tables *Gold* (`hubeau_daily_chroniques`, `dim_piezo_stations`)
+
+Tu n'as plus rien à faire : connecte-toi simplement sur http://localhost:49504 et commence à créer des charts !
+
+---
+
+## 💻 Configuration CloudBeaver
+
+**🚀 ZÉRO CONFIGURATION REQUISE !**
+
+CloudBeaver est pré-configuré pour se connecter à PostgreSQL.
+- Ouvre http://localhost:49503
+- Connecte-toi avec `cbadmin` / `cbadmin`
+- La connexion **"Hub'Eau Data Warehouse"** est déjà là !
 
 ## 📁 Structure du Projet
 
@@ -244,6 +269,9 @@ ORDER BY n_live_tup DESC;
 | dbt | 1.7.0 | Transformation |
 | PostgreSQL | 16 | Base de données |
 | PostGIS | 3.4 | Extension géospatiale |
+| CloudBeaver | 24.3 | Administration BDD |
+| Superset | 4.0 | Business Intelligence |
+| Redis | 7 | Cache (Superset) |
 
 ## 🐛 Dépannage
 

@@ -64,7 +64,15 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
          │              Dagster (Orchestration)                 │
          │  • UI Web (port 49500)                               │
          │  • Jobs pour DLT et dbt                              │
+         │  • UI Web (port 49500)                               │
+         │  • Jobs pour DLT et dbt                              │
          │  • Monitoring et logs                                │
+         │                                                      │
+         │      +-----------------------------------------+     │
+         │      |           Visualisation & BI            |     │
+         │      |  • CloudBeaver (SQL Admin) : port 49503 |     │
+         │      |  • Superset (BI/Dashboards): port 49504 |     │
+         │      +-----------------------------------------+     │
          └──────────────────────────────────────────────────────┘
 ```
 
@@ -131,6 +139,10 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 **Jobs** :
 - Jobs d'ingestion (DLT) : partitionnés ou non
 - Jobs de transformation (dbt) : pipeline complet
+
+### 5. Visualisation
+- **CloudBeaver** (Admin SQL) : Interface pour requêter la base directement.
+- **Apache Superset** (BI) : Création de tableaux de bord connectés aux tables `Gold`. Utilise **Redis** pour le cache.
 
 ## Flux de Données
 
@@ -248,7 +260,10 @@ dagster_postgres:  # PostgreSQL 16 (métadonnées Dagster)
 dlt_worker:        # Worker (DLT + dbt)
 dagster_webserver: # UI Dagster
 dagster_daemon:    # Scheduler
-adminer:           # UI PostgreSQL
+adminer:           # UI PostgreSQL (Legacy)
+cloudbeaver:       # Admin SQL Universel
+superset:          # BI & Dashboards
+redis:             # Cache pour Superset
 ```
 
 ## Performance

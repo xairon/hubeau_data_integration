@@ -15,6 +15,10 @@ CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;
 CREATE SCHEMA IF NOT EXISTS gold;
 
+-- Create Superset database (idempotent way)
+SELECT 'CREATE DATABASE superset'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'superset')\gexec
+
 -- Log enabled extensions
 DO $$
 BEGIN

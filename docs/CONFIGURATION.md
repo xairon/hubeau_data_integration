@@ -25,6 +25,14 @@ Guide de configuration des variables d'environnement et du déploiement.
 | `DAGSTER_PG_PASSWORD` | Mot de passe Dagster | `REDACTED` | ✅ |
 | `DAGSTER_HOME` | Répertoire Dagster | `/app/dagster_home` | ❌ |
 
+### Superset - Visualisation
+
+| Variable | Description | Valeur par défaut | Obligatoire |
+|----------|-------------|-------------------|-------------|
+| `SUPERSET_SECRET_KEY` | Clé secrète Flask | `your-secret-key...` (dev) | ✅ (Prod) |
+| `SUPERSET_SQLALCHEMY_DATABASE_URI` | Base métadonnées Superset | `postgresql://...` | ✅ |
+| `REDIS_HOST` | Hôte Redis (Cache) | `redis` | ✅ |
+
 ### DLT - Ingestion
 
 Les variables DLT sont automatiquement dérivées des variables PostgreSQL :

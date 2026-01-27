@@ -1,0 +1,47 @@
+databases:
+  - database_name: Hubeau Data Warehouse
+    sqlalchemy_uri: postgresql://postgres:REDACTED@postgres:5432/postgres
+    tables:
+      - table_name: hubeau_daily_chroniques
+        schema: gold
+        description: "Table finale : Piézométrie + Météo + TME"
+        main_dttm_col: date_mesure
+        columns:
+          - column_name: date_mesure
+            is_dttm: true
+            filterable: true
+            groupby: true
+          - column_name: code_bss
+            filterable: true
+            groupby: true
+          - column_name: niveau_moyen
+            verbose_name: "Niveau Nappe (m NGF)"
+            is_metric: true
+          - column_name: temperature_2m
+            verbose_name: "Température (°C)"
+            is_metric: true
+          - column_name: total_precipitation
+            verbose_name: "Précipitations (m)"
+            is_metric: true
+          - column_name: nom_departement
+            filterable: true
+            groupby: true
+          - column_name: nom_commune
+            filterable: true
+            groupby: true
+      - table_name: dim_piezo_stations
+        schema: gold
+        description: "Stations Piézométriques"
+        columns:
+          - column_name: code_bss
+            filterable: true
+            groupby: true
+          - column_name: nom_departement
+            filterable: true
+            groupby: true
+          - column_name: tendance_classification
+            filterable: true
+            groupby: true
+          - column_name: niveau_alerte
+            filterable: true
+            groupby: true
