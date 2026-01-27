@@ -27,8 +27,12 @@ pages:
     - dbt deps --project-dir src/dbt_hubeau
 
     # 5. Génération de la documentation
-    # --profiles-dir . force dbt à utiliser le profiles.yml créé
-    # --empty-catalog et --no-compile permettent de générer le site sans AUCUNE connexion à la base
+    # étape 1 : "dbt parse" génère le manifest.json sans se connecter à la base
+    - dbt parse --project-dir src/dbt_hubeau --profiles-dir .
+    
+    # étape 2 : "dbt docs generate" utilise ce manifest pour créer le site
+    # --no-compile : utilise le manifest existant (créé par parse) au lieu de recompiler
+    # --empty-catalog : ne cherche pas les infos de la base
     - dbt docs generate --project-dir src/dbt_hubeau --profiles-dir . --empty-catalog --no-compile
 
     # 6. Préparation du dossier public pour GitLab Pages

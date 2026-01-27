@@ -105,7 +105,8 @@ models:
       - name: classification_niveau_annuel
         tests:
           - accepted_values:
-              values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+              arguments:
+                values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
 
   - name: dim_piezo_stations
     description: "Dimension Stations enrichie avec statistiques globales et tendances"
@@ -117,11 +118,13 @@ models:
       - name: tendance_classification
         tests:
           - accepted_values:
-              values: ['HAUSSE', 'BAISSE', 'STABLE', 'INSUFFISANT']
+              arguments:
+                values: ['HAUSSE', 'BAISSE', 'STABLE', 'INSUFFISANT']
       - name: niveau_alerte
         tests:
           - accepted_values:
-              values: ['NORMAL', 'VIGILANCE', 'ALERTE']
+              arguments:
+                values: ['NORMAL', 'VIGILANCE', 'ALERTE']
 
   - name: agg_station_trends
     description: "Tendances saisonnières par station"
@@ -132,8 +135,10 @@ models:
       - name: saison
         tests:
           - accepted_values:
-              values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
+              arguments:
+                values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
       - name: classification_tendance
         tests:
           - accepted_values:
-              values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
+              arguments:
+                values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
