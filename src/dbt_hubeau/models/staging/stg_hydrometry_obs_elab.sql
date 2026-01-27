@@ -6,6 +6,9 @@
       {'columns': ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['date_obs_elab'], 'type': 'brin'}
+    ],
+    post_hook=[
+      "{{ convert_to_hypertable('date_obs_elab', '1 year') }}"
     ]
   )
 }}

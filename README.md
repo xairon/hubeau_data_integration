@@ -43,7 +43,9 @@ docker compose ps
 - Mot de passe : (celui défini dans `.env` ou `REDACTED` par défaut)
 - Base de données : `postgres`
 
-## 📊 Architecture
+## 📊 Architecture & Vue d'Ensemble
+
+> **[Voir le Graphique Complet du Projet (Mermaid)](docs/PROJECT_GRAPH.md)**
 
 ```
 ┌─────────────────┐     ┌─────────────────┐

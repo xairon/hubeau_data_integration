@@ -6,6 +6,10 @@
       {'columns': ['date']},
       {'columns': ['code_departement']},
       {'columns': ['code_eh']}
+    ],
+    post_hook=[
+      "{{ convert_to_hypertable('date', '1 year') }}",
+      "{{ enable_compression(segment_by=['code_departement', 'code_bss'], order_by='date DESC', compress_after='365 days') }}"
     ]
   )
 }}

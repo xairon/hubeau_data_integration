@@ -6,6 +6,9 @@
       {'columns': ['code_bss']},
       {'columns': ['mois'], 'type': 'brin'},
       {'columns': ['code_departement']}
+    ],
+    post_hook=[
+      "{{ convert_to_hypertable('mois', '5 years') }}"
     ]
   )
 }}

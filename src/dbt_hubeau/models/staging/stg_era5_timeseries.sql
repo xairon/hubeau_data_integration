@@ -8,6 +8,9 @@
       {'columns': ['time'], 'type': 'brin'},
       {'columns': ['geom'], 'type': 'gist'},
       {'columns': ['source_file_id']}
+    ],
+    post_hook=[
+      "{{ convert_to_hypertable('time', '1 month') }}"
     ]
   )
 }}

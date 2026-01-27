@@ -3,6 +3,9 @@
     materialized = 'table',
     indexes=[
       {'columns': ['latitude', 'longitude', 'era5_date']}
+    ],
+    post_hook=[
+      "{{ convert_to_hypertable('era5_date', '1 year') }}"
     ]
   )
 }}

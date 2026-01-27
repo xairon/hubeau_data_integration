@@ -6,6 +6,9 @@
       {'columns': ['code_bss', 'date_mesure'], 'unique': True},
       {'columns': ['code_bss']},
       {'columns': ['date_mesure'], 'type': 'brin'}
+    ],
+    post_hook=[
+      "{{ convert_to_hypertable('date_mesure', '1 year') }}"
     ]
   )
 }}

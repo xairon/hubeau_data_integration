@@ -2,6 +2,15 @@ WITH chroniques AS (
     SELECT * FROM {{ ref('stg_piezo_chroniques') }}
 )
 
+{{
+  config(
+    materialized = 'table',
+    post_hook = [
+      "{{ convert_to_hypertable('date_mesure', '1 year') }}"
+    ]
+  )
+}}
+
 SELECT
     code_bss,
     date_mesure,
