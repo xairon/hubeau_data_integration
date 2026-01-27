@@ -75,6 +75,8 @@ services:
       DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD:-REDACTED}
       DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST:-postgres}
       DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT:-5432}
+      # Force dbt parse on load to ensure manifest is fresh (fixes KeyError on tests)
+      DAGSTER_DBT_PARSE_PROJECT_ON_LOAD: "1"
     volumes:
       # Hot reload: mount source code
       - ./src:/app/src
