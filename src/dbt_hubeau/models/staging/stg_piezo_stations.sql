@@ -18,6 +18,8 @@ WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_stations_raw') }}
     WHERE code_bss IS NOT NULL
       AND date_debut_mesure IS NOT NULL
+      AND x IS NOT NULL 
+      AND y IS NOT NULL
 ),
 
 deduplicated AS (
