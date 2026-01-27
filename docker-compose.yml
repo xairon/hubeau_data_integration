@@ -230,7 +230,7 @@ services:
       - ./docker/superset/datasources.yaml:/app/datasources.yaml
     ports:
       - "49504:8088"
-    entrypoint: [ "/bin/bash", "-c", "sed -i 's/\r$//' /app/docker-init.sh && /bin/bash /app/docker-init.sh" ]
+    entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
     restart: unless-stopped
 
 volumes:

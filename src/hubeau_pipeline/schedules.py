@@ -4,7 +4,7 @@ Dagster Schedules - Automated Daily/Weekly Data Integration
 Schedules:
 - daily_hubeau_bronze: 6h00 UTC - Hub'Eau API (piezo + hydro)
 - daily_dbt_silver: 7h00 UTC - dbt Silver layer
-- weekly_era5_bronze: Dimanche 2h00 UTC - ERA5 current year refresh
+- daily_era5_bronze: 4h00 UTC - ERA5 Smart Update
 """
 
 from dagster import (
@@ -57,23 +57,23 @@ daily_dbt_schedule = ScheduleDefinition(
 
 
 # ==============================================================================
-# WEEKLY SCHEDULE - ERA5 Current Year
+# DAILY SCHEDULE - ERA5 Smart Update
 # ==============================================================================
 
 @schedule(
     job=era5_weekly_job,
-    cron_schedule="0 2 * * 0",  # Dimanche 2h00 UTC
+    cron_schedule="0 4 * * *",  # Daily 4h00 UTC
     default_status=DefaultScheduleStatus.STOPPED,
-    description="Weekly: ERA5 Smart Update (Target Timeseries)",
+    description="Daily: ERA5 Smart Update (Target Timeseries)",
 )
-def weekly_era5_schedule(context: ScheduleEvaluationContext):
+def daily_era5_schedule(context: ScheduleEvaluationContext):
     """
-    ERA5 weekly schedule.
+    ERA5 Daily schedule.
     Lance le job de mise à jour incrémentale.
     L'asset 'era5_weekly_update' calcule lui-même la période manquante (Smart Update).
     """
     return RunRequest(
-        run_key=f"era5_weekly_{datetime.now().strftime('%Y%m%d')}",
+        run_key=f"era5_daily_{datetime.now().strftime('%Y%m%d')}",
     )
 
 
@@ -85,5 +85,5 @@ all_schedules = [
     daily_piezometry_schedule,
     daily_hydrometry_schedule,
     daily_dbt_schedule,
-    weekly_era5_schedule,
+    daily_era5_schedule,
 ]
