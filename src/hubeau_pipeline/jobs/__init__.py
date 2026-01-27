@@ -29,7 +29,12 @@ from .era5_jobs import (
 )
 
 # Jobs dbt
-from .dbt_jobs import dbt_silver_gold_pipeline_job
+from .dbt_jobs import (
+    dbt_silver_gold_pipeline_job,
+    dbt_test_job,
+    dbt_freshness_job,
+    dbt_quality_job,
+)
 
 # Full Bootstrap Job (Complete population with partition iteration)
 from .full_bootstrap_job import full_bootstrap_job
@@ -52,6 +57,9 @@ all_jobs = [
     era5_weekly_job,
     # Jobs dbt (Silver/Gold layers)
     dbt_silver_gold_pipeline_job,
+    dbt_test_job,
+    dbt_freshness_job,
+    dbt_quality_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
 ]
@@ -74,6 +82,9 @@ __all__ = [
     "era5_weekly_job",
     # Jobs dbt (Silver/Gold layers)
     "dbt_silver_gold_pipeline_job",
+    "dbt_test_job",
+    "dbt_freshness_job",
+    "dbt_quality_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
     # Collections

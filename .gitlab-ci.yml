@@ -1,0 +1,49 @@
+image: python:3.9-slim
+
+# Variables pour le job
+variables:
+  # Évite les prompts interactifs pendant l'installation
+  DEBIAN_FRONTEND: noninteractive
+
+pages:
+  stage: deploy
+  script:
+    # 1. Installation des dépendances système nécessaires pour psycopg2 (driver postgres)
+    - apt-get update && apt-get install -y git libpq-dev gcc
+    
+    # 2. Installation de dbt
+    - pip install dbt-postgres
+
+    # 3. Configuration du profil dbt
+    # Gère les deux types de variables GitLab : "File" (chemin) ou "Variable" (contenu)
+    - |
+      if [ -f "$DBT_PROFILE_CONTENT" ]; then
+        cp "$DBT_PROFILE_CONTENT" profiles.yml
+      else
+        echo "$DBT_PROFILE_CONTENT" > profiles.yml
+      fi
+
+    # 4. Installation des dépendances du projet dbt
+    - dbt deps --project-dir src/dbt_hubeau
+
+    # 5. Génération de la documentation
+    # --profiles-dir . force dbt à utiliser le profiles.yml créé à l'étape 3
+    - dbt docs generate --project-dir src/dbt_hubeau --profiles-dir .
+
+    # 6. Préparation du dossier public pour GitLab Pages
+    - mkdir public
+    # Déplacement des fichiers générés dans public/
+    - mv src/dbt_hubeau/target/index.html public/
+    - mv src/dbt_hubeau/target/manifest.json public/
+    - mv src/dbt_hubeau/target/catalog.json public/
+    # Copie des autres assets nécessaires (graphe, recherche...)
+    - cp -r src/dbt_hubeau/target/static public/ 2>/dev/null || true
+    - cp src/dbt_hubeau/target/*.json public/ 2>/dev/null || true
+    - cp src/dbt_hubeau/target/*.js public/ 2>/dev/null || true
+
+  artifacts:
+    paths:
+      - public
+  only:
+    # Exécuter uniquement sur la branche main
+    - main

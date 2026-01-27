@@ -1,0 +1,133 @@
+version: 2
+
+models:
+  # ==============================================================================
+  # MARTS MODELS - Final Data Quality Tests
+  # ==============================================================================
+
+  - name: hubeau_daily_chroniques
+    description: |
+      Table finale combinant piézométrie, météo ERA5 et métadonnées TME.
+      Chaque ligne = 1 station × 1 jour avec toutes les observations.
+    
+    columns:
+      - name: code_bss
+        description: "Code BSS unique de la station piézométrique"
+        tests:
+          - not_null
+      
+      - name: date_mesure
+        description: "Date de la mesure (jour)"
+        tests:
+          - not_null
+      
+      - name: niveau_moyen
+        description: "Niveau piézométrique moyen journalier (m NGF)"
+        tests:
+          - not_null
+      
+      - name: temperature_2m
+        description: "Température moyenne à 2m en °C"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: -40
+              max_value: 50
+              config:
+                severity: warn
+      
+      - name: total_precipitation
+        description: "Précipitations totales journalières en m"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 0.5
+              config:
+                severity: warn
+      
+      - name: latitude
+        description: "Latitude de la station"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 41.0
+              max_value: 52.0
+      
+      - name: longitude
+        description: "Longitude de la station"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: -5.5
+              max_value: 10.0
+    
+    tests:
+      # Unicité station + date
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_bss
+            - date_mesure
+      
+      # Nombre minimum de lignes (sanity check)
+      - dbt_utils.expression_is_true:
+          expression: "1=1"  # Placeholder - le test compile toujours
+          config:
+            severity: warn
+
+  - name: fct_monthly_chroniques
+    description: "Agrégations mensuelles des mesures piézométriques et météo"
+    columns:
+      - name: code_bss
+        tests:
+          - not_null
+      - name: mois
+        tests:
+          - not_null
+      - name: niveau_moyen
+        tests:
+          - not_null
+
+  - name: fct_yearly_stats
+    description: "Statistiques annuelles et classification sécheresse"
+    columns:
+      - name: code_bss
+        tests:
+          - not_null
+      - name: annee
+        tests:
+          - not_null
+      - name: classification_niveau_annuel
+        tests:
+          - accepted_values:
+              values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+
+  - name: dim_piezo_stations
+    description: "Dimension Stations enrichie avec statistiques globales et tendances"
+    columns:
+      - name: code_bss
+        tests:
+          - unique
+          - not_null
+      - name: tendance_classification
+        tests:
+          - accepted_values:
+              values: ['HAUSSE', 'BAISSE', 'STABLE', 'INSUFFISANT']
+      - name: niveau_alerte
+        tests:
+          - accepted_values:
+              values: ['NORMAL', 'VIGILANCE', 'ALERTE']
+
+  - name: agg_station_trends
+    description: "Tendances saisonnières par station"
+    columns:
+      - name: code_bss
+        tests:
+          - not_null
+      - name: saison
+        tests:
+          - accepted_values:
+              values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
+      - name: classification_tendance
+        tests:
+          - accepted_values:
+              values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']

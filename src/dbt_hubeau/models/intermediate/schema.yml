@@ -1,0 +1,93 @@
+version: 2
+
+models:
+  # ==============================================================================
+  # INTERMEDIATE MODELS - Data Quality Tests
+  # ==============================================================================
+
+  - name: int_daily_measurements
+    description: "Mesures quotidiennes agrégées (piézométrie)"
+    columns:
+      - name: code_bss
+        description: "Code BSS de la station"
+        tests:
+          - not_null
+      - name: date_mesure
+        description: "Date de la mesure"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_bss
+            - date_mesure
+
+  - name: int_station_era5_mapping
+    description: "Mapping stations piézo → grille ERA5 avec métadonnées TME"
+    columns:
+      - name: code_bss
+        description: "Code BSS unique de la station"
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('stg_piezo_stations')
+              field: code_bss
+      - name: era5_latitude
+        description: "Latitude du point grille ERA5 (arrondie à 0.1°)"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 41.0
+              max_value: 52.0
+      - name: era5_longitude
+        description: "Longitude du point grille ERA5 (arrondie à 0.1°)"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: -5.5
+              max_value: 10.0
+
+  - name: int_era5_for_stations
+    description: "Données ERA5 filtrées pour les points de grille utilisés par les stations"
+    columns:
+      - name: latitude
+        tests:
+          - not_null
+      - name: longitude
+        tests:
+          - not_null
+      - name: time
+        tests:
+          - not_null
+      - name: temperature_2m
+        description: "Température à 2m en °C"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -40
+              max_value: 50
+              config:
+                severity: warn
+      - name: total_precipitation
+        description: "Précipitations totales en m"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 0.5  # 500mm/jour max (extrême)
+              config:
+                severity: warn
+
+  - name: int_era5_grid_points
+    description: "Points de grille ERA5 uniques utilisés"
+    columns:
+      - name: era5_latitude
+        tests:
+          - not_null
+      - name: era5_longitude
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - era5_latitude
+            - era5_longitude
