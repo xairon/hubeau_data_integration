@@ -220,6 +220,10 @@ services:
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
       SUPERSET_CONFIG_PATH: "/app/superset_config.py"
+      # Admin credentials (used by docker-init.sh)
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@hubeau.com}
     volumes:
       - ./docker/superset/superset_config.py:/app/superset_config.py
       - ./docker/superset/docker-init.sh:/app/docker-init.sh

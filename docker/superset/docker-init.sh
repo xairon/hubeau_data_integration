@@ -12,14 +12,18 @@ sleep 10
 echo "📦 Running DB upgrades..."
 superset db upgrade
 
-# 3. Create Admin User (Idempotent-ish: will fail harmlessly if exists or we can check)
+# 3. Create Admin User
+ADMIN_USER=${SUPERSET_ADMIN_USER:-admin}
+ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD:-admin}
+ADMIN_EMAIL=${SUPERSET_ADMIN_EMAIL:-admin@hubeau.com}
+
 echo "bust_cache" | superset fab create-admin \
-    --username admin \
+    --username "$ADMIN_USER" \
     --firstname Admin \
     --lastname User \
-    --email admin@fab.org \
-    --password admin \
-    || echo "User admin already exists (or creation failed)"
+    --email "$ADMIN_EMAIL" \
+    --password "$ADMIN_PASSWORD" \
+    || echo "User $ADMIN_USER already exists (or creation failed)"
 
 # 4. Init Roles
 echo "🔑 Initializing roles..."

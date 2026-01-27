@@ -28,19 +28,20 @@ docker compose ps
 |---------|-----|-------------|
 | **Dagster UI** | http://localhost:49500 | Orchestration et monitoring des pipelines |
 | **Adminer** | http://localhost:49501 | Interface web PostgreSQL (léger) |
-| **CloudBeaver** | http://localhost:49503 | Interface SQL Universelle (avancé) **Utilisateur/MdP admin: `cbadmin`/`cbadmin`** |
-| **Apache Superset** | http://localhost:49504 | Business Intelligence & Dashboards **Utilisateur/MdP admin: `admin`/`admin`** |
+| **CloudBeaver** | http://localhost:49503 | Interface SQL Universelle (avancé) **(Voir .env pour identifiants)** |
+| **Apache Superset** | http://localhost:49504 | Business Intelligence & Dashboards **(Voir .env pour identifiants)** |
 
 **Identifiants Adminer** :
 - Système : PostgreSQL
 - Serveur : `postgres`
 - Utilisateur : `postgres`
-- Mot de passe : (celui défini dans `.env` ou `REDACTED` par défaut)
+- Utilisateur : `postgres`
+- Mot de passe : **(Défini dans `.env`)**
 - Base de données : `postgres`
 
 ## 📊 Architecture & Vue d'Ensemble
 
-> **[Voir le Graphique Complet du Projet (Mermaid)](docs/PROJECT_GRAPH.md)**
+## 📊 Architecture & Vue d'Ensemble
 
 Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** pour la performance temporelle.
 
@@ -63,6 +64,12 @@ Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** p
                    └─────────────┘
 ```
 
+## ✨ Configuration Superset
+
+- 1. Crée le compte admin (Identifiants définis via variables d'environnement)
+- 2. Connecte-toi (Identifiants définis dans `.env`)
+- 3. La connexion **"Hub'Eau Data Warehouse"** est déjà là !
+
 ## ✨ Fonctionnalités Clés
 
 - **Ingestion Automatique** : Pipelines DLT résilients avec gestion de la pagination et des retries.
@@ -72,7 +79,7 @@ Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** p
 
 ---
 
-## � Tables Principales
+##  Tables Principales
 
 ### Bronze (Raw Data)
 Données brutes, partitionnées par année. Dédupliquées automatiquement.
