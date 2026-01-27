@@ -28,9 +28,8 @@ pages:
 
     # 5. Génération de la documentation
     # --profiles-dir . force dbt à utiliser le profiles.yml créé
-    # --empty-catalog permet de générer le site sans se connecter à la base (contourne le firewall)
-    # Les stats (lignes, taille) seront vides, mais le lineage et les descriptions seront là.
-    - dbt docs generate --project-dir src/dbt_hubeau --profiles-dir . --empty-catalog
+    # --empty-catalog et --no-compile permettent de générer le site sans AUCUNE connexion à la base
+    - dbt docs generate --project-dir src/dbt_hubeau --profiles-dir . --empty-catalog --no-compile
 
     # 6. Préparation du dossier public pour GitLab Pages
     - mkdir public

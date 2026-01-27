@@ -68,13 +68,15 @@ models:
     tests:
       # Unicité station + date
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - code_bss
-            - date_mesure
+          arguments:
+            combination_of_columns:
+              - code_bss
+              - date_mesure
       
       # Nombre minimum de lignes (sanity check)
       - dbt_utils.expression_is_true:
-          expression: "1=1"  # Placeholder - le test compile toujours
+          arguments:
+            expression: "1=1"  # Placeholder - le test compile toujours
           config:
             severity: warn
 
