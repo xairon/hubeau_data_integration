@@ -37,7 +37,6 @@ models:
       - name: code_site
         tests:
           - not_null
-          - not_null
           - unique
       - name: geometry
         description: "Point géographique PostGIS"

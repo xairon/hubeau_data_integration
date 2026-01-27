@@ -24,6 +24,9 @@
 WITH source AS (
     SELECT * FROM {{ source('staging', 'era5_france_timeseries') }}
     WHERE time IS NOT NULL
+      AND latitude IS NOT NULL
+      AND longitude IS NOT NULL
+      AND temperature_2m IS NOT NULL
     {% if is_incremental() %}
       -- Only process new source_file_ids not yet in Silver
       AND source_file_id NOT IN (SELECT DISTINCT source_file_id FROM {{ this }})

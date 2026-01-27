@@ -23,6 +23,7 @@ WITH source AS (
     SELECT * FROM {{ source('staging', 'hydrometry_obs_elab_raw') }}
     WHERE date_obs_elab IS NOT NULL
       AND code_site IS NOT NULL
+      AND grandeur_hydro_elab IS NOT NULL
       {% if is_incremental() %}
       AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
       {% endif %}
