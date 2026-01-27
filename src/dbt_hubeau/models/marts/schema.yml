@@ -31,9 +31,8 @@ models:
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              arguments:
-                min_value: -40
-                max_value: 50
+              min_value: -40
+              max_value: 50
               config:
                 severity: warn
       
@@ -41,9 +40,8 @@ models:
         description: "Précipitations totales journalières en m"
         tests:
           - dbt_utils.accepted_range:
-              arguments:
-                min_value: 0
-                max_value: 0.5
+              min_value: 0
+              max_value: 0.5
               config:
                 severity: warn
       
@@ -52,31 +50,27 @@ models:
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              arguments:
-                 min_value: 41.0
-                 max_value: 52.0
+              min_value: 41.0
+              max_value: 52.0
       
       - name: longitude
         description: "Longitude de la station"
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              arguments:
-                 min_value: -5.5
-                 max_value: 10.0
+              min_value: -5.5
+              max_value: 10.0
     
     tests:
       # Unicité station + date
       - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns:
-              - code_bss
-              - date_mesure
+          combination_of_columns:
+            - code_bss
+            - date_mesure
       
       # Nombre minimum de lignes (sanity check)
       - dbt_utils.expression_is_true:
-          arguments:
-            expression: "1=1"  # Placeholder - le test compile toujours
+          expression: "1=1"  # Placeholder - le test compile toujours
           config:
             severity: warn
 
@@ -105,8 +99,7 @@ models:
       - name: classification_niveau_annuel
         tests:
           - accepted_values:
-              arguments:
-                values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+              values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
 
   - name: dim_piezo_stations
     description: "Dimension Stations enrichie avec statistiques globales et tendances"
@@ -118,13 +111,11 @@ models:
       - name: tendance_classification
         tests:
           - accepted_values:
-              arguments:
-                values: ['HAUSSE', 'BAISSE', 'STABLE', 'INSUFFISANT']
+              values: ['HAUSSE', 'BAISSE', 'STABLE', 'INSUFFISANT']
       - name: niveau_alerte
         tests:
           - accepted_values:
-              arguments:
-                values: ['NORMAL', 'VIGILANCE', 'ALERTE']
+              values: ['NORMAL', 'VIGILANCE', 'ALERTE']
 
   - name: agg_station_trends
     description: "Tendances saisonnières par station"
@@ -135,10 +126,8 @@ models:
       - name: saison
         tests:
           - accepted_values:
-              arguments:
-                values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
+              values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
       - name: classification_tendance
         tests:
           - accepted_values:
-              arguments:
-                values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
+              values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
