@@ -299,6 +299,10 @@ def hubeau_chroniques_daily(
             date_fin_param: date_end,
             station_field: codes_str
         }
+
+        # Debug: log params for first batch (helps confirm date window and station param name)
+        if batch_idx == 1:
+            log(f"🔧 [DAILY] DEBUG params: {params}")
         
         batch_records = 0
         for record in fetch_all_pages(client, endpoint, params=params, context=dagster_context):
