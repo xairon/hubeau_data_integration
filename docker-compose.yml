@@ -237,7 +237,8 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
+    external: true
+    name: hubeau-dev_postgres_data_dev
   dagster_pg_data:
     driver: local
   cloudbeaver_data:
