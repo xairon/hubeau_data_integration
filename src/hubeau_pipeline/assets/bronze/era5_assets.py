@@ -26,15 +26,16 @@ from psycopg2.extras import execute_values
 from dagster import asset, AssetExecutionContext, StaticPartitionsDefinition, Output, MetadataValue
 
 # ============================================================================
-# PARTITIONS - ERA5 (chunks de 2 ans)
+# PARTITIONS - ERA5 (chunks de 1 an)
 # ============================================================================
 
 CURRENT_YEAR = datetime.now().year
 ERA5_START_YEAR = 1950  # ERA5-Land commence en 1950
-ERA5_YEARS_PER_CHUNK = 2
+# Taille d'un chunk ERA5 en années (1 = partitions annuelles)
+ERA5_YEARS_PER_CHUNK = 1
 
-# Créer les partitions par chunks de 2 ans
-# Ex: ["1950_1951", "1952_1953", ..., "2024_2025"]
+# Créer les partitions par chunks d'ERA5_YEARS_PER_CHUNK années
+# Ex pour 1 an: ["1950_1950", "1951_1951", ..., "2025_2025"]
 ERA5_PARTITIONS = []
 year = ERA5_START_YEAR
 while year <= CURRENT_YEAR:
