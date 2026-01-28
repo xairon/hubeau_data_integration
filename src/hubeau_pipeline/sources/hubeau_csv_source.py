@@ -252,6 +252,7 @@ def hubeau_chroniques_daily(
         dagster_context: Dagster context for logging
     """
     from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
     
     base_url = config["resource"]["base_url"]
     endpoint = config["resource"]["endpoint"]
@@ -268,9 +269,12 @@ def hubeau_chroniques_daily(
     client = RESTClient(base_url=base_url)
     log = dagster_context.log.info if dagster_context else logger.info
     
-    # Calculate date range
-    date_end = datetime.now().strftime("%Y-%m-%d")
-    date_start = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    # Calculate date range in Europe/Paris.
+    # Reason: containers often run in UTC; using naive datetime.now() can make "today"
+    # become "yesterday" from a French user perspective, truncating the daily window.
+    now_paris = datetime.now(ZoneInfo("Europe/Paris"))
+    date_end = now_paris.strftime("%Y-%m-%d")
+    date_start = (now_paris - timedelta(days=days_back)).strftime("%Y-%m-%d")
     
     if not station_codes:
         log("⚠️ Aucun code de station fourni à hubeau_chroniques_daily.")

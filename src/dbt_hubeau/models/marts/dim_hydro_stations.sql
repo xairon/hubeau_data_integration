@@ -5,7 +5,7 @@
       {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['code_departement']},
-      {'columns': ['geom'], 'type': 'gist'}
+      {'columns': ['geometry'], 'type': 'gist'}
     ]
   )
 }}
@@ -27,14 +27,17 @@ metadata AS (
         code_site,
         libelle_site,
         code_cours_eau,
-        nom_cours_eau,
+        -- Hub'Eau fournit libelle_cours_eau / uri_cours_eau (pas "nom_cours_eau")
+        libelle_cours_eau AS nom_cours_eau,
+        uri_cours_eau,
         code_departement,
-        nom_departement,
+        -- Hub'Eau fournit libelle_departement (pas "nom_departement")
+        libelle_departement AS nom_departement,
         date_ouverture_station,
         date_fermeture_station,
         longitude_station,
         latitude_station,
-        geom,
+        geometry,
         
         -- Statut
         CASE 

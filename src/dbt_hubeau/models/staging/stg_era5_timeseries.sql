@@ -28,8 +28,9 @@ WITH source AS (
       AND longitude IS NOT NULL
       AND temperature_2m IS NOT NULL
     {% if is_incremental() %}
-      -- Only process new source_file_ids not yet in Silver
-      AND source_file_id NOT IN (SELECT DISTINCT source_file_id FROM {{ this }})
+      -- Incrémental "safe": ne traite que les nouveaux timestamps
+      -- (beaucoup moins coûteux qu'un NOT IN sur DISTINCT source_file_id)
+      AND time > (SELECT COALESCE(MAX(time), '1900-01-01'::timestamp) FROM {{ this }})
     {% endif %}
 ),
 
