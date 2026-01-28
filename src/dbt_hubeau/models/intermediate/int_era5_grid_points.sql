@@ -2,7 +2,7 @@
   config(
     materialized = 'table',
     indexes = [
-      {'columns': ['latitude', 'longitude'], 'unique': True},
+      {'columns': ['era5_latitude', 'era5_longitude'], 'unique': True},
       {'columns': ['geom'], 'type': 'gist'}
     ]
   )
@@ -13,8 +13,8 @@
 -- Source: stg_era5_timeseries (deduplicated to grid points only)
 
 SELECT DISTINCT
-    latitude,
-    longitude,
+    latitude AS era5_latitude,
+    longitude AS era5_longitude,
     {{ make_point('longitude', 'latitude') }} AS geom
 FROM {{ ref('stg_era5_timeseries') }}
 WHERE latitude IS NOT NULL
