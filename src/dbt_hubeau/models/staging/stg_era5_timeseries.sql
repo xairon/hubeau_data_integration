@@ -2,7 +2,7 @@
   config(
     materialized = 'incremental',
     unique_key = ['latitude', 'longitude', 'time'],
-    incremental_strategy = 'merge',
+    incremental_strategy = 'append',
     indexes = [
       {'columns': ['latitude', 'longitude', 'time'], 'unique': True},
       {'columns': ['time'], 'type': 'brin'},
@@ -19,9 +19,8 @@
 
 -- Staging model for ERA5 timeseries
 -- Source: bronze.era5_france_timeseries
--- Silver layer: copie bronze + typage + déduplication + PostGIS
--- Incremental: basé sur source_file_id (identifiant unique par batch d'insertion)
--- Primary Key: latitude + longitude + time
+-- Silver: typage, déduplication, PostGIS. Incremental append (MERGE non supporté sur hypertables compressées).
+-- Primary Key: latitude + longitude + time. Filtre incrémental: time > max(time).
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'era5_france_timeseries') }}
