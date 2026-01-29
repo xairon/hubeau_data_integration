@@ -1,6 +1,7 @@
 {{
   config(
     materialized = 'table',
+    indexes = [{'columns': ['geometry'], 'type': 'gist'}],
     post_hook=["{{ add_primary_key(['code_eh']) }}"]
   )
 }}
