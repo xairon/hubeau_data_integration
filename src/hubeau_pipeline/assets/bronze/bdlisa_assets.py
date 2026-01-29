@@ -121,8 +121,9 @@ def _write_bdlisa_to_postgis(
     )
     engine.dispose()
     context.log.info(f"Table {full_table} alimentée: {len(gdf):,} lignes (avec géométrie)")
-
     cols = list(gdf.columns)
+    context.log.info(f"Colonnes BDLISA (normalisées): {cols}")
+
     code_col = next((c for c in cols if "code" in c and ("entite" in c or c == "code")), cols[0] if cols else "code")
     libelle_col = next((c for c in cols if "libelle" in c or "lb_" in c), None) or (cols[1] if len(cols) >= 2 else None)
     niveau_col = next((c for c in cols if "niveau" in c and c != "niveau_layer"), None)
@@ -132,6 +133,12 @@ def _write_bdlisa_to_postgis(
     theme_col = next((c for c in cols if "theme" in c), None)
     origine_col = next((c for c in cols if "origine" in c), None)
     geom_col = next((c for c in cols if c == "geometry" or "geom" in c), None)
+
+    context.log.info(
+        "Mapping TME: code_eh=%s, libelle_eh=%s, niveau_eh=%s, etat_eh=%s, nature_eh=%s, "
+        "milieu_eh=%s, theme_eh=%s, origine_eh=%s (NULL = colonne absente du gpkg)",
+        code_col, libelle_col, niveau_col, etat_col, nature_col, milieu_col, theme_col, origine_col,
+    )
 
     def _col_expr(c: Optional[str], default: str = "NULL") -> str:
         return f'NULLIF(TRIM("{c}"::text), \'\')' if c else default

@@ -74,27 +74,44 @@ models:
               values: ['QmnJ', 'QmxJ', 'H']
 
   - name: stg_tme_entites
-    description: "Entités hydrogéologiques TME/BDLISA (Silver) avec libellés Sandre"
+    description: |
+      Entités hydrogéologiques TME/BDLISA (Silver). Source : `bdlisa_entites` (vue sur
+      bronze.bdlisa_entites_raw) + jointures aux nomenclatures Sandre `ref_*_eh`.
+      Avec le layer 0 du GeoPackage BDLISA V3 Métropole, seuls `code_eh` et `libelle_eh`
+      sont renseignés ; niveau/etat/nature/milieu/theme/origine et leurs libellés restent
+      souvent NULL. Voir docs/BDLISA_INTEGRATION.md et scripts/inspect_bdlisa_gpkg.py.
     columns:
       - name: code_eh
-        description: "Code entité hydrogéologique"
+        description: "Code entité hydrogéologique (source bdlisa_entites)"
         tests:
           - not_null
           - unique
       - name: libelle_eh
-        description: "Libellé de l'entité"
+        description: "Libellé de l'entité (source bdlisa_entites)"
+      - name: niveau_eh
+        description: "Code niveau TME (1/2/3) — souvent NULL (layer 0 gpkg)"
       - name: libelle_niveau_eh
-        description: "Libellé du niveau (national / régional / local)"
-      - name: libelle_nature_eh
-        description: "Libellé de la nature (GSA, UA, etc.)"
+        description: "Libellé du niveau (national / régional / local) — ref_niveau_eh"
+      - name: etat_eh
+        description: "Code état nappe — souvent NULL (layer 0 gpkg)"
       - name: libelle_etat_eh
-        description: "Libellé de l'état de la nappe"
+        description: "Libellé de l'état de la nappe — ref_etat_eh"
+      - name: nature_eh
+        description: "Code nature (GSA, UA, etc.) — souvent NULL (layer 0 gpkg)"
+      - name: libelle_nature_eh
+        description: "Libellé de la nature — ref_nature_eh"
+      - name: milieu_eh
+        description: "Code milieu / porosité — souvent NULL (layer 0 gpkg)"
       - name: libelle_milieu_eh
-        description: "Libellé du type de milieu / porosité"
+        description: "Libellé du type de milieu — ref_milieu_eh"
+      - name: theme_eh
+        description: "Code thème / formation géologique — souvent NULL (layer 0 gpkg)"
       - name: libelle_theme_eh
-        description: "Libellé du thème / formation géologique"
+        description: "Libellé du thème — ref_theme_eh"
+      - name: origine_eh
+        description: "Code potentialités aquifères — souvent NULL (layer 0 gpkg)"
       - name: libelle_origine_eh
-        description: "Libellé des potentialités aquifères"
+        description: "Libellé des potentialités aquifères — ref_origine_eh"
       - name: geometry
         description: "Géométrie PostGIS (polygone entité BDLISA)"
 

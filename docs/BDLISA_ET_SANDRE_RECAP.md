@@ -120,6 +120,8 @@ Chaque table `bronze.ref_*_eh` a deux colonnes : **`code`** (ex. `"1"`) et **`li
 - **Bronze** : données brutes BDLISA (table + vue) + nomenclatures Sandre (6 tables ref_*_eh).
 - **Silver** : `stg_tme_entites` = TME avec codes **et** libellés (jointures aux ref_*_eh), prêt pour cartes (Superset) et marts (ex. `gold.stations_piezo_carte`).
 
+**Note** : Le layer 0 du GeoPackage BDLISA V3 Métropole n’expose souvent que **code** et **libellé**. Les colonnes niveau, etat, nature, milieu, theme, origine (et leurs libellés) restent alors **NULL** dans `stg_tme_entites`. Voir `scripts/inspect_bdlisa_gpkg.py` et [BDLISA_INTEGRATION.md](BDLISA_INTEGRATION.md).
+
 ---
 
 ## 4. Rôle du TME (Tableau Multi-Échelles)

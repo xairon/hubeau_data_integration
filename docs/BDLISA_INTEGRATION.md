@@ -29,9 +29,22 @@ On charge le **GeoPackage** (géométrie PostGIS). Lien direct métropole (V3) :
 3. **dbt `stg_tme_entites`**  
    Lit `source('staging', 'bdlisa_entites')` et joint les `source('staging', 'ref_*_eh')`.
 
+## Colonnes TME dans le GeoPackage (layer 0)
+
+Le **layer 0** du GeoPackage BDLISA V3 Métropole n’expose en pratique que **code** et **libellé** (→ `code_eh`, `libelle_eh` dans `bdlisa_entites` / `stg_tme_entites`). Les attributs **niveau, etat, nature, milieu, theme, origine** (et leurs libellés Sandre) sont **absents** de ce layer, donc restent **NULL** dans `stg_tme_entites`.
+
+Pour vérifier les colonnes réellement présentes :
+
+```bash
+python scripts/inspect_bdlisa_gpkg.py          # layer 0
+python scripts/inspect_bdlisa_gpkg.py --list-layers
+```
+
+Dépendances : `geopandas`, `httpx`. L’asset `bdlisa_entites_raw` logue aussi les colonnes et le mapping TME dans Dagster.
+
 ## Config
 
-- `configs/bdlisa/bdlisa_entites.yml` : URL du ZIP et options (périmètre, format).
+- `configs/bdlisa/bdlisa_entites.yml` : URL du ZIP et options (périmètre, format, `layer_index` / `layer_indexes`).
 
 ## Références
 
