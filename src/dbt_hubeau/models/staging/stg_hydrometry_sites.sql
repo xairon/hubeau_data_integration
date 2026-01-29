@@ -57,22 +57,7 @@ deduplicated AS (
         {{ cast_silver_text('commentaire_influence_generale_site') }} AS commentaire_influence_generale_site,
         {{ cast_silver_text('commentaire_site') }} AS commentaire_site,
         {{ cast_silver_text('type_contexte_loi_stat_site') }} AS type_contexte_loi_stat_site,
-        {{ cast_silver_text('type_loi_site') }} AS type_loi_site,
-
-        {{ dbt_utils.star(
-            from=source('staging', 'hydrometry_sites_raw'),
-            except=[
-                "longitude_site", "latitude_site", "altitude_site", "code_site", "code_departement",
-                "libelle_site", "type_site", "coordonnee_x_site", "coordonnee_y_site",
-                "code_projection", "code_systeme_alti_site", "surface_bv", "statut_site",
-                "premier_mois_etiage_site", "premier_mois_annee_hydro_site", "influence_generale_site",
-                "code_entite_hydro_site", "code_troncon_hydro_site", "code_commune_site", "code_zone_hydro_site",
-                "libelle_commune", "code_region", "libelle_region", "code_cours_eau", "libelle_cours_eau", "uri_cours_eau",
-                "grandeur_hydro", "date_maj_site", "libelle_departement",
-                "commentaire_influence_generale_site", "commentaire_site", "type_contexte_loi_stat_site", "type_loi_site",
-                "_dlt_load_id", "_dlt_id"
-            ]
-        ) }}
+        {{ cast_silver_text('type_loi_site') }} AS type_loi_site
     FROM source
     ORDER BY code_site
 )

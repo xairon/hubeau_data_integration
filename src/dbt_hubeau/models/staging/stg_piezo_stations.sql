@@ -41,8 +41,6 @@ deduplicated AS (
         {{ cast_silver_text('code_departement') }} AS code_departement,
         {{ cast_silver_text('nom_departement') }} AS nom_departement,
         {{ cast_silver_text('codes_bdlisa') }} AS codes_bdlisa,
-        {{ cast_silver_text('code_entite') }} AS code_entite,
-        {{ cast_silver_text('code_masse_eau') }} AS code_masse_eau,
 
         {{ dbt_utils.star(
             from=source('staging', 'piezometry_stations_raw'),
@@ -50,7 +48,6 @@ deduplicated AS (
                 "x", "y", "altitude_station",
                 "date_debut_mesure", "date_fin_mesure", "date_maj", "nb_mesures_piezo",
                 "code_bss", "code_commune_insee", "nom_commune", "code_departement", "nom_departement", "codes_bdlisa",
-                "code_entite", "code_masse_eau",
                 "_dlt_load_id", "_dlt_id"
             ]
         ) }}
