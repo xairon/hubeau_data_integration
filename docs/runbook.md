@@ -36,6 +36,18 @@ Les entités hydrogéologiques (stg_tme_entites) dépendent de BDLISA et des nom
 
 ## 🟠 Data Issues
 
+### Libellés BDLISA (libelle_eh, etc.) NULL dans stations_piezo_carte / mapping
+**Symptoms**: `libelle_eh` (et éventuellement `code_eh`) toujours NULL dans `gold.stations_piezo_carte` ou `gold.int_station_era5_mapping`.
+
+**Cause**: 
+- `int_station_era5_mapping` était en **incrémental** : le job `dbt_silver_gold_pipeline` ne met pas à jour les lignes déjà présentes, donc les libellés restaient NULL.
+- Ou jointure TME (code / spatial) qui ne matche pas (stations sans `codes_bdlisa`, ou hors polygones BDLISA).
+
+**Solution**:
+1. Le mapping est désormais en **table** (rebuild complet à chaque run). **Relancer** `dbt_silver_gold_pipeline` : le mapping et les marts en aval sont reconstruits, les libellés renseignés où la jointure TME matche.
+2. Si toujours NULL après run : exécuter `scripts/diagnose_tme_mapping.sql` (sur la base) pour vérifier `avec_libelle_eh` vs `sans_libelle_eh`, et `codes_bdlisa` renseigné ou non.
+3. Vérifier que `silver.stg_tme_entites` contient bien `libelle_eh` (et `code_eh`). Les colonnes niveau/etat/nature/milieu/theme/origine restent souvent NULL avec le layer 0 du gpkg BDLISA (voir `docs/BDLISA_INTEGRATION.md`).
+
 ### Gap in ERA5 Data
 **Symptoms**: Missing dates in `bronze.era5_france_timeseries`
 **Diagnosis**:
