@@ -52,14 +52,14 @@ station_nearest_era5 AS (
         s.code_departement,
         s.nom_departement,
         -- ERA5 grid point info
-        e.latitude AS era5_latitude,
-        e.longitude AS era5_longitude,
+        e.era5_latitude,
+        e.era5_longitude,
         e.geom AS era5_geom,
         -- Distance in meters (using geography for accuracy)
         ST_Distance(s.geometry::geography, e.geom::geography) AS distance_m
     FROM stations s
     CROSS JOIN LATERAL (
-        SELECT latitude, longitude, geom
+        SELECT era5_latitude, era5_longitude, geom
         FROM era5_grid
         ORDER BY s.geometry <-> geom  -- KNN operator (uses GiST index)
         LIMIT 1
