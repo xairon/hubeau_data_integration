@@ -35,7 +35,6 @@ DEFAULT_BDLISA_URL = (
 
 def _validate_schema_table(schema_name: str, table_name: str) -> None:
     """Valide schéma et table pour éviter injection SQL (alphanumerique + underscore)."""
-    import re
     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", schema_name):
         raise ValueError(f"schema_name invalide: {schema_name!r}")
     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
@@ -64,8 +63,8 @@ def _normalize_column_name(name: str) -> str:
     return s or "col"
 
 
-def _load_config(context: AssetExecutionContext) -> BDLISAConfig:
-    """Charge la config depuis configs/bdlisa/bdlisa_entites.yml si présent."""
+def _load_config(context: AssetExecutionContext) -> dict:
+    """Charge la config depuis configs/bdlisa/bdlisa_entites.yml. Retourne un dict avec url, perimeters, layer_index, layer_indexes, schema_name, table_name."""
     import yaml
     for base in ("configs", "/app/configs"):
         path = Path(base) / "bdlisa" / "bdlisa_entites.yml"
@@ -75,69 +74,58 @@ def _load_config(context: AssetExecutionContext) -> BDLISAConfig:
                     data = yaml.safe_load(f) or {}
                 r = data.get("resource", {})
                 e = data.get("extraction", {})
-                return BDLISAConfig(
-                    url=r.get("url", DEFAULT_BDLISA_URL),
-                    schema_name=e.get("schema", "bronze"),
-                    table_name=e.get("table", "bdlisa_entites_raw"),
-                    layer_index=e.get("layer_index", 0),
-                )
+                perimeters = r.get("perimeters")  # liste de {code, url} ou None
+                layer_indexes = e.get("layer_indexes")  # liste [0,1,2] ou None
+                return {
+                    "url": r.get("url", DEFAULT_BDLISA_URL),
+                    "perimeters": perimeters if isinstance(perimeters, list) and perimeters else None,
+                    "schema_name": e.get("schema", "bronze"),
+                    "table_name": e.get("table", "bdlisa_entites_raw"),
+                    "layer_index": e.get("layer_index", 0),
+                    "layer_indexes": layer_indexes if isinstance(layer_indexes, list) and layer_indexes else None,
+                }
             except Exception as ex:
                 context.log.warning(f"Config {path} ignorée: {ex}")
-    return BDLISAConfig()
+    return {
+        "url": DEFAULT_BDLISA_URL,
+        "perimeters": None,
+        "schema_name": "bronze",
+        "table_name": "bdlisa_entites_raw",
+        "layer_index": 0,
+        "layer_indexes": None,
+    }
 
 
-def _load_gpkg_into_postgis(
-    zip_bytes: bytes,
-    cfg: BDLISAConfig,
+def _write_bdlisa_to_postgis(
+    gdf: gpd.GeoDataFrame,
+    schema_name: str,
+    table_name: str,
     pg: PostgreSQLResource,
     context: AssetExecutionContext,
 ) -> dict:
-    """Extrait le GeoPackage du ZIP et charge dans PostGIS (géométrie conservée)."""
+    """Écrit le GeoDataFrame en table PostGIS et crée la vue bdlisa_entites (schéma fixe + perimeter/niveau_layer si présents)."""
     from sqlalchemy import create_engine
 
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-        gpkg_names = [n for n in zf.namelist() if n.lower().endswith(".gpkg")]
-        if not gpkg_names:
-            raise ValueError("Aucun fichier .gpkg dans le ZIP BDLISA")
-        gpkg_names.sort()
-        first_gpkg = gpkg_names[0]
-        with zf.open(first_gpkg) as f:
-            # Lire le gpkg en mémoire (GeoPandas peut lire depuis un buffer)
-            buf = io.BytesIO(f.read())
-    context.log.info(f"GeoPackage lu: {first_gpkg}")
-
-    gdf = gpd.read_file(buf, layer=cfg.layer_index)
-    context.log.info(f"Layer chargé: {len(gdf):,} entités, géométrie: {gdf.geometry.type.iloc[0] if len(gdf) else 'N/A'}")
-    context.log.info(f"Colonnes BDLISA: {list(gdf.columns)}")
-
-    # Normaliser noms de colonnes (minuscules, underscore) pour dbt
-    gdf.columns = [_normalize_column_name(c) for c in gdf.columns]
-    # S'assurer que la géométrie est en WGS84 pour cohérence avec le reste du projet
-    if gdf.crs and gdf.crs.to_epsg() != 4326:
-        gdf = gdf.to_crs(epsg=4326)
-
-    _validate_schema_table(cfg.schema_name, cfg.table_name)
-    engine = create_engine(pg.get_dsn())
-    full_table = f"{cfg.schema_name}.{cfg.table_name}"
+    _validate_schema_table(schema_name, table_name)
+    full_table = f"{schema_name}.{table_name}"
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {cfg.schema_name}")
-
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+    engine = create_engine(pg.get_dsn())
     gdf.to_postgis(
-        cfg.table_name,
+        table_name,
         engine,
-        schema=cfg.schema_name,
+        schema=schema_name,
         if_exists="replace",
         index=False,
     )
     engine.dispose()
     context.log.info(f"Table {full_table} alimentée: {len(gdf):,} lignes (avec géométrie)")
 
-    # Vue avec schéma fixe (code_eh, libelle_eh, ...) pour dbt, quel que soit le nommage BDLISA
     cols = list(gdf.columns)
     code_col = next((c for c in cols if "code" in c and ("entite" in c or c == "code")), cols[0] if cols else "code")
     libelle_col = next((c for c in cols if "libelle" in c or "lb_" in c), None) or (cols[1] if len(cols) >= 2 else None)
-    niveau_col = next((c for c in cols if "niveau" in c), None)
+    niveau_col = next((c for c in cols if "niveau" in c and c != "niveau_layer"), None)
     etat_col = next((c for c in cols if "etat" in c), None)
     nature_col = next((c for c in cols if "nature" in c), None)
     milieu_col = next((c for c in cols if "milieu" in c), None)
@@ -150,8 +138,15 @@ def _load_gpkg_into_postgis(
     libelle_expr = f'"{libelle_col}"::text' if libelle_col else "NULL::text"
     geom_expr = f'"{geom_col}"' if geom_col else "NULL::geometry"
 
+    extra_select = []
+    if "perimeter" in cols:
+        extra_select.append('"perimeter"::text AS perimeter')
+    if "niveau_layer" in cols:
+        extra_select.append('"niveau_layer"::int AS niveau_layer')
+    extra_sql = ", " + ", ".join(extra_select) if extra_select else ""
+
     view_sql = f"""
-    CREATE OR REPLACE VIEW {cfg.schema_name}.bdlisa_entites AS
+    CREATE OR REPLACE VIEW {schema_name}.bdlisa_entites AS
     SELECT
         ROW_NUMBER() OVER (ORDER BY "{code_col}"::text) AS tme_id,
         "{code_col}"::text AS code_eh,
@@ -163,6 +158,7 @@ def _load_gpkg_into_postgis(
         {_col_expr(theme_col)} AS theme_eh,
         {_col_expr(origine_col)} AS origine_eh,
         {geom_expr} AS geometry
+        {extra_sql}
     FROM {full_table}
     WHERE TRIM(COALESCE("{code_col}"::text, '')) != '' AND TRIM(COALESCE("{code_col}"::text, '')) != 'X'
     """
@@ -170,21 +166,46 @@ def _load_gpkg_into_postgis(
         with conn.cursor() as cur:
             cur.execute(view_sql)
         conn.commit()
-    context.log.info(f"Vue {cfg.schema_name}.bdlisa_entites créée (schéma fixe pour dbt)")
-
+    context.log.info(f"Vue {schema_name}.bdlisa_entites créée (schéma fixe pour dbt)")
     return {
         "rows_loaded": len(gdf),
         "table": full_table,
-        "view": f"{cfg.schema_name}.bdlisa_entites",
-        "source": first_gpkg,
+        "view": f"{schema_name}.bdlisa_entites",
         "columns": list(gdf.columns),
         "has_geometry": True,
     }
 
 
+def _load_gpkg_layers(
+    zip_bytes: bytes,
+    cfg: dict,
+    perimeter_code: Optional[str] = None,
+) -> gpd.GeoDataFrame:
+    """Lit un ou plusieurs layers du ZIP gpkg, ajoute perimeter/niveau_layer, retourne un seul gdf (sans écrire en base)."""
+    indices = cfg.get("layer_indexes") or [cfg.get("layer_index", 0)]
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        gpkg_names = [n for n in zf.namelist() if n.lower().endswith(".gpkg")]
+        if not gpkg_names:
+            raise ValueError("Aucun fichier .gpkg dans le ZIP BDLISA")
+        with zf.open(gpkg_names[0]) as f:
+            buf = io.BytesIO(f.read())
+    gdfs = []
+    for idx in indices:
+        gdf = gpd.read_file(io.BytesIO(buf.getvalue()), layer=idx)
+        gdf.columns = [_normalize_column_name(c) for c in gdf.columns]
+        if gdf.crs and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+        if perimeter_code is not None:
+            gdf["perimeter"] = perimeter_code
+        if len(indices) > 1:
+            gdf["niveau_layer"] = idx
+        gdfs.append(gdf)
+    return pd.concat(gdfs, ignore_index=True) if len(gdfs) > 1 else gdfs[0]
+
+
 def _load_csv_fallback(
     zip_bytes: bytes,
-    cfg: BDLISAConfig,
+    cfg: dict,
     pg: PostgreSQLResource,
     context: AssetExecutionContext,
 ) -> dict:
@@ -205,11 +226,11 @@ def _load_csv_fallback(
     for c in df.columns:
         df[c] = df[c].astype(object).where(pd.notna(df[c]), None)
 
-    _validate_schema_table(cfg.schema_name, cfg.table_name)
-    full_table = f"{cfg.schema_name}.{cfg.table_name}"
+    _validate_schema_table(cfg["schema_name"], cfg["table_name"])
+    full_table = f"{cfg['schema_name']}.{cfg['table_name']}"
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {cfg.schema_name}")
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {cfg['schema_name']}")
             cols = list(df.columns)
             col_defs = ", ".join(f'"{c}" TEXT' for c in cols)
             cur.execute(f'DROP TABLE IF EXISTS {full_table}')
@@ -238,7 +259,7 @@ def _load_csv_fallback(
 
 
 @asset(
-    description="Référentiel BDLISA V3 (entités hydrogéologiques) chargé depuis bdlisa.eaufrance.fr — format GeoPackage pour PostGIS",
+    description="Référentiel BDLISA V3 (entités hydrogéologiques) — multi-périmètres, multi-niveaux (NV1/NV2/NV3) pour Superset",
     group_name="bronze",
     compute_kind="python",
 )
@@ -247,27 +268,46 @@ def bdlisa_entites_raw(
     pg: PostgreSQLResource,
 ) -> dict:
     """
-    Télécharge le ZIP BDLISA (GeoPackage par défaut), extrait le fichier,
-    charge dans bronze.bdlisa_entites_raw avec géométrie PostGIS.
-    Si le ZIP contient du CSV uniquement, charge en fallback sans géométrie.
-    Config : configs/bdlisa/bdlisa_entites.yml ou valeurs par défaut.
+    Télécharge un ou plusieurs ZIP BDLISA (GeoPackage), charge dans bronze.bdlisa_entites_raw
+    avec géométrie PostGIS. Colonnes optionnelles : perimeter (ex. METRO, ARA), niveau_layer (0,1,2).
+    Config : configs/bdlisa/bdlisa_entites.yml — perimeters (liste {code, url}), layer_indexes ([0,1,2]).
     """
     cfg = _load_config(context)
-    context.log.info(f"Téléchargement BDLISA: {cfg.url}")
+    timeout = 600
+    perimeters = cfg.get("perimeters")
+    if perimeters:
+        items = [(p.get("code", "METRO"), p.get("url")) for p in perimeters if p.get("url")]
+    else:
+        items = [("METRO", cfg["url"])]
 
-    with httpx.Client(timeout=cfg.timeout_seconds) as client:
-        resp = client.get(cfg.url)
-        resp.raise_for_status()
-        zip_bytes = resp.content
-    context.log.info(f"ZIP téléchargé: {len(zip_bytes):,} octets")
+    all_gdfs: list = []
+    with httpx.Client(timeout=timeout) as client:
+        for perimeter_code, url in items:
+            context.log.info(f"Téléchargement BDLISA: {perimeter_code} — {url}")
+            resp = client.get(url)
+            resp.raise_for_status()
+            zip_bytes = resp.content
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+                has_gpkg = any(n.lower().endswith(".gpkg") for n in zf.namelist())
+                has_csv = any(n.lower().endswith(".csv") for n in zf.namelist())
+            if has_gpkg:
+                gdf = _load_gpkg_layers(zip_bytes, cfg, perimeter_code=perimeter_code)
+                all_gdfs.append(gdf)
+            elif has_csv and len(items) == 1:
+                context.log.warning("Pas de .gpkg dans le ZIP, fallback CSV (sans géométrie)")
+                return _load_csv_fallback(zip_bytes, cfg, pg, context)
+            elif has_csv:
+                context.log.warning(f"Périmètre {perimeter_code}: pas de .gpkg, ignoré")
 
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-        has_gpkg = any(n.lower().endswith(".gpkg") for n in zf.namelist())
-        has_csv = any(n.lower().endswith(".csv") for n in zf.namelist())
+    if not all_gdfs:
+        raise ValueError("Aucun GeoPackage BDLISA chargé")
 
-    if has_gpkg:
-        return _load_gpkg_into_postgis(zip_bytes, cfg, pg, context)
-    if has_csv:
-        context.log.warning("Pas de .gpkg dans le ZIP, fallback CSV (sans géométrie)")
-        return _load_csv_fallback(zip_bytes, cfg, pg, context)
-    raise ValueError("ZIP BDLISA sans .gpkg ni .csv")
+    big_gdf = pd.concat(all_gdfs, ignore_index=True)
+    context.log.info(f"Total BDLISA: {len(big_gdf):,} lignes, périmètres: {[c for c, _ in items]}")
+    return _write_bdlisa_to_postgis(
+        big_gdf,
+        cfg["schema_name"],
+        cfg["table_name"],
+        pg,
+        context,
+    )

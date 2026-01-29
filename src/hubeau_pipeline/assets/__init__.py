@@ -14,6 +14,9 @@ from .bronze import (
     era5_weekly_update,  # Weekly Smart Update
     bdlisa_entites_raw,  # BDLISA V3 référentiel (GeoPackage → PostGIS)
     sandre_nomenclatures_eh,  # Nomenclatures Sandre (ref_*_eh)
+    referentiel_regions,
+    referentiel_departements,
+    referentiel_zones_hydro,
 )
 
 from .csv_universal import ingest_all_csvs_asset
@@ -32,6 +35,9 @@ all_bronze_assets = [
     era5_weekly_update,
     bdlisa_entites_raw,
     sandre_nomenclatures_eh,
+    referentiel_regions,
+    referentiel_departements,
+    referentiel_zones_hydro,
 ]
 
 all_csv_assets = [ingest_all_csvs_asset]

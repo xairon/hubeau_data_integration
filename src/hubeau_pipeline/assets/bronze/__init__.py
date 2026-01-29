@@ -27,6 +27,12 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
 from hubeau_pipeline.assets.bronze.bdlisa_assets import bdlisa_entites_raw
 # Sandre nomenclatures (ref_*_eh)
 from hubeau_pipeline.assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
+# Référentiels géographiques (calques Superset)
+from hubeau_pipeline.assets.bronze.referentiel_geo_assets import (
+    referentiel_regions,
+    referentiel_departements,
+    referentiel_zones_hydro,
+)
 
 __all__ = [
     # Hub'Eau Historical
@@ -45,6 +51,10 @@ __all__ = [
     "bdlisa_entites_raw",
     # Sandre nomenclatures
     "sandre_nomenclatures_eh",
+    # Référentiels géographiques
+    "referentiel_regions",
+    "referentiel_departements",
+    "referentiel_zones_hydro",
     # Configs
     "MODE_PARTITIONS",
     "ERA5_PARTITIONS_DEF",

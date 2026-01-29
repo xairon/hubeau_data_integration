@@ -46,6 +46,54 @@ databases:
             groupby: true
           - column_name: geometry
             verbose_name: "Géométrie (PostGIS)"
+      - table_name: bdlisa_entites
+        schema: bronze
+        description: "BDLISA brut (polygones) — calque par périmètre (perimeter) et niveau (niveau_layer)"
+        columns:
+          - column_name: code_eh
+            filterable: true
+            groupby: true
+          - column_name: libelle_eh
+            filterable: true
+            groupby: true
+          - column_name: perimeter
+            filterable: true
+            groupby: true
+          - column_name: niveau_layer
+            filterable: true
+            groupby: true
+          - column_name: geometry
+            verbose_name: "Géométrie (PostGIS)"
+      - table_name: referentiel_regions
+        schema: bronze
+        description: "Contours régions (data.gouv.fr) — calque fond régional"
+        columns:
+          - column_name: code
+            filterable: true
+            groupby: true
+          - column_name: nom
+            filterable: true
+            groupby: true
+          - column_name: geometry
+            verbose_name: "Géométrie (PostGIS)"
+      - table_name: referentiel_departements
+        schema: bronze
+        description: "Contours départements (data.gouv.fr) — calque fond départemental"
+        columns:
+          - column_name: code
+            filterable: true
+            groupby: true
+          - column_name: nom
+            filterable: true
+            groupby: true
+          - column_name: geometry
+            verbose_name: "Géométrie (PostGIS)"
+      - table_name: referentiel_zones_hydro
+        schema: bronze
+        description: "Zones hydrographiques BD Carthage (Sandre) — calque par bassin"
+        columns:
+          - column_name: geometry
+            verbose_name: "Géométrie (PostGIS)"
       - table_name: dim_hydro_stations
         schema: gold
         description: "Stations hydrométriques (points) — calque sites hydro"

@@ -1,17 +1,25 @@
-# BDLISA V3 - Entités hydrogéologiques (métropole)
+# BDLISA V3 - Entités hydrogéologiques (multi-périmètres, multi-niveaux)
 # Source: https://bdlisa.eaufrance.fr/telechargement
-# Format: GeoPackage par défaut (géométrie PostGIS). Fallback CSV si ZIP sans .gpkg.
+# Format: GeoPackage (géométrie PostGIS). Permet plusieurs périmètres et plusieurs layers (NV1/NV2/NV3).
 
 resource:
   name: bdlisa_entites_raw
-  # GeoPackage métropole (V3) — géométrie chargée dans PostGIS
+  # Option A : un seul URL (comportement classique)
   url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip
-  # Optionnel: par région (ex. La Réunion)
-  # url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_REU-gpkg.zip
+  # Option B : plusieurs périmètres (Superset : filtrer par colonne perimeter)
+  # perimeters:
+  #   - code: METRO
+  #     url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip
+  #   - code: ARA
+  #     url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_ARA-gpkg.zip
+  #   - code: BFC
+  #     url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_BFC-gpkg.zip
 
 extraction:
   schema: bronze
   table: bdlisa_entites_raw
   if_exists: replace
-  # Index du layer à charger dans le gpkg (0 = premier, souvent entités)
+  # Un seul layer (comportement classique) : index 0 = premier layer (souvent entités NV3 ou fusion)
   layer_index: 0
+  # Optionnel : charger plusieurs niveaux (NV1, NV2, NV3) — colonne niveau_layer dans la table
+  # layer_indexes: [0, 1, 2]

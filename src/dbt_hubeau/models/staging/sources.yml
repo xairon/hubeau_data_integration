@@ -60,3 +60,13 @@ sources:
       - name: ref_origine_eh
         description: Nomenclature Sandre / BDLISA - Potentialités aquifères
         freshness: null
+      # Référentiels géographiques (calques Superset)
+      - name: referentiel_regions
+        description: Contours régions (data.gouv.fr GeoJSON 1000m)
+        freshness: null
+      - name: referentiel_departements
+        description: Contours départements (data.gouv.fr GeoJSON 1000m)
+        freshness: null
+      - name: referentiel_zones_hydro
+        description: Zones hydrographiques BD Carthage (Sandre)
+        freshness: null

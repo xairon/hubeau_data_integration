@@ -51,10 +51,11 @@ dependencies = [
     "pyarrow==15.0.0",
     "numpy==1.26.0",
 
-    # Geospatial (PostGIS load: geopandas.to_postgis)
+    # Geospatial (PostGIS load: geopandas.to_postgis, read_file gpkg)
     "geopandas==0.14.0",
     "shapely==2.0.2",
     "pyproj==3.6.1",
+    "pyogrio==0.7.3",
     "sqlalchemy>=2.0.0",
     "geoalchemy2>=0.14.0",
 
@@ -143,6 +144,7 @@ worker = [
     "geopandas==0.14.0",
     "shapely==2.0.2",
     "pyproj==3.6.1",
+    "pyogrio==0.7.3",
     "requests==2.31.0",
     "python-dotenv==1.0.0",
     "protobuf<5.0.0",  # Fix for dbt/google-api compatibility

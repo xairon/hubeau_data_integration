@@ -20,6 +20,10 @@ Pour éviter les jointures dans Superset, le pipeline produit des **marts gold**
 | **Carte stations piézo** (points + BDLISA + alerte/tendance) | `gold.stations_piezo_carte` | 1 ligne / station : `geom`, `code_eh`, `libelle_eh`, `niveau_alerte`, `tendance_classification`, commune, département. **À privilégier** pour la carte « stations avec entité hydro et alerte ». |
 | **Chroniques quotidiennes** (séries + BDLISA + météo) | `gold.hubeau_daily_chroniques` | 1 ligne / station / jour : niveau, météo ERA5, `code_eh`, `libelle_eh`, `station_latitude`, `station_longitude`. Pas de colonne PostGIS ; utiliser lat/lon pour scatter ou filtrer par date. |
 | **Polygones BDLISA** (nappes / unités aquifères) | `silver.stg_tme_entites` | 1 ligne / entité : `geometry` (polygones), `code_eh`, `libelle_eh`. Calque de fond « nappes ». |
+| **BDLISA brut** (multi-périmètres / multi-couches) | `bronze.bdlisa_entites` | Polygones avec `perimeter`, `niveau_layer` pour filtres par périmètre ou niveau (NV1/NV2/NV3). |
+| **Contours régions** | `bronze.referentiel_regions` | Contours régions (data.gouv.fr) : `code`, `nom`, `geometry`. Calque fond régional. |
+| **Contours départements** | `bronze.referentiel_departements` | Contours départements (data.gouv.fr) : `code`, `nom`, `geometry`. Calque fond départemental. |
+| **Zones hydrographiques** | `bronze.referentiel_zones_hydro` | Zones BD Carthage (Sandre) : `geometry`. Calque par bassin. |
 | **Points stations hydrométriques** | `gold.dim_hydro_stations` | 1 ligne / site : `geometry` (points), code_site, etc. |
 | **Grille météo ERA5** | `gold.int_era5_grid_points` | Points de grille : `geom`, `era5_latitude`, `era5_longitude`. |
 
@@ -29,7 +33,7 @@ En résumé : **pas de jointure à faire dans Superset** pour les calques princi
 
 ## Configuration actuelle
 
-- **Base Superset** : `docker/superset/datasources.yaml` déclare la connexion PostgreSQL et les tables gold/silver listées ci‑dessus (dont `stations_piezo_carte`, `hubeau_daily_chroniques`, `stg_tme_entites`, etc.).
+- **Base Superset** : `docker/superset/datasources.yaml` déclare la connexion PostgreSQL et les tables gold/silver/bronze listées ci‑dessus (dont `stations_piezo_carte`, `hubeau_daily_chroniques`, `stg_tme_entites`, `bdlisa_entites`, `referentiel_regions`, `referentiel_departements`, `referentiel_zones_hydro`, etc.).
 - **Import au démarrage** : `docker-init.sh` exécute `superset import_datasources -p /app/datasources.yaml`.
 - Dans Superset : créer un **dataset** par table, puis choisir la colonne **geom** / **geometry** comme « spatial column » pour les graphiques type carte (deck.gl).
 
