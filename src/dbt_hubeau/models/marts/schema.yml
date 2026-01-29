@@ -16,12 +16,12 @@ models:
         tests:
           - not_null
       
-      - name: date_mesure
+      - name: date
         description: "Date de la mesure (jour)"
         tests:
           - not_null
       
-      - name: niveau_moyen
+      - name: niveau_nappe_eau
         description: "Niveau piézométrique moyen journalier (m NGF)"
         tests:
           - not_null
@@ -45,7 +45,7 @@ models:
               config:
                 severity: warn
       
-      - name: latitude
+      - name: station_latitude
         description: "Latitude de la station"
         tests:
           - not_null
@@ -53,7 +53,7 @@ models:
               min_value: 41.0
               max_value: 52.0
       
-      - name: longitude
+      - name: station_longitude
         description: "Longitude de la station"
         tests:
           - not_null
@@ -66,7 +66,7 @@ models:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
             - code_bss
-            - date_mesure
+            - date
       
       # Nombre minimum de lignes (sanity check)
       - dbt_utils.expression_is_true:

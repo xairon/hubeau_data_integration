@@ -57,7 +57,8 @@ models:
       - name: longitude
         tests:
           - not_null
-      - name: time
+      - name: era5_date
+        description: "Date ERA5 (time casté en date)"
         tests:
           - not_null
       - name: temperature_2m

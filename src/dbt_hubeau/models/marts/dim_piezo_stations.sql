@@ -94,7 +94,7 @@ SELECT
     s.altitude_station,
     s.x AS longitude,
     s.y AS latitude,
-    s.geom,
+    s.geometry AS geom,
     
     -- Période de mesure
     s.date_debut_mesure,
