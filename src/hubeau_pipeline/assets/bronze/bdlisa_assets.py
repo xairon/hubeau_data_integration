@@ -245,14 +245,14 @@ def _load_csv_fallback(
 def bdlisa_entites_raw(
     context: AssetExecutionContext,
     pg: PostgreSQLResource,
-    config: Optional[BDLISAConfig] = None,
 ) -> dict:
     """
     Télécharge le ZIP BDLISA (GeoPackage par défaut), extrait le fichier,
     charge dans bronze.bdlisa_entites_raw avec géométrie PostGIS.
     Si le ZIP contient du CSV uniquement, charge en fallback sans géométrie.
+    Config : configs/bdlisa/bdlisa_entites.yml ou valeurs par défaut.
     """
-    cfg = config or _load_config(context)
+    cfg = _load_config(context)
     context.log.info(f"Téléchargement BDLISA: {cfg.url}")
 
     with httpx.Client(timeout=cfg.timeout_seconds) as client:
