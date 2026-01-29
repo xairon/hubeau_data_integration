@@ -181,26 +181,43 @@ def _load_gpkg_layers(
     cfg: dict,
     perimeter_code: Optional[str] = None,
 ) -> gpd.GeoDataFrame:
-    """Lit un ou plusieurs layers du ZIP gpkg, ajoute perimeter/niveau_layer, retourne un seul gdf (sans écrire en base)."""
+    """
+    Lit un ou plusieurs layers du ZIP gpkg, ajoute perimeter/niveau_layer, retourne un seul gdf (sans écrire en base).
+
+    Prod: on extrait le .gpkg dans un fichier temporaire et on lit depuis un chemin.
+    La lecture depuis un buffer en mémoire peut déclencher des erreurs SQLite/OGR
+    (ex. "database disk image is malformed") selon les builds GDAL/pyogrio.
+    """
+    import tempfile
+
     indices = cfg.get("layer_indexes") or [cfg.get("layer_index", 0)]
     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
         gpkg_names = [n for n in zf.namelist() if n.lower().endswith(".gpkg")]
         if not gpkg_names:
             raise ValueError("Aucun fichier .gpkg dans le ZIP BDLISA")
-        with zf.open(gpkg_names[0]) as f:
-            buf = io.BytesIO(f.read())
-    gdfs = []
-    for idx in indices:
-        gdf = gpd.read_file(io.BytesIO(buf.getvalue()), layer=idx)
-        gdf.columns = [_normalize_column_name(c) for c in gdf.columns]
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
-            gdf = gdf.to_crs(epsg=4326)
-        if perimeter_code is not None:
-            gdf["perimeter"] = perimeter_code
-        if len(indices) > 1:
-            gdf["niveau_layer"] = idx
-        gdfs.append(gdf)
-    return pd.concat(gdfs, ignore_index=True) if len(gdfs) > 1 else gdfs[0]
+        gpkg_name = gpkg_names[0]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            zf.extract(gpkg_name, tmp)
+            gpkg_path = Path(tmp) / gpkg_name
+            if not gpkg_path.exists():
+                gpkg_path = next(Path(tmp).rglob("*.gpkg"), None)
+                if not gpkg_path:
+                    raise ValueError("Fichier .gpkg introuvable après extraction")
+
+            gdfs = []
+            for idx in indices:
+                gdf = gpd.read_file(gpkg_path, layer=idx)
+                gdf.columns = [_normalize_column_name(c) for c in gdf.columns]
+                if gdf.crs and gdf.crs.to_epsg() != 4326:
+                    gdf = gdf.to_crs(epsg=4326)
+                if perimeter_code is not None:
+                    gdf["perimeter"] = perimeter_code
+                if len(indices) > 1:
+                    gdf["niveau_layer"] = idx
+                gdfs.append(gdf)
+
+            return pd.concat(gdfs, ignore_index=True) if len(gdfs) > 1 else gdfs[0]
 
 
 def _load_csv_fallback(
@@ -283,21 +300,46 @@ def bdlisa_entites_raw(
     all_gdfs: list = []
     with httpx.Client(timeout=timeout) as client:
         for perimeter_code, url in items:
-            context.log.info(f"Téléchargement BDLISA: {perimeter_code} — {url}")
-            resp = client.get(url)
-            resp.raise_for_status()
-            zip_bytes = resp.content
-            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-                has_gpkg = any(n.lower().endswith(".gpkg") for n in zf.namelist())
-                has_csv = any(n.lower().endswith(".csv") for n in zf.namelist())
-            if has_gpkg:
-                gdf = _load_gpkg_layers(zip_bytes, cfg, perimeter_code=perimeter_code)
-                all_gdfs.append(gdf)
-            elif has_csv and len(items) == 1:
-                context.log.warning("Pas de .gpkg dans le ZIP, fallback CSV (sans géométrie)")
-                return _load_csv_fallback(zip_bytes, cfg, pg, context)
-            elif has_csv:
-                context.log.warning(f"Périmètre {perimeter_code}: pas de .gpkg, ignoré")
+            attempts = 2
+            last_err: Optional[Exception] = None
+
+            for attempt in range(1, attempts + 1):
+                try:
+                    context.log.info(f"Téléchargement BDLISA: {perimeter_code} — {url} (tentative {attempt}/{attempts})")
+                    resp = client.get(url)
+                    resp.raise_for_status()
+                    zip_bytes = resp.content
+
+                    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+                        has_gpkg = any(n.lower().endswith(".gpkg") for n in zf.namelist())
+                        has_csv = any(n.lower().endswith(".csv") for n in zf.namelist())
+
+                    if has_gpkg:
+                        gdf = _load_gpkg_layers(zip_bytes, cfg, perimeter_code=perimeter_code)
+                        all_gdfs.append(gdf)
+                        last_err = None
+                        break
+
+                    if has_csv and len(items) == 1:
+                        context.log.warning("Pas de .gpkg dans le ZIP, fallback CSV (sans géométrie)")
+                        return _load_csv_fallback(zip_bytes, cfg, pg, context)
+
+                    if has_csv:
+                        context.log.warning(f"Périmètre {perimeter_code}: pas de .gpkg, ignoré")
+                        last_err = None
+                        break
+
+                    raise ValueError("ZIP BDLISA sans .gpkg ni .csv")
+
+                except zipfile.BadZipFile as e:
+                    last_err = e
+                    context.log.warning("ZIP BDLISA invalide (download tronqué ?) : %s", e)
+                except Exception as e:
+                    last_err = e
+                    context.log.warning("Erreur lecture BDLISA (%s): %s", type(e).__name__, e)
+
+            if last_err is not None:
+                raise last_err
 
     if not all_gdfs:
         raise ValueError("Aucun GeoPackage BDLISA chargé")
