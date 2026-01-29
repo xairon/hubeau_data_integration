@@ -1,7 +1,7 @@
 {#-
   Post-hooks pour déclarer clés primaires et étrangères (silver / gold).
   Utilisation: post_hook = ["{{ add_primary_key(['col1','col2']) }}", "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"]
-  Idempotent: DROP INDEX / DROP CONSTRAINT IF EXISTS puis ADD pour éviter "relation already exists" sur runs répétés.
+  Idempotent: DROP CONSTRAINT IF EXISTS puis ADD (en PostgreSQL on ne peut pas DROP INDEX d'une PK sans d'abord DROP CONSTRAINT).
 -#}
 
 {% macro add_primary_key(columns) %}
@@ -9,7 +9,6 @@
   {% set cols_sql = cols | join(', ') %}
   {% set relation = this %}
   {% set constraint_name = relation.identifier ~ '_pkey' %}
-DROP INDEX IF EXISTS "{{ relation.schema }}"."{{ constraint_name }}";
 ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ constraint_name }};
 ALTER TABLE {{ relation }} ADD CONSTRAINT {{ constraint_name }} PRIMARY KEY ({{ cols_sql }});
 {% endmacro %}
