@@ -1,7 +1,8 @@
 {#-
   Post-hooks pour déclarer clés primaires et étrangères (silver / gold).
   Utilisation: post_hook = ["{{ add_primary_key(['col1','col2']) }}", "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"]
-  Idempotent: DROP CONSTRAINT puis DROP INDEX (index orphelin créé par dbt) puis ADD CONSTRAINT.
+  Idempotent: au 2e run dbt renomme la table en __dbt_backup → on drop la contrainte sur la backup d'abord (libère l'index),
+  puis on drop/add sur la table courante.
 -#}
 
 {% macro add_primary_key(columns) %}
@@ -9,8 +10,13 @@
   {% set cols_sql = cols | join(', ') %}
   {% set relation = this %}
   {% set constraint_name = relation.identifier ~ '_pkey' %}
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{{ relation.schema }}' AND table_name = '{{ relation.identifier }}__dbt_backup') THEN
+    EXECUTE 'ALTER TABLE "{{ relation.schema }}"."{{ relation.identifier }}__dbt_backup" DROP CONSTRAINT IF EXISTS "{{ constraint_name }}"';
+  END IF;
+END $$;
 ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ constraint_name }};
-DROP INDEX IF EXISTS "{{ relation.schema }}"."{{ constraint_name }}";
 ALTER TABLE {{ relation }} ADD CONSTRAINT {{ constraint_name }} PRIMARY KEY ({{ cols_sql }});
 {% endmacro %}
 
