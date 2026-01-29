@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_piezo_chroniques_rejected
+    description: "Lignes rejetées par stg_piezo_chroniques (date/code_bss/mesure nuls ou invalides). Trace pour audit et qualité."
+    columns:
+      - name: rejection_reason
+        description: "Code du motif de rejet (DATE_MESURE_NULL, CODE_BSS_NULL, NIVEAU_NAPPE_NULL, PROFONDEUR_NAPPE_NULL, OTHER)"
+      - name: _dlt_id
+        description: "Identifiant unique de la ligne (bronze) pour déduplication incrémentale"
+
+  - name: stg_hydrometry_obs_elab_rejected
+    description: "Lignes rejetées par stg_hydrometry_obs_elab (date/code_site/grandeur/résultat nuls ou invalides). Trace pour audit et qualité."
+    columns:
+      - name: rejection_reason
+        description: "Code du motif de rejet (DATE_OBS_ELAB_NULL, CODE_SITE_NULL, GRANDEUR_HYDRO_NULL, RESULTAT_OBS_NULL, OTHER)"
+      - name: _dlt_id
+        description: "Identifiant unique de la ligne (bronze) pour déduplication incrémentale"

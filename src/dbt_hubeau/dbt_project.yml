@@ -32,6 +32,11 @@ models:
       # Tables nettoyées (Silver Layer)
       +schema: silver
       +materialized: table
+
+    # Tables de rejet / exception : trace des lignes filtrées (audit, qualité, conformité)
+    rejects:
+      +schema: silver_rejects
+      +materialized: table
       
     intermediate:
       # Tables intermédiaires (Gold Layer)

@@ -8,45 +8,47 @@
       {'columns': ['date_mesure'], 'type': 'brin'}
     ],
     post_hook=[
-      "{{ convert_to_hypertable('date_mesure', '1 year') }}"
+      "{{ add_primary_key(['code_bss', 'date_mesure']) }}",
+      "{{ convert_to_hypertable('date_mesure', '1 year') }}",
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}
 
 -- Staging model for piezometry chroniques
 -- Source: bronze.piezometry_chroniques_raw
--- Silver layer: copie bronze + typage + déduplication + suppression métadonnées dlt
--- Incremental: basé sur _dlt_load_id
--- Primary Key: code_bss + date_mesure
+-- Silver: typage, déduplication, filtrage (mesure non nulle), sans colonnes DLT
+-- Primary Key: (code_bss, date_mesure). FK: code_bss -> stg_piezo_stations(code_bss)
+-- Incremental: par date (nouvelles données uniquement)
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_chroniques_raw') }}
     WHERE date_mesure IS NOT NULL
       AND code_bss IS NOT NULL
+      -- Filtrage des valeurs nulles en silver : ne garder que les lignes avec mesures utiles
+      AND {{ cast_silver_numeric('niveau_nappe_eau') }} IS NOT NULL
+      AND {{ cast_silver_numeric('profondeur_nappe') }} IS NOT NULL
       {% if is_incremental() %}
-      AND _dlt_load_id > (SELECT MAX(_dlt_load_id) FROM {{ this }})
+      AND {{ cast_silver_date('date_mesure') }} > (SELECT COALESCE(MAX(date_mesure), '1900-01-01'::date) FROM {{ this }})
       {% endif %}
 ),
 
 deduplicated AS (
-    SELECT DISTINCT ON (code_bss, date_mesure::date)
-        date_mesure::date AS date_mesure,
-        niveau_nappe_eau::numeric AS niveau_nappe_eau,
-        profondeur_nappe::numeric AS profondeur_nappe,
-        _dlt_load_id,
+    SELECT DISTINCT ON (code_bss, {{ cast_silver_date('date_mesure') }})
+        {{ cast_silver_date('date_mesure') }} AS date_mesure,
+        {{ cast_silver_numeric('niveau_nappe_eau') }} AS niveau_nappe_eau,
+        {{ cast_silver_numeric('profondeur_nappe') }} AS profondeur_nappe,
+        {{ cast_silver_text('code_bss') }} AS code_bss,
 
         {{ dbt_utils.star(
             from=source('staging', 'piezometry_chroniques_raw'), 
             except=[
-                "date_mesure",
-                "niveau_nappe_eau",
-                "profondeur_nappe",
-                "_dlt_load_id",
-                "_dlt_id"
+                "date_mesure", "niveau_nappe_eau", "profondeur_nappe", "code_bss",
+                "_dlt_load_id", "_dlt_id"
             ]
         ) }}
     FROM source
-    ORDER BY code_bss, date_mesure::date, niveau_nappe_eau DESC NULLS LAST
+    ORDER BY code_bss, {{ cast_silver_date('date_mesure') }}, niveau_nappe_eau DESC NULLS LAST
 )
 
 SELECT * FROM deduplicated

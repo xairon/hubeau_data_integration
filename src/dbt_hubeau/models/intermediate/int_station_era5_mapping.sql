@@ -6,6 +6,10 @@
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['era5_latitude', 'era5_longitude']},
       {'columns': ['geom'], 'type': 'gist'}
+    ],
+    post_hook=[
+      "{{ add_primary_key(['code_bss']) }}",
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}
@@ -67,27 +71,26 @@ station_nearest_era5 AS (
 )
 
 SELECT
-    sne.code_bss,
-    sne.era5_latitude,
-    sne.era5_longitude,
-    sne.station_latitude,
-    sne.station_longitude,
+    sne.code_bss::text AS code_bss,
+    sne.era5_latitude::numeric AS era5_latitude,
+    sne.era5_longitude::numeric AS era5_longitude,
+    sne.station_latitude::numeric AS station_latitude,
+    sne.station_longitude::numeric AS station_longitude,
     sne.station_geom AS geom,
-    sne.distance_m AS era5_distance_m,
-    sne.codes_bdlisa,
-    sne.code_commune_insee,
-    sne.nom_commune,
-    sne.altitude_station,
-    sne.code_departement,
-    sne.nom_departement,
-    -- TME metadata (joined on primary code)
-    COALESCE(t.code_eh, sne.code_eh_primary) AS code_eh,
-    t.libelle_eh,
-    t.niveau_eh,
-    t.etat_eh,
-    t.nature_eh,
-    t.milieu_eh,
-    t.theme_eh,
-    t.origine_eh
+    (sne.distance_m)::numeric AS era5_distance_m,
+    sne.codes_bdlisa::text AS codes_bdlisa,
+    sne.code_commune_insee::text AS code_commune_insee,
+    sne.nom_commune::text AS nom_commune,
+    sne.altitude_station::numeric AS altitude_station,
+    sne.code_departement::text AS code_departement,
+    sne.nom_departement::text AS nom_departement,
+    COALESCE(t.code_eh, sne.code_eh_primary)::text AS code_eh,
+    t.libelle_eh::text AS libelle_eh,
+    t.niveau_eh::text AS niveau_eh,
+    t.etat_eh::text AS etat_eh,
+    t.nature_eh::text AS nature_eh,
+    t.milieu_eh::text AS milieu_eh,
+    t.theme_eh::text AS theme_eh,
+    t.origine_eh::text AS origine_eh
 FROM station_nearest_era5 sne
 LEFT JOIN tme t ON sne.code_eh_primary = t.code_eh

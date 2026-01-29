@@ -6,6 +6,10 @@
       {'columns': ['code_departement']},
       {'columns': ['tendance_classification']},
       {'columns': ['geom'], 'type': 'gist'}
+    ],
+    post_hook=[
+      "{{ add_primary_key(['code_bss']) }}",
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}

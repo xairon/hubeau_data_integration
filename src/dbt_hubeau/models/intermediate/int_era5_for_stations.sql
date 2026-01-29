@@ -1,21 +1,25 @@
 {{
   config(
     materialized = 'table',
-    indexes=[
-      {'columns': ['latitude', 'longitude', 'era5_date']}
+    indexes = [
+      {'columns': ['latitude', 'longitude', 'era5_date'], 'unique': True},
+      {'columns': ['latitude', 'longitude']},
+      {'columns': ['era5_date'], 'type': 'brin'}
     ],
-    post_hook=[
-      "{{ convert_to_hypertable('era5_date', '1 year') }}"
+    post_hook = [
+      "{{ add_primary_key(['latitude', 'longitude', 'era5_date']) }}",
+      "{{ convert_to_hypertable('era5_date', '1 year') }}",
+      "{{ add_foreign_key(['latitude', 'longitude'], 'int_era5_grid_points', ['era5_latitude', 'era5_longitude']) }}",
+      "{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='era5_date DESC', compress_after='365 days') }}"
     ]
   )
 }}
 
--- ERA5 filtré uniquement sur les points de grille utilisés par les stations piézo
--- Réduit le volume de ~300M lignes à ~10-15M lignes (seulement les grid points avec stations)
+-- ERA5 filtré sur les points de grille utilisés par les stations piézo
+-- Filtrage: uniquement les 3 colonnes météo non nulles
 
 WITH station_grid_points AS (
-    -- Récupère les points de grille ERA5 uniques utilisés par les stations
-    SELECT DISTINCT 
+    SELECT DISTINCT
         era5_latitude AS latitude,
         era5_longitude AS longitude
     FROM {{ ref('int_station_era5_mapping') }}
@@ -23,17 +27,16 @@ WITH station_grid_points AS (
 
 filtered_era5 AS (
     SELECT
-        e.latitude,
-        e.longitude,
-        e.time::date AS era5_date,
-        e.temperature_2m,
-        e.total_precipitation,
-        e.potential_evaporation
+        e.latitude::numeric AS latitude,
+        e.longitude::numeric AS longitude,
+        (e.time::date)::date AS era5_date,
+        e.temperature_2m::numeric AS temperature_2m,
+        e.total_precipitation::numeric AS total_precipitation,
+        e.potential_evaporation::numeric AS potential_evaporation
     FROM {{ ref('stg_era5_timeseries') }} e
     INNER JOIN station_grid_points g
         ON e.latitude = g.latitude
         AND e.longitude = g.longitude
-    -- S'assurer que toutes les 3 colonnes météo sont non-nulles
     WHERE e.temperature_2m IS NOT NULL
       AND e.total_precipitation IS NOT NULL
       AND e.potential_evaporation IS NOT NULL

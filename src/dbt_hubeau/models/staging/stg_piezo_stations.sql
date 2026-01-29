@@ -5,7 +5,8 @@
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['code_departement']},
       {'columns': ['geometry'], 'type': 'gist'}
-    ]
+    ],
+    post_hook=["{{ add_primary_key(['code_bss']) }}"]
   )
 }}
 
@@ -24,28 +25,31 @@ WITH source AS (
 
 deduplicated AS (
     SELECT DISTINCT ON (code_bss)
-        -- Champs castés explicitement
-        x::numeric AS x,
-        y::numeric AS y,
-        altitude_station::numeric AS altitude_station,
-        date_debut_mesure::date AS date_debut_mesure,
-        date_fin_mesure::date AS date_fin_mesure,
-        date_maj::timestamp AS date_maj,
-        nb_mesures_piezo::integer AS nb_mesures_piezo,
+        -- Champs castés explicitement (gère NULL / chaîne vide / littéral 'NULL')
+        {{ cast_silver_numeric('x') }} AS x,
+        {{ cast_silver_numeric('y') }} AS y,
+        {{ cast_silver_numeric('altitude_station') }} AS altitude_station,
+        {{ cast_silver_date('date_debut_mesure') }} AS date_debut_mesure,
+        {{ cast_silver_date('date_fin_mesure') }} AS date_fin_mesure,
+        {{ cast_silver_timestamp('date_maj') }} AS date_maj,
+        {{ cast_silver_int('nb_mesures_piezo') }} AS nb_mesures_piezo,
 
-        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
+        -- Colonnes texte (cast explicite pour éviter character varying NULL)
+        {{ cast_silver_text('code_bss') }} AS code_bss,
+        {{ cast_silver_text('code_commune_insee') }} AS code_commune_insee,
+        {{ cast_silver_text('nom_commune') }} AS nom_commune,
+        {{ cast_silver_text('code_departement') }} AS code_departement,
+        {{ cast_silver_text('nom_departement') }} AS nom_departement,
+        {{ cast_silver_text('codes_bdlisa') }} AS codes_bdlisa,
+
+        -- Autres champs (passent par star; adapter except si la source a d'autres colonnes)
         {{ dbt_utils.star(
             from=source('staging', 'piezometry_stations_raw'), 
             except=[
-                "x",
-                "y",
-                "altitude_station",
-                "date_debut_mesure",
-                "date_fin_mesure",
-                "date_maj",
-                "nb_mesures_piezo",
-                "_dlt_load_id",
-                "_dlt_id"
+                "x", "y", "altitude_station",
+                "date_debut_mesure", "date_fin_mesure", "date_maj", "nb_mesures_piezo",
+                "code_bss", "code_commune_insee", "nom_commune", "code_departement", "nom_departement", "codes_bdlisa",
+                "_dlt_load_id", "_dlt_id"
             ]
         ) }}
     FROM source

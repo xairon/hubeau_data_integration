@@ -1,9 +1,7 @@
 {% macro convert_to_hypertable(time_column, chunk_time_interval='1 year', migrate_data=true) %}
   {#-
-    Intended for use in dbt hooks (post_hook/pre_hook).
-    IMPORTANT: hooks must return executable SQL; do not call run_query() here,
-    otherwise the hook becomes an empty string and Postgres errors with
-    "can't execute an empty query".
+    TimescaleDB: conversion en hypertable. À appeler APRÈS add_primary_key (la PK doit inclure time_column).
+    chunk_time_interval: INTERVAL ('1 year', '1 month') ou entier pour colonne time integer (ex: 10 = 10 ans).
   -#}
   {% set relation = this %}
   {% set create_hypertable_query %}

@@ -4,11 +4,13 @@
     indexes = [
       {'columns': ['code_bss', 'annee'], 'unique': True},
       {'columns': ['code_bss']},
-      {'columns': ['annee']},
+      {'columns': ['annee'], 'type': 'brin'},
       {'columns': ['code_departement']}
     ],
-    post_hook=[
-      "{{ convert_to_hypertable('annee', '10') }}"
+    post_hook = [
+      "{{ add_primary_key(['code_bss', 'annee']) }}",
+      "{{ convert_to_hypertable('annee', '10') }}",
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}

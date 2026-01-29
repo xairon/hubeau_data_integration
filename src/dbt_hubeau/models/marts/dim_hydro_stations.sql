@@ -6,6 +6,11 @@
       {'columns': ['code_site']},
       {'columns': ['code_departement']},
       {'columns': ['geometry'], 'type': 'gist'}
+    ],
+    post_hook=[
+      "{{ add_primary_key(['code_station']) }}",
+      "{{ add_foreign_key(['code_station'], 'stg_hydrometry_stations', ['code_station']) }}",
+      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}"
     ]
   )
 }}

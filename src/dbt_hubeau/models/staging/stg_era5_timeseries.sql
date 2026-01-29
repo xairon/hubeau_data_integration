@@ -10,7 +10,9 @@
       {'columns': ['source_file_id']}
     ],
     post_hook=[
-      "{{ convert_to_hypertable('time', '1 month') }}"
+      "{{ add_primary_key(['latitude', 'longitude', 'time']) }}",
+      "{{ convert_to_hypertable('time', '1 month') }}",
+      "{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='time DESC', compress_after='90 days') }}"
     ]
   )
 }}
@@ -35,18 +37,18 @@ WITH source AS (
 ),
 
 deduplicated AS (
-    SELECT DISTINCT ON (latitude::numeric, longitude::numeric, time)
-        -- Champs castés explicitement
-        latitude::numeric AS latitude,
-        longitude::numeric AS longitude,
-        temperature_2m::numeric AS temperature_2m,
-        total_precipitation::numeric AS total_precipitation,
-        potential_evaporation::numeric AS potential_evaporation,
+    SELECT DISTINCT ON ({{ cast_silver_numeric('latitude') }}, {{ cast_silver_numeric('longitude') }}, time)
+        -- Champs castés explicitement (gère NULL / chaîne vide / littéral 'NULL')
+        {{ cast_silver_numeric('latitude') }} AS latitude,
+        {{ cast_silver_numeric('longitude') }} AS longitude,
+        {{ cast_silver_numeric('temperature_2m') }} AS temperature_2m,
+        {{ cast_silver_numeric('total_precipitation') }} AS total_precipitation,
+        {{ cast_silver_numeric('potential_evaporation') }} AS potential_evaporation,
+        {{ cast_silver_timestamp('time') }} AS time,
         source_file_id,
-        time,
         created_at
     FROM source
-    ORDER BY latitude::numeric, longitude::numeric, time
+    ORDER BY {{ cast_silver_numeric('latitude') }}, {{ cast_silver_numeric('longitude') }}, time
 )
 
 SELECT 

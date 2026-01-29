@@ -86,14 +86,37 @@ docker system prune -a --volumes  # WARNING: Removes unused data!
 
 ## 🟢 Routine Operations
 
+### Mise à jour du code (Silver / Gold uniquement)
+
+Après un **commit**, **git pull** et modification des modèles dbt (silver/gold) :
+
+1. **Rebuild** l’image du worker (pour prendre les nouveaux modèles dbt / manifest) :
+   ```powershell
+   docker compose build dlt_worker
+   docker compose up -d
+   ```
+
+2. **Supprimer** les schémas silver et gold (Bronze reste intact) :
+   ```powershell
+   docker exec -i brgm-postgres psql -U postgres -d postgres -c "DROP SCHEMA IF EXISTS silver CASCADE; DROP SCHEMA IF EXISTS gold CASCADE; DROP SCHEMA IF EXISTS silver_rejects CASCADE;"
+   ```
+   dbt recréera les schémas au prochain run.
+
+3. **Relancer** le job dbt dans Dagster : **dbt_silver_gold_pipeline** (UI ou API).
+
+Résumé : **commit → pull → build worker → drop silver/gold/silver_rejects → lancer dbt_silver_gold_pipeline**.
+
 ### Full Reload (Clean Slate)
+
+Tout repart de zéro (y compris Bronze) :
+
 ```powershell
 docker-compose down -v
 docker-compose up -d
-# Wait for healthy, then in Dagster UI:
+# Attendre que les services soient prêts, puis dans l’UI Dagster :
 # 1. Run all_stations_bronze
-# 2. Run all_chroniques_bronze (partitioned - will take hours)
-# 3. Run era5_historical_load (partitioned - will take days)
+# 2. Run all_chroniques_bronze (partitioned - peut prendre des heures)
+# 3. Run era5_historical_load (partitioned - peut prendre des jours)
 # 4. Run dbt_silver_gold_pipeline
 ```
 

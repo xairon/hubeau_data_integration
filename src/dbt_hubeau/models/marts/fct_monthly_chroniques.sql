@@ -7,8 +7,11 @@
       {'columns': ['mois'], 'type': 'brin'},
       {'columns': ['code_departement']}
     ],
-    post_hook=[
-      "{{ convert_to_hypertable('mois', '5 years') }}"
+    post_hook = [
+      "{{ add_primary_key(['code_bss', 'mois']) }}",
+      "{{ convert_to_hypertable('mois', '5 years') }}",
+      "{{ enable_compression(segment_by=['code_bss', 'code_departement'], order_by='mois DESC', compress_after='730 days') }}",
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}

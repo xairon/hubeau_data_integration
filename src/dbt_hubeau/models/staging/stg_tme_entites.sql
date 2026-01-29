@@ -1,6 +1,7 @@
 {{
   config(
-    materialized = 'table'
+    materialized = 'table',
+    post_hook=["{{ add_primary_key(['code_eh']) }}"]
   )
 }}
 

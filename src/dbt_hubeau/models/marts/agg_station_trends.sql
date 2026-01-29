@@ -6,6 +6,10 @@
       {'columns': ['classification_tendance']},
       {'columns': ['saison']},
       {'columns': ['code_departement']}
+    ],
+    post_hook=[
+      "{{ add_primary_key(['code_bss', 'saison']) }}",
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}

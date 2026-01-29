@@ -16,14 +16,29 @@ ERA5 API ──────┘
 |--------|---------|---------|
 | `bronze` | DLT + dbt seeds | Tables brutes (`*_raw`) + référentiels |
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
+| `silver_rejects` | dbt rejects | Lignes filtrées (exceptions) avec `rejection_reason` — audit, qualité |
 | `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
 
 ## 🔥 Optimisations TimescaleDB
 
-Les tables suivantes sont converties en **Hypertables** pour la performance :
+Les tables suivantes sont converties en **Hypertables** (PK incluant la colonne temps, puis `create_hypertable`) :
 - **Silver** : `stg_piezo_chroniques`, `stg_hydrometry_obs_elab`, `stg_era5_timeseries`
 - **Gold** : `int_daily_measurements`, `int_era5_for_stations`
-- **Marts** : `hubeau_daily_chroniques` (Compressée), `fct_monthly_chroniques`, `fct_yearly_stats`
+- **Marts** : `hubeau_daily_chroniques`, `fct_monthly_chroniques`, `fct_yearly_stats`
+
+**Compression** (chunks anciens compressés) : `stg_era5_timeseries` (90 j), `int_era5_for_stations`, `hubeau_daily_chroniques`, `fct_monthly_chroniques` (730 j).
+
+## 🗺 PostGIS
+
+- **Géométries** : `make_point(longitude, latitude)` → `geometry(Point, 4326)` (WGS84). Index **GIST** sur toutes les colonnes `geometry` / `geom`.
+- **Distances** : utiliser `::geography` pour des mètres exacts : `ST_Distance(geom::geography, ...)`.
+- **KNN** : l’opérateur `<->` s’appuie sur l’index GIST (ex. plus proche point ERA5 dans `int_station_era5_mapping`).
+
+## 📇 Index (silver / gold)
+
+- **Temps** : index **BRIN** sur les colonnes de temps (`date_mesure`, `date`, `time`, `era5_date`, `mois`, `annee`) pour les requêtes par plage.
+- **Clés** : index B-tree sur `code_bss`, `code_site`, `code_station`, `(code_bss, date)`, etc.
+- **Spatial** : index GIST sur `geometry` / `geom` (voir PostGIS ci-dessus).
 
 ---
 
@@ -101,6 +116,19 @@ Tables nettoyées et standardisées depuis bronze.
 - Renommage colonnes (standardisation)
 - Filtrage des valeurs NULL
 - Nettoyage des valeurs invalides ('X' → NULL)
+
+---
+
+## Tables de rejet (silver_rejects)
+
+**Bonnes pratiques** : les lignes exclues en silver (mesure nulle, clé manquante, etc.) ne sont pas supprimées sans trace. Elles sont écrites dans des tables **rejet** dans le schéma `silver_rejects`, avec une colonne `rejection_reason` pour l’audit et la qualité.
+
+| Table | Source | Motifs de rejet (exemples) |
+|-------|--------|----------------------------|
+| `stg_piezo_chroniques_rejected` | `piezometry_chroniques_raw` | `DATE_MESURE_NULL`, `CODE_BSS_NULL`, `NIVEAU_NAPPE_NULL`, `PROFONDEUR_NAPPE_NULL` |
+| `stg_hydrometry_obs_elab_rejected` | `hydrometry_obs_elab_raw` | `DATE_OBS_ELAB_NULL`, `CODE_SITE_NULL`, `GRANDEUR_HYDRO_NULL`, `RESULTAT_OBS_NULL` |
+
+Voir `src/dbt_hubeau/models/rejects/README.md` pour les requêtes utiles.
 
 ---
 

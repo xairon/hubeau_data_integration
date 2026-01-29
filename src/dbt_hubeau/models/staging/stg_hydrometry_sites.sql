@@ -5,7 +5,8 @@
       {'columns': ['code_site'], 'unique': True},
       {'columns': ['code_departement']},
       {'columns': ['geometry'], 'type': 'gist'}
-    ]
+    ],
+    post_hook=["{{ add_primary_key(['code_site']) }}"]
   )
 }}
 
@@ -23,20 +24,22 @@ WITH source AS (
 
 deduplicated AS (
     SELECT DISTINCT ON (code_site)
-        -- Champs castés explicitement
-        longitude_site::numeric AS longitude_site,
-        latitude_site::numeric AS latitude_site,
-        altitude_site::numeric AS altitude_site,
+        -- Champs castés explicitement (gère NULL / chaîne vide / littéral 'NULL')
+        {{ cast_silver_numeric('longitude_site') }} AS longitude_site,
+        {{ cast_silver_numeric('latitude_site') }} AS latitude_site,
+        {{ cast_silver_numeric('altitude_site') }} AS altitude_site,
 
-        -- Sélection de tous les autres champs sauf ceux déjà castés et les métadonnées dlt
+        -- Colonnes texte
+        {{ cast_silver_text('code_site') }} AS code_site,
+        {{ cast_silver_text('code_departement') }} AS code_departement,
+
+        -- Autres champs
         {{ dbt_utils.star(
             from=source('staging', 'hydrometry_sites_raw'), 
             except=[
-                "longitude_site",
-                "latitude_site",
-                "altitude_site",
-                "_dlt_load_id",
-                "_dlt_id"
+                "longitude_site", "latitude_site", "altitude_site",
+                "code_site", "code_departement",
+                "_dlt_load_id", "_dlt_id"
             ]
         ) }}
     FROM source
