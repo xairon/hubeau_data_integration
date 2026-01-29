@@ -12,6 +12,8 @@ from .bronze import (
     hydrometry_obs_daily_raw,  # Daily
     era5_france_timeseries_historical,  # Updated ERA5
     era5_weekly_update,  # Weekly Smart Update
+    bdlisa_entites_raw,  # BDLISA V3 référentiel (GeoPackage → PostGIS)
+    sandre_nomenclatures_eh,  # Nomenclatures Sandre (ref_*_eh)
 )
 
 from .csv_universal import ingest_all_csvs_asset
@@ -28,6 +30,8 @@ all_bronze_assets = [
     hydrometry_obs_daily_raw,
     era5_france_timeseries_historical,
     era5_weekly_update,
+    bdlisa_entites_raw,
+    sandre_nomenclatures_eh,
 ]
 
 all_csv_assets = [ingest_all_csvs_asset]

@@ -5,7 +5,8 @@
     indexes = [
       {'columns': ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
-      {'columns': ['date_obs_elab'], 'type': 'brin'}
+      {'columns': ['date_obs_elab'], 'type': 'brin'},
+      {'columns': ['geometry'], 'type': 'gist'}
     ],
     post_hook=[
       "{{ add_primary_key(['code_site', 'date_obs_elab', 'grandeur_hydro_elab']) }}",
@@ -44,16 +45,35 @@ deduplicated AS (
         {{ cast_silver_numeric('resultat_obs_elab') }} AS resultat_obs_elab,
         {{ cast_silver_text('code_site') }} AS code_site,
         {{ cast_silver_text('grandeur_hydro_elab') }} AS grandeur_hydro_elab,
+        {{ cast_silver_text('code_station') }} AS code_station,
+        {{ cast_silver_timestamp('date_prod') }} AS date_prod,
+        {{ cast_silver_text('code_statut') }} AS code_statut,
+        {{ cast_silver_text('libelle_statut') }} AS libelle_statut,
+        {{ cast_silver_text('code_methode') }} AS code_methode,
+        {{ cast_silver_text('libelle_methode') }} AS libelle_methode,
+        {{ cast_silver_text('code_qualification') }} AS code_qualification,
+        {{ cast_silver_text('libelle_qualification') }} AS libelle_qualification,
+        {{ cast_silver_numeric('longitude') }} AS longitude,
+        {{ cast_silver_numeric('latitude') }} AS latitude,
 
         {{ dbt_utils.star(
-            from=source('staging', 'hydrometry_obs_elab_raw'), 
+            from=source('staging', 'hydrometry_obs_elab_raw'),
             except=[
                 "date_obs_elab", "resultat_obs_elab", "code_site", "grandeur_hydro_elab",
+                "code_station", "date_prod", "code_statut", "libelle_statut",
+                "code_methode", "libelle_methode", "code_qualification", "libelle_qualification",
+                "longitude", "latitude",
                 "_dlt_load_id", "_dlt_id"
             ]
         ) }}
     FROM source
     ORDER BY code_site, {{ cast_silver_date('date_obs_elab') }}, grandeur_hydro_elab, resultat_obs_elab DESC NULLS LAST
+),
+
+with_geometry AS (
+    SELECT d.*, s.geometry
+    FROM deduplicated d
+    LEFT JOIN {{ ref('stg_hydrometry_sites') }} s ON d.code_site = s.code_site
 )
 
-SELECT * FROM deduplicated
+SELECT * FROM with_geometry

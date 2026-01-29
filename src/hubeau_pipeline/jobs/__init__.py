@@ -39,6 +39,9 @@ from .dbt_jobs import (
 # Full Bootstrap Job (Complete population with partition iteration)
 from .full_bootstrap_job import full_bootstrap_job
 
+# Données de référence (BDLISA + Sandre) — à lancer avant full_bootstrap ou premier dbt run
+from .reference_data_jobs import reference_data_bronze_job
+
 all_jobs = [
     # Jobs STATIONS (no partitions)
     piezometry_stations_job,
@@ -60,6 +63,8 @@ all_jobs = [
     dbt_test_job,
     dbt_freshness_job,
     dbt_quality_job,
+    # Données de référence (BDLISA + Sandre)
+    reference_data_bronze_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
 ]
@@ -85,6 +90,8 @@ __all__ = [
     "dbt_test_job",
     "dbt_freshness_job",
     "dbt_quality_job",
+    # Données de référence (BDLISA + Sandre)
+    "reference_data_bronze_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
     # Collections

@@ -1,0 +1,17 @@
+# BDLISA V3 - Entités hydrogéologiques (métropole)
+# Source: https://bdlisa.eaufrance.fr/telechargement
+# Format: GeoPackage par défaut (géométrie PostGIS). Fallback CSV si ZIP sans .gpkg.
+
+resource:
+  name: bdlisa_entites_raw
+  # GeoPackage métropole (V3) — géométrie chargée dans PostGIS
+  url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip
+  # Optionnel: par région (ex. La Réunion)
+  # url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_REU-gpkg.zip
+
+extraction:
+  schema: bronze
+  table: bdlisa_entites_raw
+  if_exists: replace
+  # Index du layer à charger dans le gpkg (0 = premier, souvent entités)
+  layer_index: 0

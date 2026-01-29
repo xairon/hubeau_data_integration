@@ -25,8 +25,7 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
                                 ▼
          ┌──────────────────────────────────────────────────────┐
          │         PostgreSQL - Schéma: bronze                  │
-         │  Tables brutes : *_raw                               │
-         │  Seeds : tme_entites_hydrogeo                        │
+         │  Tables brutes : *_raw ; BDLISA + Sandre (ref_*_eh)  │
          └──────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -118,7 +117,7 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 
 | Schéma | Gestion | Contenu |
 |--------|---------|---------|
-| `bronze` | DLT + dbt seeds | Tables brutes (`*_raw`) + référentiels |
+| `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + BDLISA + nomenclatures Sandre (`ref_*_eh`) |
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
 
@@ -143,7 +142,7 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 
 ### 5. Visualisation
 - **CloudBeaver** (Admin SQL) : Interface pour requêter la base directement.
-- **Apache Superset** (BI) : Création de tableaux de bord connectés aux tables `Gold`. Utilise **Redis** pour le cache.
+- **Apache Superset** (BI) : Objectif à terme — exploiter l’ensemble des données dans Superset (dashboards, cartes, calques : BDLISA, stations, chroniques, météo). Connexion aux tables Silver/Gold, PostGIS pour les calques cartographiques. Utilise **Redis** pour le cache. Voir [docs/SUPERSET.md](SUPERSET.md).
 
 ### 6. TimescaleDB (Performance)
 - **Rôle** : Optimiser le stockage et la requête des séries temporelles.

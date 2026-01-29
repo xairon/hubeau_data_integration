@@ -2,6 +2,7 @@
 Full Bootstrap Job - Complete Database Population (Sequential)
 
 A single job that populates the ENTIRE database from scratch:
+0. Load reference data (BDLISA + Sandre nomenclatures) — requis pour stg_tme_entites
 1. Load all station metadata
 2. Load chroniques SEQUENTIALLY (1990-present, one year at a time)
 3. Load ERA5 SEQUENTIALLY (1990-present, 2-year chunks)
@@ -67,7 +68,21 @@ def bootstrap_start(context: OpExecutionContext) -> Nothing:
     context.log.info("⚠️  Do NOT run other data jobs while this is running!")
 
 
-@op(ins={"start": In(Nothing)}, out=Out(Nothing))
+@op(ins={"start": In(Nothing)}, out=Out(Nothing), required_resource_keys={"pg"})
+def load_reference_data(context: OpExecutionContext) -> Nothing:
+    """Load reference data: BDLISA (GeoPackage → PostGIS) + Sandre nomenclatures (ref_*_eh). Required for stg_tme_entites."""
+    from ..assets.bronze.bdlisa_assets import bdlisa_entites_raw
+    from ..assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
+    from ..resources import PostgreSQLResource
+
+    context.log.info("📚 STEP 0/5: Loading reference data (BDLISA + Sandre nomenclatures)...")
+    pg: PostgreSQLResource = context.resources.pg
+    bdlisa_entites_raw(context, pg)
+    sandre_nomenclatures_eh(context, pg)
+    context.log.info("📚 Reference data loaded.")
+
+
+@op(ins={"ref_data": In(Nothing)}, out=Out(Nothing))
 def load_all_stations(context: OpExecutionContext) -> Nothing:
     """Load ALL station metadata (non-partitioned)."""
     from ..sources.hubeau_csv_source import hubeau_stations
@@ -77,7 +92,7 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     from dlt.destinations import postgres
 
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
-    context.log.info("📍 STEP 1/4: Loading ALL station metadata (via DLT)...")
+    context.log.info("📍 STEP 1/5: Loading ALL station metadata (via DLT)...")
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
     
     # Credentials from standard env vars (available in all containers)
@@ -135,7 +150,7 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     from dlt.destinations import postgres
 
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
-    context.log.info("📊 STEP 2/4: Loading ALL chroniques (SEQUENTIAL, via DLT)...")
+    context.log.info("📊 STEP 2/5: Loading ALL chroniques (SEQUENTIAL, via DLT)...")
     context.log.info(f"📊 Period: {START_YEAR} → {CURRENT_YEAR}")
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
     
@@ -226,7 +241,7 @@ def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
     from ..assets.bronze.era5_assets import process_era5_range_to_timeseries
     
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
-    context.log.info("🌤️  STEP 3/4: Loading ALL ERA5 data (SEQUENTIAL, 2-year chunks)...")
+    context.log.info("🌤️  STEP 3/5: Loading ALL ERA5 data (SEQUENTIAL, 2-year chunks)...")
     context.log.info(f"🌤️  Period: {START_YEAR} → {CURRENT_YEAR}")
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
     
@@ -261,7 +276,7 @@ def run_dbt_full(context: OpExecutionContext) -> Nothing:
     import subprocess
     
     context.log.info("🔄 ═══════════════════════════════════════════════════════════")
-    context.log.info("🔄 STEP 4/4: Running dbt Silver/Gold transformations...")
+    context.log.info("🔄 STEP 4/5: Running dbt Silver/Gold transformations...")
     context.log.info("🔄 ═══════════════════════════════════════════════════════════")
     
     try:
@@ -307,9 +322,10 @@ def bootstrap_complete(context: OpExecutionContext):
     hooks=set(),
 )
 def full_bootstrap_job():
-    """Full sequential bootstrap pipeline."""
+    """Full sequential bootstrap pipeline (includes reference data: BDLISA + Sandre)."""
     start = bootstrap_start()
-    stations = load_all_stations(start=start)
+    ref_data = load_reference_data(start=start)
+    stations = load_all_stations(ref_data=ref_data)
     chroniques = load_all_chroniques_sequential(stations=stations)
     era5 = load_all_era5_sequential(chroniques=chroniques)
     dbt = run_dbt_full(era5=era5)

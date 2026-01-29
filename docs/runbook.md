@@ -1,5 +1,15 @@
 # Operations Runbook
 
+## Bootstrap complet (base vide)
+
+Pour peupler toute la base from scratch :
+1. Lancer le job **full_bootstrap** : il charge d’abord les données de référence (BDLISA + Sandre), puis stations, chroniques, ERA5, puis dbt.
+2. Ou lancer dans l’ordre : **reference_data_bronze** puis **full_bootstrap** (si vous préférez séparer la référence).
+
+Les entités hydrogéologiques (stg_tme_entites) dépendent de BDLISA et des nomenclatures Sandre ; le full_bootstrap inclut désormais cette étape en premier.
+
+---
+
 ## Common Scenarios & Solutions
 
 ---

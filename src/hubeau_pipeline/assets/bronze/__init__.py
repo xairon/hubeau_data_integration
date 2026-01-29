@@ -23,6 +23,11 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
     ERA5_PARTITIONS_DEF,
 )
 
+# BDLISA (GeoPackage → PostGIS)
+from hubeau_pipeline.assets.bronze.bdlisa_assets import bdlisa_entites_raw
+# Sandre nomenclatures (ref_*_eh)
+from hubeau_pipeline.assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
+
 __all__ = [
     # Hub'Eau Historical
     "piezometry_stations_raw",
@@ -36,6 +41,10 @@ __all__ = [
     # ERA5
     "era5_france_timeseries_historical",
     "era5_weekly_update",
+    # BDLISA
+    "bdlisa_entites_raw",
+    # Sandre nomenclatures
+    "sandre_nomenclatures_eh",
     # Configs
     "MODE_PARTITIONS",
     "ERA5_PARTITIONS_DEF",

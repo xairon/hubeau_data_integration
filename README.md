@@ -66,9 +66,10 @@ Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** p
 
 ## ✨ Configuration Superset
 
+- **Objectif à terme** : exploiter l’ensemble des données dans Superset (dashboards, cartes, calques : BDLISA, stations, chroniques, météo). Voir [docs/SUPERSET.md](docs/SUPERSET.md).
 - 1. Crée le compte admin (Identifiants définis via variables d'environnement)
 - 2. Connecte-toi (Identifiants définis dans `.env`)
-- 3. La connexion **"Hub'Eau Data Warehouse"** est déjà là !
+- 3. La connexion **"Hub'Eau Data Warehouse"** est déjà là (tables gold + calques carto importés au démarrage).
 
 ## ✨ Fonctionnalités Clés
 

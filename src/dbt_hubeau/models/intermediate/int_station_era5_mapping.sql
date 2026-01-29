@@ -87,10 +87,16 @@ SELECT
     COALESCE(t.code_eh, sne.code_eh_primary)::text AS code_eh,
     t.libelle_eh::text AS libelle_eh,
     t.niveau_eh::text AS niveau_eh,
+    t.libelle_niveau_eh::text AS libelle_niveau_eh,
     t.etat_eh::text AS etat_eh,
+    t.libelle_etat_eh::text AS libelle_etat_eh,
     t.nature_eh::text AS nature_eh,
+    t.libelle_nature_eh::text AS libelle_nature_eh,
     t.milieu_eh::text AS milieu_eh,
+    t.libelle_milieu_eh::text AS libelle_milieu_eh,
     t.theme_eh::text AS theme_eh,
-    t.origine_eh::text AS origine_eh
+    t.libelle_theme_eh::text AS libelle_theme_eh,
+    t.origine_eh::text AS origine_eh,
+    t.libelle_origine_eh::text AS libelle_origine_eh
 FROM station_nearest_era5 sne
 LEFT JOIN tme t ON sne.code_eh_primary = t.code_eh

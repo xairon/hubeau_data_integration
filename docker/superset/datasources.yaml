@@ -1,20 +1,82 @@
+# Format: Superset import_datasources (database_name, tables, table_name, schema, columns).
+# Référence: https://superset.apache.org/docs/configuration/importing-exporting-datasources/
+# Objectif : exploiter l'ensemble des données dans Superset (dashboards, cartes, calques).
+# Voir docs/SUPERSET.md pour les calques (BDLISA, stations, chroniques, météo).
 databases:
   - database_name: Hubeau Data Warehouse
     sqlalchemy_uri: postgresql://postgres:REDACTED@postgres:5432/postgres
     tables:
+      # --- Calques carto (PostGIS) : tables gold avec jointures geo/stations déjà faites ---
+      - table_name: stations_piezo_carte
+        schema: gold
+        description: "Stations piézo prêtes carte : 1 ligne/station avec geom + BDLISA (code_eh, libelle_eh) + alerte/tendance. Pas de jointure à faire dans Superset."
+        columns:
+          - column_name: code_bss
+            filterable: true
+            groupby: true
+          - column_name: geom
+            verbose_name: "Géométrie (PostGIS)"
+          - column_name: code_eh
+            filterable: true
+            groupby: true
+          - column_name: libelle_eh
+            filterable: true
+            groupby: true
+          - column_name: niveau_alerte
+            filterable: true
+            groupby: true
+          - column_name: tendance_classification
+            filterable: true
+            groupby: true
+          - column_name: nom_commune
+            filterable: true
+            groupby: true
+          - column_name: nom_departement
+            filterable: true
+            groupby: true
+      - table_name: stg_tme_entites
+        schema: silver
+        description: "Entités hydrogéologiques BDLISA (polygones) — calque nappes / unités aquifères"
+        columns:
+          - column_name: code_eh
+            filterable: true
+            groupby: true
+          - column_name: libelle_eh
+            filterable: true
+            groupby: true
+          - column_name: geometry
+            verbose_name: "Géométrie (PostGIS)"
+      - table_name: dim_hydro_stations
+        schema: gold
+        description: "Stations hydrométriques (points) — calque sites hydro"
+        columns:
+          - column_name: code_site
+            filterable: true
+            groupby: true
+          - column_name: geometry
+            verbose_name: "Géométrie (PostGIS)"
+      - table_name: int_era5_grid_points
+        schema: gold
+        description: "Grille ERA5 (points) — calque météo"
+        columns:
+          - column_name: era5_latitude
+          - column_name: era5_longitude
+          - column_name: geom
+            verbose_name: "Géométrie (PostGIS)"
+      # --- Tables analytiques (déjà jointes : chroniques + stations + BDLISA + météo) ---
       - table_name: hubeau_daily_chroniques
         schema: gold
-        description: "Table finale : Piézométrie + Météo + TME"
-        main_dttm_col: date_mesure
+        description: "Chroniques quotidiennes : 1 ligne = 1 station × 1 jour. Déjà joint : piézo + météo ERA5 + BDLISA (code_eh, libelle_eh). Utiliser station_latitude/longitude pour cartes par date."
+        main_dttm_col: date
         columns:
-          - column_name: date_mesure
+          - column_name: date
             is_dttm: true
             filterable: true
             groupby: true
           - column_name: code_bss
             filterable: true
             groupby: true
-          - column_name: niveau_moyen
+          - column_name: niveau_nappe_eau
             verbose_name: "Niveau Nappe (m NGF)"
             is_metric: true
           - column_name: temperature_2m
@@ -31,8 +93,10 @@ databases:
             groupby: true
       - table_name: dim_piezo_stations
         schema: gold
-        description: "Stations Piézométriques"
+        description: "Stations Piézométriques (points) — calque stations piézo"
         columns:
+          - column_name: geom
+            verbose_name: "Géométrie (PostGIS)"
           - column_name: code_bss
             filterable: true
             groupby: true

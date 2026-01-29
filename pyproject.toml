@@ -51,10 +51,12 @@ dependencies = [
     "pyarrow==15.0.0",
     "numpy==1.26.0",
 
-    # Geospatial
+    # Geospatial (PostGIS load: geopandas.to_postgis)
     "geopandas==0.14.0",
     "shapely==2.0.2",
     "pyproj==3.6.1",
+    "sqlalchemy>=2.0.0",
+    "geoalchemy2>=0.14.0",
 
     # Utilities
     "python-dotenv==1.0.0",

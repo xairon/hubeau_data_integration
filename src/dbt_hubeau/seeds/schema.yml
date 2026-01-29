@@ -1,19 +1,8 @@
+# Données de référence TME et nomenclatures Sandre ne sont plus des seeds.
+# Elles sont chargées via le pipeline Dagster :
+#   - bronze.bdlisa_entites_raw : asset bdlisa_entites_raw (BDLISA V3 GeoPackage → PostGIS)
+#   - bronze.ref_*_eh : asset sandre_nomenclatures_eh (nomenclatures Sandre)
+# Les modèles dbt lisent ces tables via source('staging', 'bdlisa_entites_raw') et source('staging', 'ref_*_eh').
 version: 2
 
-seeds:
-  - name: tme_entites_hydrogeo
-    description: "Table des Masses d'Eau - Référentiel des entités hydrogéologiques BDLISA"
-    config:
-      schema: bronze  # Seed dans bronze layer
-      column_types:
-        id: varchar
-        CodeEH: varchar
-        LibelleEH: varchar
-        OrdreAbsEH: varchar
-        NiveauEH: varchar
-        InclusEH: varchar
-        EtatEH: varchar
-        NatureEH: varchar
-        MilieuEH: varchar
-        ThemeEH: varchar
-        OrigineEH: varchar
+seeds: []

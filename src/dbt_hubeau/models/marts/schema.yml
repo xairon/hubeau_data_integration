@@ -117,6 +117,25 @@ models:
           - accepted_values:
               values: ['NORMAL', 'VIGILANCE', 'ALERTE']
 
+  - name: stations_piezo_carte
+    description: |
+      Mart "prêt carte" pour Superset : une ligne par station avec géométrie (geom),
+      entité BDLISA (code_eh, libelle_eh, …) et indicateurs (niveau_alerte, tendance_classification).
+      Évite les jointures côté BI pour les calques "stations piézo" avec libellés et alertes.
+    columns:
+      - name: code_bss
+        tests: [unique, not_null]
+      - name: geom
+        description: "Géométrie PostGIS (point station)"
+      - name: code_eh
+        description: "Code entité hydrogéologique BDLISA"
+      - name: libelle_eh
+        description: "Libellé entité hydrogéologique"
+      - name: niveau_alerte
+        description: "NORMAL / VIGILANCE / ALERTE"
+      - name: tendance_classification
+        description: "HAUSSE / BAISSE / STABLE / INSUFFISANT"
+
   - name: agg_station_trends
     description: "Tendances saisonnières par station"
     columns:

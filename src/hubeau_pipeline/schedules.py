@@ -1,10 +1,11 @@
 """
-Dagster Schedules - Automated Daily/Weekly Data Integration
+Dagster Schedules - Automated Daily/Weekly/Monthly Data Integration
 
 Schedules:
-- daily_hubeau_bronze: 6h00 UTC - Hub'Eau API (piezo + hydro)
-- daily_dbt_silver: 7h00 UTC - dbt Silver layer
-- daily_era5_bronze: 4h00 UTC - ERA5 Smart Update
+- daily_hubeau_bronze: 4h00 UTC - Hub'Eau API (piezo + hydro)
+- daily_dbt_silver: 6h00 UTC - dbt Silver/Gold layer
+- daily_era5_bronze: 3h00 UTC - ERA5 Smart Update
+- monthly_reference_data: 1er du mois 2h00 UTC - BDLISA + Sandre nomenclatures
 """
 
 from dagster import (
@@ -22,6 +23,7 @@ from .jobs import (
     dbt_silver_gold_pipeline_job,
     era5_meteo_job,
     era5_weekly_job,
+    reference_data_bronze_job,
 )
 
 
@@ -57,6 +59,17 @@ daily_dbt_schedule = ScheduleDefinition(
 
 
 # ==============================================================================
+# MONTHLY SCHEDULE - Reference Data (BDLISA + Sandre)
+# ==============================================================================
+
+monthly_reference_data_schedule = ScheduleDefinition(
+    job=reference_data_bronze_job,
+    cron_schedule="0 2 1 * *",  # 1er du mois à 2h00 UTC
+    default_status=DefaultScheduleStatus.STOPPED,
+    description="Monthly: BDLISA + Sandre nomenclatures (ref_*_eh)",
+)
+
+# ==============================================================================
 # DAILY SCHEDULE - ERA5 Smart Update
 # ==============================================================================
 
@@ -86,4 +99,5 @@ all_schedules = [
     daily_hydrometry_schedule,
     daily_dbt_schedule,
     daily_era5_schedule,
+    monthly_reference_data_schedule,
 ]

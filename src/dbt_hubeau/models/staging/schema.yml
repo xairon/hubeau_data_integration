@@ -73,6 +73,31 @@ models:
           - accepted_values:
               values: ['QmnJ', 'QmxJ', 'H']
 
+  - name: stg_tme_entites
+    description: "Entités hydrogéologiques TME/BDLISA (Silver) avec libellés Sandre"
+    columns:
+      - name: code_eh
+        description: "Code entité hydrogéologique"
+        tests:
+          - not_null
+          - unique
+      - name: libelle_eh
+        description: "Libellé de l'entité"
+      - name: libelle_niveau_eh
+        description: "Libellé du niveau (national / régional / local)"
+      - name: libelle_nature_eh
+        description: "Libellé de la nature (GSA, UA, etc.)"
+      - name: libelle_etat_eh
+        description: "Libellé de l'état de la nappe"
+      - name: libelle_milieu_eh
+        description: "Libellé du type de milieu / porosité"
+      - name: libelle_theme_eh
+        description: "Libellé du thème / formation géologique"
+      - name: libelle_origine_eh
+        description: "Libellé des potentialités aquifères"
+      - name: geometry
+        description: "Géométrie PostGIS (polygone entité BDLISA)"
+
   - name: stg_era5_timeseries
     description: "Données météo ERA5 (Silver)"
     columns:
