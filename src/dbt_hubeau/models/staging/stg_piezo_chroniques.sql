@@ -38,15 +38,7 @@ deduplicated AS (
         {{ cast_silver_date('date_mesure') }} AS date_mesure,
         {{ cast_silver_numeric('niveau_nappe_eau') }} AS niveau_nappe_eau,
         {{ cast_silver_numeric('profondeur_nappe') }} AS profondeur_nappe,
-        {{ cast_silver_text('code_bss') }} AS code_bss,
-
-        {{ dbt_utils.star(
-            from=source('staging', 'piezometry_chroniques_raw'), 
-            except=[
-                "date_mesure", "niveau_nappe_eau", "profondeur_nappe", "code_bss",
-                "_dlt_load_id", "_dlt_id"
-            ]
-        ) }}
+        {{ cast_silver_text('code_bss') }} AS code_bss
     FROM source
     ORDER BY code_bss, {{ cast_silver_date('date_mesure') }}, niveau_nappe_eau DESC NULLS LAST
 )

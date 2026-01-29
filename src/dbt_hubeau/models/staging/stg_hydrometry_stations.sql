@@ -46,17 +46,12 @@ deduplicated AS (
         {{ cast_silver_text('code_station') }} AS code_station,
         {{ cast_silver_text('code_site') }} AS code_site,
         {{ cast_silver_text('code_departement') }} AS code_departement,
-
-        -- Autres champs
-        {{ dbt_utils.star(
-            from=source('staging', 'hydrometry_stations_raw'), 
-            except=[
-                "date_ouverture_station", "date_fermeture_station", "date_maj_station",
-                "longitude_station", "latitude_station", "altitude_ref_alti_station",
-                "code_station", "code_site", "code_departement",
-                "_dlt_load_id", "_dlt_id"
-            ]
-        ) }}
+        {{ cast_silver_text('libelle_station') }} AS libelle_station,
+        {{ cast_silver_text('libelle_site') }} AS libelle_site,
+        {{ cast_silver_text('code_cours_eau') }} AS code_cours_eau,
+        {{ cast_silver_text('libelle_cours_eau') }} AS libelle_cours_eau,
+        {{ cast_silver_text('uri_cours_eau') }} AS uri_cours_eau,
+        {{ cast_silver_text('libelle_departement') }} AS libelle_departement
     FROM source
     ORDER BY code_station, date_maj_station DESC NULLS LAST
 )

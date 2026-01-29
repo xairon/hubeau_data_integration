@@ -54,18 +54,7 @@ deduplicated AS (
         {{ cast_silver_text('code_qualification') }} AS code_qualification,
         {{ cast_silver_text('libelle_qualification') }} AS libelle_qualification,
         {{ cast_silver_numeric('longitude') }} AS longitude,
-        {{ cast_silver_numeric('latitude') }} AS latitude,
-
-        {{ dbt_utils.star(
-            from=source('staging', 'hydrometry_obs_elab_raw'),
-            except=[
-                "date_obs_elab", "resultat_obs_elab", "code_site", "grandeur_hydro_elab",
-                "code_station", "date_prod", "code_statut", "libelle_statut",
-                "code_methode", "libelle_methode", "code_qualification", "libelle_qualification",
-                "longitude", "latitude",
-                "_dlt_load_id", "_dlt_id"
-            ]
-        ) }}
+        {{ cast_silver_numeric('latitude') }} AS latitude
     FROM source
     ORDER BY code_site, {{ cast_silver_date('date_obs_elab') }}, grandeur_hydro_elab, resultat_obs_elab DESC NULLS LAST
 ),
