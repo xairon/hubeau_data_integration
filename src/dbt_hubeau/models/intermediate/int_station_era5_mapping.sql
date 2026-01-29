@@ -17,7 +17,7 @@
 
 WITH stations AS (
     SELECT * FROM {{ ref('stg_piezo_stations') }}
-    WHERE geom IS NOT NULL
+    WHERE geometry IS NOT NULL
       -- Filtre pour la France métropolitaine (Hexagone) uniquement
       -- Les DOM-TOM n'ont pas de couverture ERA5 dans ce dataset
       AND y >= 41.0 AND y <= 51.5 
@@ -43,7 +43,7 @@ station_nearest_era5 AS (
         s.code_bss,
         s.y AS station_latitude,
         s.x AS station_longitude,
-        s.geom AS station_geom,
+        s.geometry AS station_geom,
         s.codes_bdlisa,
         SPLIT_PART(s.codes_bdlisa, ',', 1) AS code_eh_primary,
         s.code_commune_insee,
@@ -56,12 +56,12 @@ station_nearest_era5 AS (
         e.longitude AS era5_longitude,
         e.geom AS era5_geom,
         -- Distance in meters (using geography for accuracy)
-        ST_Distance(s.geom::geography, e.geom::geography) AS distance_m
+        ST_Distance(s.geometry::geography, e.geom::geography) AS distance_m
     FROM stations s
     CROSS JOIN LATERAL (
         SELECT latitude, longitude, geom
         FROM era5_grid
-        ORDER BY s.geom <-> geom  -- KNN operator (uses GiST index)
+        ORDER BY s.geometry <-> geom  -- KNN operator (uses GiST index)
         LIMIT 1
     ) e
 )
