@@ -55,7 +55,7 @@ dependencies = [
     "geopandas==0.14.0",
     "shapely==2.0.2",
     "pyproj==3.6.1",
-    "pyogrio==0.7.3",
+    "pyogrio>=0.7.0,<0.13",
     "sqlalchemy>=2.0.0",
     "geoalchemy2>=0.14.0",
 
@@ -144,7 +144,7 @@ worker = [
     "geopandas==0.14.0",
     "shapely==2.0.2",
     "pyproj==3.6.1",
-    "pyogrio==0.7.3",
+    "pyogrio>=0.7.0,<0.13",
     "requests==2.31.0",
     "python-dotenv==1.0.0",
     "protobuf<5.0.0",  # Fix for dbt/google-api compatibility
