@@ -16,15 +16,20 @@
 
 -- Staging model for hydrometry stations
 -- Source: bronze.hydrometry_stations_raw
--- Silver layer: copie bronze + typage + déduplication + PostGIS + suppression métadonnées dlt
--- Primary Key: code_station
+-- Silver: typage, déduplication, PostGIS. Ne garde que les stations dont le code_site existe dans stg_hydrometry_sites (FK).
+-- Primary Key: code_station. FK: code_site -> stg_hydrometry_sites(code_site)
 
-WITH source AS (
-    SELECT * FROM {{ source('staging', 'hydrometry_stations_raw') }}
-    WHERE code_station IS NOT NULL
-      -- AND date_debut_mesure IS NOT NULL -- Column missing in source on server
-      AND longitude_station IS NOT NULL
-      AND latitude_station IS NOT NULL
+WITH sites AS (
+    SELECT code_site FROM {{ ref('stg_hydrometry_sites') }}
+),
+
+source AS (
+    SELECT s.*
+    FROM {{ source('staging', 'hydrometry_stations_raw') }} s
+    INNER JOIN sites ON s.code_site = sites.code_site
+    WHERE s.code_station IS NOT NULL
+      AND s.longitude_station IS NOT NULL
+      AND s.latitude_station IS NOT NULL
 ),
 
 deduplicated AS (

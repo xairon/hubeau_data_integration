@@ -126,7 +126,8 @@ Tables nettoyées et standardisées depuis bronze.
 | Table | Source | Motifs de rejet (exemples) |
 |-------|--------|----------------------------|
 | `stg_piezo_chroniques_rejected` | `piezometry_chroniques_raw` | `DATE_MESURE_NULL`, `CODE_BSS_NULL`, `NIVEAU_NAPPE_NULL`, `PROFONDEUR_NAPPE_NULL` |
-| `stg_hydrometry_obs_elab_rejected` | `hydrometry_obs_elab_raw` | `DATE_OBS_ELAB_NULL`, `CODE_SITE_NULL`, `GRANDEUR_HYDRO_NULL`, `RESULTAT_OBS_NULL` |
+| `stg_hydrometry_stations_rejected` | `hydrometry_stations_raw` | `CODE_SITE_NOT_IN_SITES`, `CODE_STATION_NULL`, `COORDS_NULL` |
+| `stg_hydrometry_obs_elab_rejected` | `hydrometry_obs_elab_raw` | `CODE_SITE_NOT_IN_SITES`, `DATE_OBS_ELAB_NULL`, `CODE_SITE_NULL`, `GRANDEUR_HYDRO_NULL`, `RESULTAT_OBS_NULL` |
 
 Voir `src/dbt_hubeau/models/rejects/README.md` pour les requêtes utiles.
 

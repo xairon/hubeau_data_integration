@@ -17,19 +17,24 @@
 
 -- Staging model for hydrometry observations élaborées
 -- Source: bronze.hydrometry_obs_elab_raw
--- Silver: typage, déduplication, filtrage (résultat non nul), sans colonnes DLT
+-- Silver: typage, déduplication, filtrage (résultat non nul). Ne garde que les obs dont code_site existe dans stg_hydrometry_sites (FK).
 -- Primary Key: (code_site, date_obs_elab, grandeur_hydro_elab). FK: code_site -> stg_hydrometry_sites(code_site)
 -- Incremental: par date
 
-WITH source AS (
-    SELECT * FROM {{ source('staging', 'hydrometry_obs_elab_raw') }}
-    WHERE date_obs_elab IS NOT NULL
-      AND code_site IS NOT NULL
-      AND grandeur_hydro_elab IS NOT NULL
-      -- Filtrage intelligent: ne garder que les lignes avec une valeur de mesure utile
-      AND {{ cast_silver_numeric('resultat_obs_elab') }} IS NOT NULL
+WITH sites AS (
+    SELECT code_site FROM {{ ref('stg_hydrometry_sites') }}
+),
+
+source AS (
+    SELECT o.*
+    FROM {{ source('staging', 'hydrometry_obs_elab_raw') }} o
+    INNER JOIN sites ON o.code_site = sites.code_site
+    WHERE o.date_obs_elab IS NOT NULL
+      AND o.code_site IS NOT NULL
+      AND o.grandeur_hydro_elab IS NOT NULL
+      AND {{ cast_silver_numeric('o.resultat_obs_elab') }} IS NOT NULL
       {% if is_incremental() %}
-      AND {{ cast_silver_date('date_obs_elab') }} > (SELECT COALESCE(MAX(date_obs_elab), '1900-01-01'::date) FROM {{ this }})
+      AND {{ cast_silver_date('o.date_obs_elab') }} > (SELECT COALESCE(MAX(date_obs_elab), '1900-01-01'::date) FROM {{ this }})
       {% endif %}
 ),
 

@@ -12,23 +12,29 @@
 }}
 
 -- Lignes rejetées par stg_hydrometry_obs_elab (trace pour audit / qualité)
--- Même critères que le staging, mais on garde les lignes qui NE passent PAS le filtre
+-- Tout ce qui ne va pas en silver : mesure nulle, clés nulles, ou code_site absent des sites
 
-WITH rejected AS (
-    SELECT *
-    FROM {{ source('staging', 'hydrometry_obs_elab_raw') }}
-    WHERE date_obs_elab IS NULL
-       OR code_site IS NULL
-       OR grandeur_hydro_elab IS NULL
-       OR {{ cast_silver_numeric('resultat_obs_elab') }} IS NULL
+WITH sites AS (
+    SELECT code_site FROM {{ ref('stg_hydrometry_sites') }}
+),
+
+rejected AS (
+    SELECT o.*
+    FROM {{ source('staging', 'hydrometry_obs_elab_raw') }} o
+    WHERE o.date_obs_elab IS NULL
+       OR o.code_site IS NULL
+       OR o.grandeur_hydro_elab IS NULL
+       OR {{ cast_silver_numeric('o.resultat_obs_elab') }} IS NULL
+       OR o.code_site NOT IN (SELECT code_site FROM sites)
       {% if is_incremental() %}
-       AND _dlt_id NOT IN (SELECT _dlt_id FROM {{ this }})
+       AND o._dlt_id NOT IN (SELECT _dlt_id FROM {{ this }})
       {% endif %}
 )
 
 SELECT
     *,
     CASE
+        WHEN code_site NOT IN (SELECT code_site FROM sites) THEN 'CODE_SITE_NOT_IN_SITES'
         WHEN date_obs_elab IS NULL THEN 'DATE_OBS_ELAB_NULL'
         WHEN code_site IS NULL THEN 'CODE_SITE_NULL'
         WHEN grandeur_hydro_elab IS NULL THEN 'GRANDEUR_HYDRO_NULL'

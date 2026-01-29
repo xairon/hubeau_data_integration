@@ -13,7 +13,8 @@ Chaque modèle `*_rejected` correspond à un staging qui filtre des lignes : il 
 | Modèle | Source bronze | Lignes rejetées (exemples) |
 |--------|----------------|----------------------------|
 | `stg_piezo_chroniques_rejected` | `piezometry_chroniques_raw` | `date_mesure` ou `code_bss` ou `niveau_nappe_eau` ou `profondeur_nappe` nul/invalide |
-| `stg_hydrometry_obs_elab_rejected` | `hydrometry_obs_elab_raw` | `date_obs_elab` ou `code_site` ou `grandeur_hydro_elab` ou `resultat_obs_elab` nul/invalide |
+| `stg_hydrometry_stations_rejected` | `hydrometry_stations_raw` | `code_site` absent de `stg_hydrometry_sites`, ou `code_station`/coords nulles |
+| `stg_hydrometry_obs_elab_rejected` | `hydrometry_obs_elab_raw` | `date_obs_elab` ou `code_site` ou `grandeur_hydro_elab` ou `resultat_obs_elab` nul/invalide, ou `code_site` absent des sites |
 
 ## Colonnes ajoutées
 
