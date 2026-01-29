@@ -4,7 +4,6 @@
     indexes = [
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['code_departement']},
-      {'columns': ['code_eh']},
       {'columns': ['tendance_classification']},
       {'columns': ['geom'], 'type': 'gist'}
     ]

@@ -47,7 +47,7 @@ tendances_saisonnieres AS (
 ),
 
 metadata AS (
-    SELECT code_bss, code_departement, nom_departement, region_admin
+    SELECT code_bss, code_departement, nom_departement
     FROM {{ ref('stg_piezo_stations') }}
 )
 
