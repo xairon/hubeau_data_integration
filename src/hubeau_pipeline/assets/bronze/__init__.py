@@ -23,28 +23,8 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
     ERA5_PARTITIONS_DEF,
 )
 
-# BDLISA (GeoPackage → PostGIS)
-from hubeau_pipeline.assets.bronze.bdlisa_assets import bdlisa_entites_raw
 # TME attributs (niveau, etat, nature, ...) depuis TME.csv — enrichit stg_tme_entites
 from hubeau_pipeline.assets.bronze.tme_entites_assets import tme_entites_hydrogeo
-# Sandre nomenclatures (ref_*_eh)
-from hubeau_pipeline.assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
-# BDLISA CSV (national)
-from hubeau_pipeline.assets.bronze.bdlisa_csv_assets import (
-    bdlisa_table_genealogie,
-    bdlisa_lithologie_niv1,
-    bdlisa_lithologie_niv2,
-    bdlisa_lithologie_niv3,
-    bdlisa_pile_entites_niv1,
-    bdlisa_pile_entites_niv2,
-    bdlisa_pile_entites_niv3,
-)
-# Référentiels géographiques (calques Superset)
-from hubeau_pipeline.assets.bronze.referentiel_geo_assets import (
-    referentiel_regions,
-    referentiel_departements,
-    referentiel_zones_hydro,
-)
 
 __all__ = [
     # Hub'Eau Historical
@@ -59,24 +39,8 @@ __all__ = [
     # ERA5
     "era5_france_timeseries_historical",
     "era5_weekly_update",
-    # BDLISA
-    "bdlisa_entites_raw",
     # TME attributs (TME.csv)
     "tme_entites_hydrogeo",
-    # Sandre nomenclatures
-    "sandre_nomenclatures_eh",
-    # BDLISA CSV (national)
-    "bdlisa_table_genealogie",
-    "bdlisa_lithologie_niv1",
-    "bdlisa_lithologie_niv2",
-    "bdlisa_lithologie_niv3",
-    "bdlisa_pile_entites_niv1",
-    "bdlisa_pile_entites_niv2",
-    "bdlisa_pile_entites_niv3",
-    # Référentiels géographiques
-    "referentiel_regions",
-    "referentiel_departements",
-    "referentiel_zones_hydro",
     # Configs
     "MODE_PARTITIONS",
     "ERA5_PARTITIONS_DEF",
