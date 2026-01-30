@@ -111,8 +111,9 @@ def _write_bdlisa_to_postgis(
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-            # Drop dependent view first to avoid DROP TABLE failure
-            cur.execute(f"DROP VIEW IF EXISTS {schema_name}.bdlisa_entites")
+            # Drop dependent view first to avoid DROP TABLE failure (commit needed before to_postgis)
+            cur.execute(f"DROP VIEW IF EXISTS {schema_name}.bdlisa_entites CASCADE")
+        conn.commit()
     engine = create_engine(pg.get_dsn())
     gdf.to_postgis(
         table_name,
