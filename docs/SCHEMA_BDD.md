@@ -323,22 +323,6 @@ Dimension géographique consolidée depuis les stations piézo et hydro :
 - `code_departement`, `nom_departement`
 - `code_region`, `nom_region`
 
-### Tables ML / IA
-
-#### Piézométrie
-
-- `ml_features_piezo_daily` : features journalières (lags, rolling, deltas)
-- `ml_anomalies_piezo_daily` : détection d'anomalies (z-score)
-- `ml_correlations_piezo_station` : corrélations stationnaires météo
-- `ml_train_test_piezo_daily` : dataset avec split train/validation/test
-
-#### Hydrométrie
-
-- `ml_features_hydro_daily` : features journalières (lags, rolling, deltas)
-- `ml_anomalies_hydro_daily` : détection d'anomalies (z-score)
-- `ml_correlations_hydro_station` : corrélations stationnaires météo
-- `ml_train_test_hydro_daily` : dataset avec split train/validation/test
-
 ---
 
 ## Index Automatiques
