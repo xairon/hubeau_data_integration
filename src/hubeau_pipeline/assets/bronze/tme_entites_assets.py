@@ -90,15 +90,29 @@ def _fetch_zip(context: AssetExecutionContext, url: str, timeout: int = 600) -> 
     return resp.content
 
 
-def _find_and_read_csv_in_zip(zip_bytes: bytes) -> Optional[pd.DataFrame]:
+def _normalize_header(name: str) -> str:
+    """Normalise un en-tête CSV pour comparaison (minuscules, espaces/accents -> underscore)."""
+    s = str(name).strip().lower()
+    s = re.sub(r"[^\w\s]", "", s)  # retire accents etc. (\w = alphanumerique + _)
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "col"
+
+
+def _find_and_read_csv_in_zip(
+    zip_bytes: bytes,
+    context: Optional[AssetExecutionContext] = None,
+) -> Optional[pd.DataFrame]:
     """Cherche un fichier CSV dans le zip BDLISA et retourne un DataFrame (colonnes mappées)."""
     import zipfile
     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
         names = zf.namelist()
         csv_names = [n for n in names if n.lower().endswith(".csv")]
+        if context:
+            context.log.info("Fichiers dans le zip : %s", names[:20])
+            context.log.info("CSV trouvés : %s", csv_names)
         if not csv_names:
             return None
-        # Préférer un nom évoquant entités / TME
         csv_names.sort(key=lambda n: (
             0 if ("entite" in n.lower() or "tme" in n.lower() or "entites" in n.lower()) else 1,
             n,
@@ -106,15 +120,25 @@ def _find_and_read_csv_in_zip(zip_bytes: bytes) -> Optional[pd.DataFrame]:
         first_csv = csv_names[0]
         with zf.open(first_csv) as f:
             df = pd.read_csv(f, encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn")
-        # Mapper les colonnes vers le schéma bronze
+        raw_columns = list(df.columns)
+        if context:
+            context.log.info("CSV lu : %s — colonnes brutes : %s", first_csv, raw_columns)
+        # Mapper : d'abord mapping exact, puis normalisé (ex. "Code EH" -> code_eh)
         rename = {}
+        normalized_to_bronze = {_normalize_header(c): c for c in TME_BRONZE_COLUMNS}
         for c in df.columns:
             if c in CSV_TO_BRONZE:
                 rename[c] = CSV_TO_BRONZE[c]
             elif c.strip() in CSV_TO_BRONZE:
                 rename[c] = CSV_TO_BRONZE[c.strip()]
+            else:
+                n = _normalize_header(c)
+                if n in normalized_to_bronze:
+                    rename[c] = normalized_to_bronze[n]
         df = df.rename(columns=rename)
         cols = [c for c in TME_BRONZE_COLUMNS if c in df.columns]
+        if context and not cols:
+            context.log.warning("Aucune colonne TME reconnue dans %s (colonnes après mapping : %s)", first_csv, list(df.columns))
         if not cols:
             return None
         df = df[cols].copy()
@@ -160,7 +184,7 @@ def tme_entites_hydrogeo(
     url = cfg.get("url") or DEFAULT_BDLISA_GPKG_URL
     try:
         zip_bytes = _fetch_zip(context, url)
-        df = _find_and_read_csv_in_zip(zip_bytes)
+        df = _find_and_read_csv_in_zip(zip_bytes, context)
         if df is not None and len(df) > 0:
             source = url
     except Exception as e:
@@ -170,7 +194,7 @@ def tme_entites_hydrogeo(
     if (df is None or len(df) == 0) and url != BDLISA_NATIONAL_CSV_URL:
         try:
             zip_bytes = _fetch_zip(context, BDLISA_NATIONAL_CSV_URL)
-            df = _find_and_read_csv_in_zip(zip_bytes)
+            df = _find_and_read_csv_in_zip(zip_bytes, context)
             if df is not None and len(df) > 0:
                 source = BDLISA_NATIONAL_CSV_URL
         except Exception as e:
