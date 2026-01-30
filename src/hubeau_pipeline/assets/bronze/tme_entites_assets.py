@@ -305,21 +305,10 @@ def _read_local_tme_csv(context: AssetExecutionContext) -> Optional[pd.DataFrame
     return None
 
 
-@asset(
-    description="Table TME (entités hydrogéologiques) depuis l'archive BDLISA ou TME.csv local — jointures ref_*_eh en silver",
-    group_name="bronze",
-    compute_kind="python",
-)
-def tme_entites_hydrogeo(
-    context: AssetExecutionContext,
-    pg: PostgreSQLResource,
-) -> dict:
+def load_tme_entites_to_bronze(context: AssetExecutionContext, pg: PostgreSQLResource) -> dict:
     """
     Charge le TME dans bronze.tme_entites_hydrogeo.
-    Source : 1) fichier TME.csv local (prioritaire, si présent) ;
-            2) zip BDLISA CSV national (contient TME) ;
-            3) zip config (gpkg, souvent sans CSV). Sinon table vide.
-    Fait partie du job reference_data_bronze (chargement des référentiels).
+    Utilisable depuis l'asset ou depuis un op (ex. full_bootstrap).
     """
     _validate_schema_table("bronze", "tme_entites_hydrogeo")
     full_table = "bronze.tme_entites_hydrogeo"
@@ -394,3 +383,22 @@ def tme_entites_hydrogeo(
 
     context.log.info("%s : %s lignes", full_table, len(df))
     return {"table": full_table, "rows": len(df), "source": source}
+
+
+@asset(
+    description="Table TME (entités hydrogéologiques) depuis l'archive BDLISA ou TME.csv local — jointures ref_*_eh en silver",
+    group_name="bronze",
+    compute_kind="python",
+)
+def tme_entites_hydrogeo(
+    context: AssetExecutionContext,
+    pg: PostgreSQLResource,
+) -> dict:
+    """
+    Charge le TME dans bronze.tme_entites_hydrogeo.
+    Source : 1) fichier TME.csv local (prioritaire, si présent) ;
+            2) zip BDLISA CSV national (contient TME) ;
+            3) zip config (gpkg, souvent sans CSV). Sinon table vide.
+    Fait partie du job reference_data_bronze (chargement des référentiels).
+    """
+    return load_tme_entites_to_bronze(context, pg)

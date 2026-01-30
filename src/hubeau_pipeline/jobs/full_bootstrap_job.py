@@ -168,12 +168,10 @@ def bootstrap_start(context: OpExecutionContext) -> Nothing:
 
 @op(ins={"start": In(Nothing)}, out=Out(Nothing), required_resource_keys={"pg"})
 def load_reference_data(context: OpExecutionContext) -> Nothing:
-    """Load reference data: BDLISA + TME.csv + Sandre nomenclatures (ref_*_eh). Required for stg_tme_entites."""
-    from ..assets.bronze.tme_entites_assets import tme_entites_hydrogeo
-    
-    from ..resources import PostgreSQLResource
+    """Load reference data: TME (entités hydrogéologiques). Required for stg_tme_entites."""
+    from ..assets.bronze.tme_entites_assets import load_tme_entites_to_bronze
 
-    context.log.info("📚 STEP 0/5: Loading reference data (BDLISA + TME attributs + Sandre nomenclatures)...")
+    context.log.info("📚 STEP 0/5: Loading reference data (TME)...")
     job_name = "reference_data"
     partition_key = "all"
     if _should_skip_partition(job_name, partition_key):
@@ -181,9 +179,9 @@ def load_reference_data(context: OpExecutionContext) -> Nothing:
         return
     with get_db_connection() as conn:
         _mark_partition_start(conn, job_name, partition_key)
-    pg: PostgreSQLResource = context.resources.pg
+    pg = context.resources.pg
     try:
-        tme_entites_hydrogeo(context, pg)
+        load_tme_entites_to_bronze(context, pg)
     except Exception as e:
         with get_db_connection() as conn:
             _mark_partition_failed(conn, job_name, partition_key, str(e))
@@ -299,14 +297,14 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
             "stations_config": "configs/hubeau/piezometry_stations.yml",
             "chroniques_config": "configs/hubeau/piezometry_chroniques.yml",
             "station_code_field": "code_bss",
-            "table_name": "piezometry_chroniques"
+            "table_name": "piezometry_chroniques_raw"
         },
         {
             "name": "hydrometry",
             "stations_config": "configs/hubeau/hydrometry_stations.yml",
             "chroniques_config": "configs/hubeau/hydrometry_obs_elab.yml",
             "station_code_field": "code_site",
-            "table_name": "hydrometry_observations"
+            "table_name": "hydrometry_obs_elab_raw"
         },
     ]
     
@@ -484,7 +482,7 @@ def bootstrap_complete(context: OpExecutionContext):
     hooks=set(),
 )
 def full_bootstrap_job():
-    """Full sequential bootstrap pipeline (includes reference data: BDLISA + Sandre)."""
+    """Full sequential bootstrap pipeline (reference data: TME uniquement)."""
     start = bootstrap_start()
     ref_data = load_reference_data(start=start)
     stations = load_all_stations(ref_data=ref_data)

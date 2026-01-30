@@ -1,7 +1,7 @@
 # Format: Superset import_datasources (database_name, tables, table_name, schema, columns).
 # Référence: https://superset.apache.org/docs/configuration/importing-exporting-datasources/
 # Objectif : exploiter l'ensemble des données dans Superset (dashboards, cartes, calques).
-# Voir docs/SUPERSET.md pour les calques (BDLISA, stations, chroniques, météo).
+# Voir docs/SUPERSET.md pour les calques (TME, stations, chroniques, météo).
 databases:
   - database_name: Hubeau Data Warehouse
     sqlalchemy_uri: postgresql://postgres:REDACTED@postgres:5432/postgres
@@ -9,7 +9,7 @@ databases:
       # --- Calques carto (PostGIS) : tables gold avec jointures geo/stations déjà faites ---
       - table_name: stations_piezo_carte
         schema: gold
-        description: "Stations piézo prêtes carte : 1 ligne/station avec geom + BDLISA (code_eh, libelle_eh) + alerte/tendance. Pas de jointure à faire dans Superset."
+        description: "Stations piézo prêtes carte : 1 ligne/station avec geom + TME (code_eh, libelle_eh) + alerte/tendance. Pas de jointure à faire dans Superset."
         columns:
           - column_name: code_bss
             filterable: true
