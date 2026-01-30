@@ -26,8 +26,8 @@ On charge le **GeoPackage** (géométrie PostGIS). Lien direct métropole (V3) :
 2. **Asset `sandre_nomenclatures_eh`**  
    Charge les nomenclatures Sandre dans `bronze.ref_*_eh`. Plus de seeds CSV.
 
-3. **Asset `tme_entites_hydrogeo`** (optionnel)  
-   Charge `TME.csv` (à la racine du dépôt) dans `bronze.tme_entites_hydrogeo`. Ce fichier contient les attributs **niveau, etat, nature, milieu, theme, origine** par code entité ; il enrichit `stg_tme_entites` lorsque le GeoPackage BDLISA (layer 0) ne les fournit pas.
+3. **Asset `tme_entites_hydrogeo`**  
+   Charge le TME (attributs niveau, etat, nature, milieu, theme, origine) dans `bronze.tme_entites_hydrogeo`. Source : **archive BDLISA** (même URL que `bdlisa_entites_raw`, extraction d’un CSV du zip si présent), puis archive CSV nationale BDLISA, puis fallback fichier `TME.csv` local. Fait partie du job **reference_data_bronze** (chargement des référentiels).
 
 4. **dbt `stg_tme_entites`**  
    Lit `source('staging', 'bdlisa_entites')`, enrichit avec `source('staging', 'tme_entites_hydrogeo')` si présent (jointure sur `code_eh`), puis joint les `source('staging', 'ref_*_eh')` pour les libellés.
