@@ -54,7 +54,7 @@ CSV_TO_BRONZE = {
     "OrigineEH": "origine_eh",
 }
 # Variantes déjà en snake_case (ex. CSV BDLISA normalisé)
-for _v in CSV_TO_BRONZE.values():
+for _v in list(CSV_TO_BRONZE.values()):
     if _v not in CSV_TO_BRONZE:
         CSV_TO_BRONZE[_v] = _v
 
