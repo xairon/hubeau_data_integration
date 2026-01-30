@@ -26,8 +26,38 @@ On charge le **GeoPackage** (géométrie PostGIS). Lien direct métropole (V3) :
 2. **Asset `sandre_nomenclatures_eh`**  
    Charge les nomenclatures Sandre dans `bronze.ref_*_eh`. Plus de seeds CSV.
 
-3. **dbt `stg_tme_entites`**  
-   Lit `source('staging', 'bdlisa_entites')` et joint les `source('staging', 'ref_*_eh')`.
+3. **Asset `tme_entites_hydrogeo`** (optionnel)  
+   Charge `TME.csv` (à la racine du dépôt) dans `bronze.tme_entites_hydrogeo`. Ce fichier contient les attributs **niveau, etat, nature, milieu, theme, origine** par code entité ; il enrichit `stg_tme_entites` lorsque le GeoPackage BDLISA (layer 0) ne les fournit pas.
+
+4. **dbt `stg_tme_entites`**  
+   Lit `source('staging', 'bdlisa_entites')`, enrichit avec `source('staging', 'tme_entites_hydrogeo')` si présent (jointure sur `code_eh`), puis joint les `source('staging', 'ref_*_eh')` pour les libellés.
+
+## Pourquoi des NULL en silver et gold ? (chaîne de causalité)
+
+Les valeurs NULL dans les colonnes `*_eh` (niveau, etat, nature, milieu, theme, origine et leurs `libelle_*_eh`) en **silver** et **gold** viennent d'une seule cause : **le GeoPackage BDLISA V3 Métropole (layer 0) ne contient pas ces champs**.
+
+Chaîne :
+
+1. **Source (fichier)**  
+   Le layer 0 du gpkg BDLISA V3 Métropole n'a en pratique que : **code entité**, **libellé**, **géométrie**. Pas de colonnes Niveau, Etat, Nature, Milieu, Thème, Origine.
+
+2. **Bronze**  
+   - `bdlisa_entites_raw` : table chargée telle quelle depuis le gpkg → seules les colonnes présentes dans le fichier existent (code, libellé, geometry, etc.).  
+   - `bdlisa_entites` (vue) : l'asset détecte les noms de colonnes. Pour chaque attribut (niveau, etat, nature, …), s'il n'existe pas de colonne correspondante dans la table raw, la vue met **NULL** dans la colonne de la vue (ex. `niveau_eh`, `etat_eh`, …).  
+   → En bronze, `code_eh` et `libelle_eh` sont renseignés ; niveau_eh, etat_eh, nature_eh, milieu_eh, theme_eh, origine_eh sont **NULL**.
+
+3. **Silver**  
+   `stg_tme_entites` lit la vue `bdlisa_entites` et fait des `LEFT JOIN` sur les tables Sandre `ref_*_eh` (ex. `ref_niveau_eh`) avec `base.niveau_eh = ref_niveau.code`.  
+   Si `base.niveau_eh` est NULL, la jointure ne matche jamais → `libelle_niveau_eh` (et les autres libellés) restent **NULL**.  
+   → En silver, même schéma : seul `code_eh` et `libelle_eh` sont remplis ; le reste des colonnes _eh est **NULL**.
+
+4. **Gold**  
+   Les marts (`stations_piezo_carte`, `hubeau_daily_chroniques`, `fct_monthly_chroniques`, `fct_yearly_stats`) utilisent `stg_tme_entites` ou un intermediate qui en dépend. Ils recopient ou agrègent `code_eh`, `libelle_eh`, `libelle_niveau_eh`, etc.  
+   → Les colonnes qui sont NULL en silver restent **NULL** en gold.
+
+**En résumé** : ce n'est pas un bug du pipeline. Les tables `ref_*_eh` en bronze sont bien remplies (code + libelle), mais comme le **fichier BDLISA** ne fournit pas les codes niveau/etat/nature/milieu/theme/origine, on n'a rien à joindre : la source ne les expose pas, donc bronze → silver → gold propagent des NULL pour ces champs.
+
+---
 
 ## Colonnes TME dans le GeoPackage (layer 0)
 

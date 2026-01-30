@@ -124,15 +124,25 @@ def _write_bdlisa_to_postgis(
     cols = list(gdf.columns)
     context.log.info(f"Colonnes BDLISA (normalisées): {cols}")
 
-    code_col = next((c for c in cols if "code" in c and ("entite" in c or c == "code")), cols[0] if cols else "code")
-    libelle_col = next((c for c in cols if "libelle" in c or "lb_" in c), None) or (cols[1] if len(cols) >= 2 else None)
+    # Exclure la géométrie des fallbacks (première colonne texte = code, deuxième = libellé)
+    geom_col = next((c for c in cols if c == "geometry" or "geom" in c), None)
+    data_cols = [c for c in cols if c != geom_col and c not in ("perimeter", "niveau_layer")]
+
+    # Détection code : "code" + "entit" (couvre entité/entite) ou colonne nommée "code"
+    code_col = next(
+        (c for c in cols if "code" in c and ("entit" in c or c == "code")),
+        data_cols[0] if data_cols else (cols[0] if cols else "code"),
+    )
+    # Détection libellé : "libell" (couvre libellé/libelle) ou "lb_"
+    libelle_col = next((c for c in cols if "libell" in c or "lb_" in c), None) or (
+        data_cols[1] if len(data_cols) >= 2 else (cols[1] if len(cols) >= 2 else None)
+    )
     niveau_col = next((c for c in cols if "niveau" in c and c != "niveau_layer"), None)
     etat_col = next((c for c in cols if "etat" in c), None)
     nature_col = next((c for c in cols if "nature" in c), None)
     milieu_col = next((c for c in cols if "milieu" in c), None)
     theme_col = next((c for c in cols if "theme" in c), None)
     origine_col = next((c for c in cols if "origine" in c), None)
-    geom_col = next((c for c in cols if c == "geometry" or "geom" in c), None)
 
     context.log.info(
         "Mapping TME: code_eh=%s, libelle_eh=%s, niveau_eh=%s, etat_eh=%s, nature_eh=%s, "

@@ -25,6 +25,8 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
 
 # BDLISA (GeoPackage → PostGIS)
 from hubeau_pipeline.assets.bronze.bdlisa_assets import bdlisa_entites_raw
+# TME attributs (niveau, etat, nature, ...) depuis TME.csv — enrichit stg_tme_entites
+from hubeau_pipeline.assets.bronze.tme_entites_assets import tme_entites_hydrogeo
 # Sandre nomenclatures (ref_*_eh)
 from hubeau_pipeline.assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
 # Référentiels géographiques (calques Superset)
@@ -49,6 +51,8 @@ __all__ = [
     "era5_weekly_update",
     # BDLISA
     "bdlisa_entites_raw",
+    # TME attributs (TME.csv)
+    "tme_entites_hydrogeo",
     # Sandre nomenclatures
     "sandre_nomenclatures_eh",
     # Référentiels géographiques

@@ -42,6 +42,9 @@ sources:
       - name: bdlisa_entites
         description: Vue BDLISA schéma fixe (code_eh, libelle_eh, ...) pour dbt
         freshness: null
+      - name: tme_entites_hydrogeo
+        description: Attributs TME (niveau, etat, nature, milieu, theme, origine) depuis TME.csv — enrichit stg_tme_entites
+        freshness: null
       - name: ref_niveau_eh
         description: Nomenclature Sandre - Niveau entité hydrogéologique
         freshness: null

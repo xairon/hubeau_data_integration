@@ -70,14 +70,16 @@ def bootstrap_start(context: OpExecutionContext) -> Nothing:
 
 @op(ins={"start": In(Nothing)}, out=Out(Nothing), required_resource_keys={"pg"})
 def load_reference_data(context: OpExecutionContext) -> Nothing:
-    """Load reference data: BDLISA (GeoPackage → PostGIS) + Sandre nomenclatures (ref_*_eh). Required for stg_tme_entites."""
+    """Load reference data: BDLISA + TME.csv + Sandre nomenclatures (ref_*_eh). Required for stg_tme_entites."""
     from ..assets.bronze.bdlisa_assets import bdlisa_entites_raw
+    from ..assets.bronze.tme_entites_assets import tme_entites_hydrogeo
     from ..assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
     from ..resources import PostgreSQLResource
 
-    context.log.info("📚 STEP 0/5: Loading reference data (BDLISA + Sandre nomenclatures)...")
+    context.log.info("📚 STEP 0/5: Loading reference data (BDLISA + TME attributs + Sandre nomenclatures)...")
     pg: PostgreSQLResource = context.resources.pg
     bdlisa_entites_raw(context, pg)
+    tme_entites_hydrogeo(context, pg)
     sandre_nomenclatures_eh(context, pg)
     context.log.info("📚 Reference data loaded.")
 
