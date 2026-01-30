@@ -25,6 +25,8 @@ Guide de configuration des variables d'environnement et du déploiement.
 | `DAGSTER_PG_USER` | Utilisateur Dagster | `postgres` | ✅ |
 | `DAGSTER_PG_PASSWORD` | Mot de passe Dagster | `(Définir dans .env)` | ✅ |
 | `DAGSTER_HOME` | Répertoire Dagster | `/app/dagster_home` | ❌ |
+| `DAGSTER_ENABLE_SCHEDULES` | Active les schedules Dagster | `false` | ❌ |
+| `DAGSTER_ENABLE_SENSORS` | Active les sensors Dagster | `false` | ❌ |
 
 ### Superset - Visualisation
 
@@ -48,6 +50,19 @@ Les variables DLT sont automatiquement dérivées des variables PostgreSQL :
 | `DESTINATION__POSTGRES__CREDENTIALS__DATABASE` | `PG_DB` |
 | `DESTINATION__POSTGRES__CREDENTIALS__USERNAME` | `PG_USER` |
 | `DESTINATION__POSTGRES__CREDENTIALS__PASSWORD` | `PG_PASSWORD` |
+
+### Bootstrap - Relance contrôlée
+
+| Variable | Description | Valeur par défaut | Obligatoire |
+|----------|-------------|-------------------|-------------|
+| `BOOTSTRAP_PARTITIONS` | Allowlist de partitions à relancer (`job:partition`) | (vide) | ❌ |
+| `BOOTSTRAP_FORCE_RERUN` | Ignore l’état de complétion et relance tout | `false` | ❌ |
+| `BOOTSTRAP_CONTINUE_ON_ERROR` | Continue après erreur (mode best-effort) | `false` | ❌ |
+
+**Exemple** :
+```bash
+BOOTSTRAP_PARTITIONS=chroniques:piezometry:2020,era5:1990-1991
+```
 
 ## Configuration Locale
 
@@ -81,6 +96,24 @@ docker compose up -d --build
 
 # Sans .env (utilise les valeurs par défaut)
 docker compose up -d --build
+```
+
+## Reprocess dbt (vars)
+
+Ces paramètres se passent via `--vars` lors d’un `dbt run` ciblé.
+
+```bash
+# Piézo : reprocess depuis une date
+dbt run --select stg_piezo_chroniques --vars '{"piezometry_reprocess_from_date": "2020-01-01"}'
+
+# Hydro : reprocess depuis une date
+dbt run --select stg_hydrometry_obs_elab --vars '{"hydrometry_reprocess_from_date": "2020-01-01"}'
+
+# ERA5 : reprocess depuis un timestamp
+dbt run --select stg_era5_timeseries --vars '{"era5_reprocess_from_timestamp": "2020-01-01 00:00:00"}'
+
+# Mapping station↔ERA5 : recompute complet
+dbt run --select int_station_era5_mapping --vars '{"recompute_station_era5_mapping": true}'
 ```
 
 ## Configuration Production

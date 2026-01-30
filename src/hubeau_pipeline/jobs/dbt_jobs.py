@@ -1,10 +1,6 @@
 from dagster import define_asset_job, AssetSelection, op, job, In, Nothing, graph
-from ..assets.dbt_assets import hubeau_dbt_assets, dbt_resource
+from ..assets.dbt_assets import hubeau_dbt_assets
 from dagster_dbt import build_dbt_asset_selection, DbtCliResource
-from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
-
-# Common hooks for all jobs
-# FAILURE_HOOKS removed as per request
 
 # Select all assets from the dbt AssetsDefinition
 # Using build_dbt_asset_selection without dbt_select selects all dbt models

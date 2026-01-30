@@ -8,6 +8,7 @@ Schedules:
 - monthly_reference_data: 1er du mois 2h00 UTC - BDLISA + Sandre nomenclatures
 """
 
+import os
 from dagster import (
     ScheduleDefinition,
     DefaultScheduleStatus,
@@ -21,9 +22,19 @@ from .jobs import (
     daily_piezometry_bronze_job,
     daily_hydrometry_bronze_job,
     dbt_silver_gold_pipeline_job,
-    era5_meteo_job,
     era5_weekly_job,
     reference_data_bronze_job,
+)
+
+
+def _env_true(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
+
+
+DEFAULT_SCHEDULE_STATUS = (
+    DefaultScheduleStatus.RUNNING
+    if _env_true("DAGSTER_ENABLE_SCHEDULES", "false")
+    else DefaultScheduleStatus.STOPPED
 )
 
 
@@ -34,14 +45,14 @@ from .jobs import (
 daily_piezometry_schedule = ScheduleDefinition(
     job=daily_piezometry_bronze_job,
     cron_schedule="0 4 * * *",  # 4h00 UTC every day
-    default_status=DefaultScheduleStatus.STOPPED,  # Manual activation in prod
+    default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: Piezometry chroniques (last 7 days)",
 )
 
 daily_hydrometry_schedule = ScheduleDefinition(
     job=daily_hydrometry_bronze_job,
     cron_schedule="0 4 * * *",  # 4h00 UTC every day
-    default_status=DefaultScheduleStatus.STOPPED,
+    default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: Hydrometry observations (last 7 days)",
 )
 
@@ -53,7 +64,7 @@ daily_hydrometry_schedule = ScheduleDefinition(
 daily_dbt_schedule = ScheduleDefinition(
     job=dbt_silver_gold_pipeline_job,
     cron_schedule="0 6 * * *",  # 6h00 UTC (after Bronze completes)
-    default_status=DefaultScheduleStatus.STOPPED,
+    default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: dbt Silver/Gold layer incremental refresh",
 )
 
@@ -65,7 +76,7 @@ daily_dbt_schedule = ScheduleDefinition(
 monthly_reference_data_schedule = ScheduleDefinition(
     job=reference_data_bronze_job,
     cron_schedule="0 2 1 * *",  # 1er du mois à 2h00 UTC
-    default_status=DefaultScheduleStatus.STOPPED,
+    default_status=DEFAULT_SCHEDULE_STATUS,
     description="Monthly: BDLISA + Sandre nomenclatures (ref_*_eh)",
 )
 
@@ -76,7 +87,7 @@ monthly_reference_data_schedule = ScheduleDefinition(
 @schedule(
     job=era5_weekly_job,
     cron_schedule="0 3 * * *",  # Daily 3h00 UTC
-    default_status=DefaultScheduleStatus.STOPPED,
+    default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: ERA5 Smart Update (Target Timeseries)",
 )
 def daily_era5_schedule(context: ScheduleEvaluationContext):

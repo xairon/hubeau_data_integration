@@ -8,6 +8,11 @@ Pour peupler toute la base from scratch :
 
 Les entités hydrogéologiques (stg_tme_entites) dépendent de BDLISA et des nomenclatures Sandre ; le full_bootstrap inclut désormais cette étape en premier.
 
+Variables utiles :
+- `BOOTSTRAP_PARTITIONS` : allowlist `job:partition` (rejouer une plage précise).
+- `BOOTSTRAP_FORCE_RERUN` : relancer même si déjà complété.
+- `BOOTSTRAP_CONTINUE_ON_ERROR` : continuer après erreur (best-effort).
+
 ---
 
 ## Common Scenarios & Solutions
@@ -40,11 +45,14 @@ Les entités hydrogéologiques (stg_tme_entites) dépendent de BDLISA et des nom
 **Symptoms**: `libelle_eh` (et éventuellement `code_eh`) toujours NULL dans `gold.stations_piezo_carte` ou `gold.int_station_era5_mapping`.
 
 **Cause**: 
-- `int_station_era5_mapping` était en **incrémental** : le job `dbt_silver_gold_pipeline` ne met pas à jour les lignes déjà présentes, donc les libellés restaient NULL.
+- `int_station_era5_mapping` est en **incrémental** : les lignes déjà présentes ne sont pas recalculées.
 - Ou jointure TME (code / spatial) qui ne matche pas (stations sans `codes_bdlisa`, ou hors polygones BDLISA).
 
 **Solution**:
-1. Le mapping est désormais en **table** (rebuild complet à chaque run). **Relancer** `dbt_silver_gold_pipeline` : le mapping et les marts en aval sont reconstruits, les libellés renseignés où la jointure TME matche.
+1. Forcer un recalcul complet du mapping :
+   ```bash
+   docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'
+   ```
 2. Si toujours NULL après run : exécuter `scripts/diagnose_tme_mapping.sql` (sur la base) pour vérifier `avec_libelle_eh` vs `sans_libelle_eh`, et `codes_bdlisa` renseigné ou non.
 3. Vérifier que `silver.stg_tme_entites` contient bien `libelle_eh` (et `code_eh`). Les colonnes niveau/etat/nature/milieu/theme/origine restent souvent NULL avec le layer 0 du gpkg BDLISA (voir `docs/BDLISA_INTEGRATION.md`).
 
@@ -136,10 +144,33 @@ Tout repart de zéro (y compris Bronze) :
 docker-compose down -v
 docker-compose up -d
 # Attendre que les services soient prêts, puis dans l’UI Dagster :
-# 1. Run all_stations_bronze
-# 2. Run all_chroniques_bronze (partitioned - peut prendre des heures)
-# 3. Run era5_historical_load (partitioned - peut prendre des jours)
-# 4. Run dbt_silver_gold_pipeline
+# 1. Run full_bootstrap (séquentiel, très long)
+```
+
+### Relancer une plage précise (bootstrap)
+
+Relancer uniquement certaines partitions sans tout refaire :
+
+```powershell
+# Exemple: rejouer piezo 2020 et ERA5 1990-1991
+BOOTSTRAP_PARTITIONS=chroniques:piezometry:2020,era5:1990-1991
+```
+
+Pour forcer la relance de tout :
+```powershell
+BOOTSTRAP_FORCE_RERUN=true
+```
+
+### Reprocess ciblé en Silver/Gold (dbt)
+
+Rejouer une fenêtre historique sans full refresh :
+
+```bash
+# Piézo : rejouer depuis une date (incluse)
+dbt run --select stg_piezo_chroniques --vars '{"piezometry_reprocess_from_date": "2020-01-01"}'
+
+# Hydro : rejouer depuis une date (incluse)
+dbt run --select stg_hydrometry_obs_elab --vars '{"hydrometry_reprocess_from_date": "2020-01-01"}'
 ```
 
 ### Check Data Freshness

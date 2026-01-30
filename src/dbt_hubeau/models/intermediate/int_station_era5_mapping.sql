@@ -19,6 +19,9 @@
 -- Utilise PostGIS KNN (opérateur <->) pour trouver le vrai nearest neighbor
 -- TME (libellés BDLISA): jointure par code (TRIM) → fallback par n'importe quel code dans codes_bdlisa → fallback spatial (ST_Contains).
 -- Incrémental : ne calcule que pour les stations absentes de la table (stations et grille ERA5 changent rarement).
+-- Optionnel: forcer un recalcul complet via var('recompute_station_era5_mapping', false).
+
+{% set recompute_all = var('recompute_station_era5_mapping', false) %}
 
 WITH stations AS (
     SELECT * FROM {{ ref('stg_piezo_stations') }}
@@ -26,7 +29,7 @@ WITH stations AS (
       -- Filtre pour la France métropolitaine (Hexagone) uniquement
       AND y >= 41.0 AND y <= 51.5 
       AND x >= -5.5 AND x <= 10.0
-      {% if is_incremental() %}
+      {% if is_incremental() and not recompute_all %}
       -- Ne traiter que les stations pas encore mappées
       AND code_bss NOT IN (SELECT code_bss FROM {{ this }})
       {% endif %}

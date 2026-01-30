@@ -14,7 +14,7 @@ ERA5 API ──────┘
 
 | Schéma | Gestion | Contenu |
 |--------|---------|---------|
-| `bronze` | DLT + dbt seeds | Tables brutes (`*_raw`) + référentiels |
+| `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + référentiels |
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `silver_rejects` | dbt rejects | Lignes filtrées (exceptions) avec `rejection_reason` — audit, qualité |
 | `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
@@ -73,20 +73,18 @@ Tables créées automatiquement par DLT au premier run.
 
 | Table | Description | Volume estimé |
 |-------|-------------|---------------|
-| `era5_france_meteo_raw` | Fichiers NetCDF bruts | ~38 fichiers |
-| `era5_france_timeseries` | Time series extraites | ~300M |
+| `era5_france_timeseries` | Time series extraites (Direct-to-Timeseries) | ~300M |
 
 **Colonnes principales** :
-- `era5_france_meteo_raw` : `file_id`, `netcdf_data` (BYTEA), `start_year`, `end_year`, etc.
 - `era5_france_timeseries` : `time`, `latitude`, `longitude`, `temperature_2m`, `total_precipitation`, `potential_evaporation`
 
-### Référentiels (Seeds)
+### Référentiels (Assets Dagster)
 
 | Table | Description | Volume |
 |-------|-------------|--------|
 | `tme_entites_hydrogeo` | Entités hydrogéologiques (TME) | ~2k |
 
-**Source** : Seed dbt (`src/dbt_hubeau/seeds/tme_entites_hydrogeo.csv`)
+**Source** : Asset Dagster `tme_entites_hydrogeo` (ZIP BDLISA / CSV TME)
 
 ### Métadonnées DLT
 
@@ -345,7 +343,7 @@ ORDER BY mois;
 ## Schémas Création
 
 Les schémas sont créés automatiquement :
-- `bronze` : Créé par DLT au premier run
+- `bronze` : Créé par DLT et assets Dagster au premier run
 - `silver` : Créé par dbt au premier run
 - `gold` : Créé par dbt au premier run
 

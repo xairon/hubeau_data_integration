@@ -8,6 +8,10 @@ A single job that populates the ENTIRE database from scratch:
 3. Load ERA5 SEQUENTIALLY (1990-present, 2-year chunks)
 4. Run dbt Silver/Gold transformations
 
+Restartability:
+- Persists partition status in ops.bootstrap_state
+- Supports BOOTSTRAP_PARTITIONS (allowlist), BOOTSTRAP_FORCE_RERUN, BOOTSTRAP_CONTINUE_ON_ERROR
+
 IMPORTANT: This job runs partitions SEQUENTIALLY to avoid API rate limits!
 WARNING: This job will take MANY HOURS (possibly days) to complete!
 """
@@ -27,8 +31,6 @@ from dagster import (
 )
 import psycopg2
 import yaml
-
-from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
 
 
 # Configuration
@@ -50,6 +52,102 @@ def get_db_connection():
         password=os.getenv('PG_PASSWORD'),
         sslmode=os.getenv('PG_SSLMODE', 'prefer')
     )
+
+
+def _env_true(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _selected_partitions() -> set[str] | None:
+    raw = os.getenv("BOOTSTRAP_PARTITIONS")
+    if not raw:
+        return None
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def _ensure_bootstrap_state_table(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute("CREATE SCHEMA IF NOT EXISTS ops")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ops.bootstrap_state (
+                job_name TEXT NOT NULL,
+                partition_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                error TEXT,
+                PRIMARY KEY (job_name, partition_key)
+            )
+            """
+        )
+    conn.commit()
+
+
+def _partition_is_completed(conn, job_name: str, partition_key: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM ops.bootstrap_state WHERE job_name = %s AND partition_key = %s",
+            (job_name, partition_key),
+        )
+        row = cur.fetchone()
+    return bool(row and row[0] == "completed")
+
+
+def _mark_partition_start(conn, job_name: str, partition_key: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ops.bootstrap_state (job_name, partition_key, status, started_at)
+            VALUES (%s, %s, 'running', NOW())
+            ON CONFLICT (job_name, partition_key)
+            DO UPDATE SET status = 'running', started_at = EXCLUDED.started_at, completed_at = NULL, error = NULL
+            """,
+            (job_name, partition_key),
+        )
+    conn.commit()
+
+
+def _mark_partition_success(conn, job_name: str, partition_key: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ops.bootstrap_state
+            SET status = 'completed', completed_at = NOW(), error = NULL
+            WHERE job_name = %s AND partition_key = %s
+            """,
+            (job_name, partition_key),
+        )
+    conn.commit()
+
+
+def _mark_partition_failed(conn, job_name: str, partition_key: str, error: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ops.bootstrap_state
+            SET status = 'failed', completed_at = NOW(), error = %s
+            WHERE job_name = %s AND partition_key = %s
+            """,
+            (error[:2000], job_name, partition_key),
+        )
+    conn.commit()
+
+
+def _should_skip_partition(job_name: str, partition_key: str) -> bool:
+    selected = _selected_partitions()
+    if selected is not None:
+        # Explicit allowlist: only run matching partitions, regardless of completion
+        return f"{job_name}:{partition_key}" not in selected
+    if _env_true("BOOTSTRAP_FORCE_RERUN", "false"):
+        return False
+    with get_db_connection() as conn:
+        _ensure_bootstrap_state_table(conn)
+        return _partition_is_completed(conn, job_name, partition_key)
+
+
+def _continue_on_error() -> bool:
+    return _env_true("BOOTSTRAP_CONTINUE_ON_ERROR", "false")
 
 
 # ==============================================================================
@@ -77,10 +175,24 @@ def load_reference_data(context: OpExecutionContext) -> Nothing:
     from ..resources import PostgreSQLResource
 
     context.log.info("📚 STEP 0/5: Loading reference data (BDLISA + TME attributs + Sandre nomenclatures)...")
+    job_name = "reference_data"
+    partition_key = "all"
+    if _should_skip_partition(job_name, partition_key):
+        context.log.info("📚 Reference data already loaded. Skipping.")
+        return
+    with get_db_connection() as conn:
+        _mark_partition_start(conn, job_name, partition_key)
     pg: PostgreSQLResource = context.resources.pg
-    bdlisa_entites_raw(context, pg)
-    tme_entites_hydrogeo(context, pg)
-    sandre_nomenclatures_eh(context, pg)
+    try:
+        bdlisa_entites_raw(context, pg)
+        tme_entites_hydrogeo(context, pg)
+        sandre_nomenclatures_eh(context, pg)
+    except Exception as e:
+        with get_db_connection() as conn:
+            _mark_partition_failed(conn, job_name, partition_key, str(e))
+        raise
+    with get_db_connection() as conn:
+        _mark_partition_success(conn, job_name, partition_key)
     context.log.info("📚 Reference data loaded.")
 
 
@@ -96,7 +208,14 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
     context.log.info("📍 STEP 1/5: Loading ALL station metadata (via DLT)...")
     context.log.info("📍 ═══════════════════════════════════════════════════════════")
-    
+    job_name = "stations"
+    partition_key = "all"
+    if _should_skip_partition(job_name, partition_key):
+        context.log.info("📍 Stations already loaded. Skipping.")
+        return
+    with get_db_connection() as conn:
+        _mark_partition_start(conn, job_name, partition_key)
+
     # Credentials from standard env vars (available in all containers)
     db_creds = {
         "database": os.getenv("PG_DB", "postgres"),
@@ -120,9 +239,9 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
         ("hydrometry_stations", "configs/hubeau/hydrometry_stations.yml"),
     ]
     
-    for table_name, config_path in configs:
-        context.log.info(f"  📍 Loading {table_name}...")
-        try:
+    try:
+        for table_name, config_path in configs:
+            context.log.info(f"  📍 Loading {table_name}...")
             with open(config_path) as f:
                 config = yaml.safe_load(f)
             
@@ -136,9 +255,13 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
             context.log.info(f"  ✅ {table_name}: {info}")
             
             time.sleep(DELAY_BETWEEN_PARTITIONS)
-        except Exception as e:
-            context.log.error(f"  ❌ {table_name} failed: {e}")
-            raise e
+    except Exception as e:
+        context.log.error(f"  ❌ stations failed: {e}")
+        with get_db_connection() as conn:
+            _mark_partition_failed(conn, job_name, partition_key, str(e))
+        raise
+    with get_db_connection() as conn:
+        _mark_partition_success(conn, job_name, partition_key)
     
     context.log.info("📍 Station loading complete!")
 
@@ -211,6 +334,13 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
         
         for year in range(START_YEAR, CURRENT_YEAR + 1):
             context.log.info(f"  📅 {api['name']} - Year {year}...")
+            job_name = "chroniques"
+            partition_key = f"{api['name']}:{year}"
+            if _should_skip_partition(job_name, partition_key):
+                context.log.info(f"  ↪️  Skipping {partition_key} (already completed)")
+                continue
+            with get_db_connection() as conn:
+                _mark_partition_start(conn, job_name, partition_key)
             try:
                 # Wrap generator in DLT resource
                 @dlt.resource(name=api["table_name"], write_disposition="append")
@@ -225,13 +355,20 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
                 # RUN PIPELINE
                 info = pipeline.run(resource_wrapper())
                 context.log.info(f"  ✅ {year}: {info}")
-                
+                with get_db_connection() as conn:
+                    _mark_partition_success(conn, job_name, partition_key)
+
                 # Rate limit: wait between years
                 time.sleep(DELAY_BETWEEN_PARTITIONS)
                 
             except Exception as e:
                 context.log.error(f"  ❌ {year} failed: {e}")
-                # Continue to next year
+                with get_db_connection() as conn:
+                    _mark_partition_failed(conn, job_name, partition_key, str(e))
+                if _continue_on_error():
+                    context.log.warning("  ↪️  Continuing after error (BOOTSTRAP_CONTINUE_ON_ERROR=true)")
+                    continue
+                raise
     
     context.log.info("📊 Chroniques loading complete!")
 
@@ -256,13 +393,27 @@ def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
         file_id = f"era5_bootstrap_{year}_{chunk_end}"
         
         context.log.info(f"  🌤️  Loading ERA5 {year}-{chunk_end}...")
-        
+        job_name = "era5"
+        partition_key = f"{year}-{chunk_end}"
+        if _should_skip_partition(job_name, partition_key):
+            context.log.info(f"  ↪️  Skipping era5 {partition_key} (already completed)")
+            year += 2
+            continue
+        with get_db_connection() as conn:
+            _mark_partition_start(conn, job_name, partition_key)
+
         try:
             # Direct insertion function (handles DB connection internally)
             rows = process_era5_range_to_timeseries(context, start_date, end_date, file_id)
             context.log.info(f"  ✅ {year}-{chunk_end}: {rows:,} rows inserted")
+            with get_db_connection() as conn:
+                _mark_partition_success(conn, job_name, partition_key)
         except Exception as e:
             context.log.error(f"  ❌ {year}-{chunk_end} failed: {e}")
+            with get_db_connection() as conn:
+                _mark_partition_failed(conn, job_name, partition_key, str(e))
+            if not _continue_on_error():
+                raise
         
         # Rate limit: wait between chunks (longer for ERA5)
         time.sleep(DELAY_BETWEEN_PARTITIONS * 2)
@@ -281,6 +432,13 @@ def run_dbt_full(context: OpExecutionContext) -> Nothing:
     context.log.info("🔄 STEP 4/5: Running dbt Silver/Gold transformations...")
     context.log.info("🔄 ═══════════════════════════════════════════════════════════")
     
+    job_name = "dbt"
+    partition_key = "full"
+    if _should_skip_partition(job_name, partition_key):
+        context.log.info("🔄 dbt already completed. Skipping.")
+        return
+    with get_db_connection() as conn:
+        _mark_partition_start(conn, job_name, partition_key)
     try:
         result = subprocess.run(
             ["dbt", "run", "--project-dir", "/app/src/dbt_hubeau", "--profiles-dir", "/app/src/dbt_hubeau"],
@@ -291,8 +449,13 @@ def run_dbt_full(context: OpExecutionContext) -> Nothing:
         context.log.info(result.stdout)
         if result.returncode != 0:
             context.log.error(result.stderr)
+            raise RuntimeError(f"dbt run failed with code {result.returncode}")
     except Exception as e:
-        context.log.error(f"dbt failed: {e}")
+        with get_db_connection() as conn:
+            _mark_partition_failed(conn, job_name, partition_key, str(e))
+        raise
+    with get_db_connection() as conn:
+        _mark_partition_success(conn, job_name, partition_key)
     
     context.log.info("🔄 dbt transformations complete!")
 

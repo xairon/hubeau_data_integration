@@ -1,7 +1,7 @@
 """
-Dagster Jobs - Hub'Eau Bronze Layer + ERA5 + Aggregation (Legacy)
+Dagster Jobs - Hub'Eau Pipeline
 
-KEPT DOMAINS:
+Domains:
 - Piezometry (stations + chroniques)
 - Hydrometry (sites + stations + observations)
 - ERA5 (weather data)

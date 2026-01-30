@@ -4,9 +4,7 @@ La [BDLISA](https://bdlisa.eaufrance.fr/) (Base de Données des LImites des Syst
 
 ## Nomenclatures : BDLISA vs Sandre
 
-Le site BDLISA **ne publie pas** les listes de codes/libellés (Niveau, Etat, Nature, Milieu, Thème, Origine) comme pages ou fichiers séparés. Les nomenclatures utilisées sont celles du **Sandre** (dictionnaire PRL, SAQ 2002-1). Les services WFS/WMS BDLISA renvoient des **codes** ; les **libellés** officiels sont dans les seeds dbt `ref_*_eh.csv` (source : [Sandre PRL](https://api.sandre.eaufrance.fr/definitions/v1/dictionnaire/PRL/1.0)).
-
-Voir aussi : `src/dbt_hubeau/seeds/README_NOMENCLATURES_EH.md`.
+Le site BDLISA **ne publie pas** les listes de codes/libellés (Niveau, Etat, Nature, Milieu, Thème, Origine) comme pages ou fichiers séparés. Les nomenclatures utilisées sont celles du **Sandre** (dictionnaire PRL, SAQ 2002-1). Les services WFS/WMS BDLISA renvoient des **codes** ; les **libellés** officiels sont chargés par l’asset `sandre_nomenclatures_eh` depuis l’API Sandre (avec fallback local).
 
 ## Téléchargement des données BDLISA
 

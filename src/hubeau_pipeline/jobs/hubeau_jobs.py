@@ -9,10 +9,6 @@ Reference: https://docs.dagster.io/api/libraries/dagster-dlt
 
 from dagster import define_asset_job, AssetSelection
 from ..assets.bronze.dlt_assets import MODE_PARTITIONS
-from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
-
-# Common hooks for all jobs (must be a set, not a list!)
-# FAILURE_HOOKS removed as per request
 
 
 # ====================================

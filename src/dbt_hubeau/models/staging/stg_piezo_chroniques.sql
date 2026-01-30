@@ -2,6 +2,7 @@
   config(
     materialized = 'incremental',
     unique_key = ['code_bss', 'date_mesure'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss', 'date_mesure'], 'unique': True},
       {'columns': ['code_bss']},
@@ -19,7 +20,10 @@
 -- Source: bronze.piezometry_chroniques_raw
 -- Silver: typage, déduplication, filtrage (mesure non nulle), sans colonnes DLT
 -- Primary Key: (code_bss, date_mesure). FK: code_bss -> stg_piezo_stations(code_bss)
--- Incremental: par date (nouvelles données uniquement)
+-- Incremental: par date avec fenêtre de rechargement configurable pour corrections tardives
+
+{% set lookback_days = var('piezometry_incremental_lookback_days', 7) %}
+{% set reprocess_from_date = var('piezometry_reprocess_from_date', none) %}
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_chroniques_raw') }}
@@ -29,7 +33,15 @@ WITH source AS (
       AND {{ cast_silver_numeric('niveau_nappe_eau') }} IS NOT NULL
       AND {{ cast_silver_numeric('profondeur_nappe') }} IS NOT NULL
       {% if is_incremental() %}
-      AND {{ cast_silver_date('date_mesure') }} > (SELECT COALESCE(MAX(date_mesure), '1900-01-01'::date) FROM {{ this }})
+      {% if reprocess_from_date is not none %}
+      AND {{ cast_silver_date('date_mesure') }} >= '{{ reprocess_from_date }}'::date
+      {% else %}
+      AND {{ cast_silver_date('date_mesure') }} >= (
+          SELECT COALESCE(MAX(date_mesure), '1900-01-01'::date)
+                 - INTERVAL '{{ lookback_days }} days'
+          FROM {{ this }}
+      )
+      {% endif %}
       {% endif %}
 ),
 

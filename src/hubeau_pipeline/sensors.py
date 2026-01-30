@@ -6,6 +6,7 @@ Sensors:
 - freshness_alert_sensor: Alerts when source data is stale
 """
 
+import os
 from dagster import (
     asset_sensor,
     multi_asset_sensor,
@@ -26,6 +27,17 @@ from .jobs import dbt_silver_gold_pipeline_job
 logger = logging.getLogger(__name__)
 
 
+def _env_true(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
+
+
+DEFAULT_SENSOR_STATUS = (
+    DefaultSensorStatus.RUNNING
+    if _env_true("DAGSTER_ENABLE_SENSORS", "false")
+    else DefaultSensorStatus.STOPPED
+)
+
+
 # ==============================================================================
 # BRONZE → SILVER AUTOMATION SENSOR
 # ==============================================================================
@@ -37,7 +49,7 @@ logger = logging.getLogger(__name__)
     ],
     job=dbt_silver_gold_pipeline_job,
     minimum_interval_seconds=300,  # 5 minutes cooldown
-    default_status=DefaultSensorStatus.STOPPED,  # Start manually in prod
+    default_status=DEFAULT_SENSOR_STATUS,
     description="Triggers dbt Silver/Gold pipeline when Bronze data is updated",
 )
 def bronze_to_silver_sensor(context: MultiAssetSensorEvaluationContext):
@@ -87,7 +99,7 @@ def bronze_to_silver_sensor(context: MultiAssetSensorEvaluationContext):
     asset_key=AssetKey("piezometry_chroniques_daily_raw"),
     job=dbt_silver_gold_pipeline_job,
     minimum_interval_seconds=300,
-    default_status=DefaultSensorStatus.STOPPED,
+    default_status=DEFAULT_SENSOR_STATUS,
     description="Triggers dbt after daily piezometry incremental load",
 )
 def piezometry_daily_to_silver_sensor(context, asset_event):
@@ -117,7 +129,7 @@ def piezometry_daily_to_silver_sensor(context, asset_event):
     asset_key=AssetKey("hydrometry_obs_daily_raw"),
     job=dbt_silver_gold_pipeline_job,
     minimum_interval_seconds=300,
-    default_status=DefaultSensorStatus.STOPPED,
+    default_status=DEFAULT_SENSOR_STATUS,
     description="Triggers dbt after daily hydrometry incremental load",
 )
 def hydrometry_daily_to_silver_sensor(context, asset_event):

@@ -22,6 +22,8 @@
 -- Silver: typage, déduplication, PostGIS. Incremental append (MERGE non supporté sur hypertables compressées).
 -- Primary Key: latitude + longitude + time. Filtre incrémental: time > max(time).
 
+{% set reprocess_from_ts = var('era5_reprocess_from_timestamp', none) %}
+
 WITH source AS (
     SELECT * FROM {{ source('staging', 'era5_france_timeseries') }}
     WHERE time IS NOT NULL
@@ -29,9 +31,13 @@ WITH source AS (
       AND longitude IS NOT NULL
       AND temperature_2m IS NOT NULL
     {% if is_incremental() %}
+      {% if reprocess_from_ts is not none %}
+      AND time >= '{{ reprocess_from_ts }}'::timestamp
+      {% else %}
       -- Incrémental "safe": ne traite que les nouveaux timestamps
       -- (beaucoup moins coûteux qu'un NOT IN sur DISTINCT source_file_id)
       AND time > (SELECT COALESCE(MAX(time), '1900-01-01'::timestamp) FROM {{ this }})
+      {% endif %}
     {% endif %}
 ),
 

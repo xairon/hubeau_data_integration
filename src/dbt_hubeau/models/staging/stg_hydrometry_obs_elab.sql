@@ -2,6 +2,7 @@
   config(
     materialized = 'incremental',
     unique_key = ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
@@ -20,7 +21,10 @@
 -- Source: bronze.hydrometry_obs_elab_raw
 -- Silver: typage, déduplication, filtrage (résultat non nul). Ne garde que les obs dont code_site existe dans stg_hydrometry_sites (FK).
 -- Primary Key: (code_site, date_obs_elab, grandeur_hydro_elab). FK: code_site -> stg_hydrometry_sites(code_site)
--- Incremental: par date
+-- Incremental: par date avec fenêtre de rechargement configurable pour corrections tardives
+
+{% set lookback_days = var('hydrometry_incremental_lookback_days', 7) %}
+{% set reprocess_from_date = var('hydrometry_reprocess_from_date', none) %}
 
 WITH sites AS (
     SELECT code_site FROM {{ ref('stg_hydrometry_sites') }}
@@ -35,7 +39,15 @@ source AS (
       AND o.grandeur_hydro_elab IS NOT NULL
       AND {{ cast_silver_numeric('o.resultat_obs_elab') }} IS NOT NULL
       {% if is_incremental() %}
-      AND {{ cast_silver_date('o.date_obs_elab') }} > (SELECT COALESCE(MAX(date_obs_elab), '1900-01-01'::date) FROM {{ this }})
+      {% if reprocess_from_date is not none %}
+      AND {{ cast_silver_date('o.date_obs_elab') }} >= '{{ reprocess_from_date }}'::date
+      {% else %}
+      AND {{ cast_silver_date('o.date_obs_elab') }} >= (
+          SELECT COALESCE(MAX(date_obs_elab), '1900-01-01'::date)
+                 - INTERVAL '{{ lookback_days }} days'
+          FROM {{ this }}
+      )
+      {% endif %}
       {% endif %}
 ),
 

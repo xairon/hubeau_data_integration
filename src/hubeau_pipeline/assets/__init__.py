@@ -20,7 +20,6 @@ from .bronze import (
     referentiel_zones_hydro,
 )
 
-from .csv_universal import ingest_all_csvs_asset
 
 from .dbt_assets import hubeau_dbt_assets
 
@@ -42,11 +41,11 @@ all_bronze_assets = [
     referentiel_zones_hydro,
 ]
 
-all_csv_assets = [ingest_all_csvs_asset]
+all_csv_assets = []
 
 # dbt assets replace the manual aggregation assets
 all_dbt_assets = [hubeau_dbt_assets]
 
-all_assets = all_bronze_assets + all_csv_assets + all_dbt_assets
+all_assets = all_bronze_assets + all_dbt_assets
 
 __all__ = ["all_assets", "all_bronze_assets", "all_csv_assets", "all_dbt_assets"]

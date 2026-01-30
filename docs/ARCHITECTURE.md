@@ -24,8 +24,8 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
                                 │
                                 ▼
          ┌──────────────────────────────────────────────────────┐
-         │         PostgreSQL - Schéma: bronze                  │
-         │  Tables brutes : *_raw ; BDLISA + Sandre (ref_*_eh)  │
+        │         PostgreSQL - Schéma: bronze                  │
+        │  Tables brutes : *_raw ; BDLISA + Sandre (ref_*_eh)  │
          └──────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -61,12 +61,11 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
                                 │
                                 ▼
          ┌──────────────────────────────────────────────────────┐
-         │              Dagster (Orchestration)                 │
-         │  • UI Web (port 49500)                               │
-         │  • Jobs pour DLT et dbt                              │
-         │  • UI Web (port 49500)                               │
-         │  • Jobs pour DLT et dbt                              │
-         │  • Monitoring et logs                                │
+        │              Dagster (Orchestration)                 │
+        │  • UI Web (port 49500)                               │
+        │  • Jobs pour DLT et dbt                              │
+        │  • Schedules/sensors activables via env              │
+        │  • Monitoring et logs                                │
          │                                                      │
          │      +-----------------------------------------+     │
          │      |           Visualisation & BI            |     │
@@ -218,7 +217,7 @@ Chaque station est reliée à son point de grille "réellement" le plus proche g
 
 ## Tables Principales
 
-### Bronze (DLT)
+### Bronze (DLT + assets Dagster)
 
 | Table | Description | Volume |
 |-------|-------------|--------|
@@ -226,9 +225,8 @@ Chaque station est reliée à son point de grille "réellement" le plus proche g
 | `piezometry_chroniques_raw` | Mesures piézo | ~23M |
 | `hydrometry_stations_raw` | Stations hydro | ~5k |
 | `hydrometry_obs_elab_raw` | Observations hydro | ~15M |
-| `hydrometry_obs_elab_raw` | Observations hydro | ~15M |
 | `era5_france_timeseries` | Time series ERA5 (Direct Load) | ~300M |
-| `tme_entites_hydrogeo` | Référentiel TME (seed) | ~2k |
+| `tme_entites_hydrogeo` | Référentiel TME (asset Dagster, CSV/ZIP BDLISA) | ~2k |
 
 ### Silver (dbt staging)
 

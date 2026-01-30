@@ -4,16 +4,12 @@ Jobs ERA5 - Bronze Layer
 Job pour téléchargement historique ERA5
 - Partitionné par chunks de 2 ans (ex: "2024_2025")
 - Durée estimée: 5-10 minutes par chunk
-- Mode: APPEND (idempotent par file_id)
+- Mode: DELETE overlap + insert (idempotent par fenêtre)
 - Support de partitions: relance un chunk spécifique (ex: 2006)
 """
 
 from dagster import define_asset_job, AssetSelection, AssetKey
 from ..assets.bronze.era5_assets import ERA5_PARTITIONS_DEF
-from ..hooks import log_failure_hook, slack_failure_hook, email_failure_hook
-
-# Common hooks for all jobs
-# FAILURE_HOOKS removed as per request
 
 
 era5_meteo_job = define_asset_job(
@@ -41,9 +37,4 @@ era5_weekly_job = define_asset_job(
 )
 
 
-# L'ancien job d'extraction est obsolète car intégré dans l'ingestion directe
-# On garde juste meteor et weekly
-
-
-# L'ancien job d'extraction est obsolète car intégré dans l'ingestion directe
-# On garde juste meteor et weekly
+# L'ancien job d'extraction est obsolète car intégré dans l'ingestion directe.

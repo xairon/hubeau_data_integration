@@ -10,6 +10,7 @@
 - **[Architecture](ARCHITECTURE.md)** - Architecture détaillée du pipeline
 - **[Schéma BDD](SCHEMA_BDD.md)** - Structure des tables PostgreSQL
 - **[Stockage ERA5](ERA5_DATA_STORAGE.md)** - Détails sur le stockage ERA5
+- **[Intégration BDLISA](BDLISA_INTEGRATION.md)** - Référentiels, TME et nomenclatures
 
 ## 🔧 Utilisation
 
@@ -18,6 +19,8 @@
 1. **Ingestion** : Lancer les jobs DLT pour charger les données brutes dans `bronze`
 2. **Transformation** : Lancer le job dbt pour créer `silver` et `gold`
 3. **Analyse** : Utiliser `gold.hubeau_daily_chroniques` pour vos analyses
+
+Pour les procédures d’exploitation : voir [runbook.md](runbook.md).
 
 ### Exemples de Requêtes
 

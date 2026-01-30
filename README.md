@@ -35,11 +35,8 @@ docker compose ps
 - Système : PostgreSQL
 - Serveur : `postgres`
 - Utilisateur : `postgres`
-- Utilisateur : `postgres`
 - Mot de passe : **(Défini dans `.env`)**
 - Base de données : `postgres`
-
-## 📊 Architecture & Vue d'Ensemble
 
 ## 📊 Architecture & Vue d'Ensemble
 
@@ -75,7 +72,7 @@ Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** p
 
 - **Ingestion Automatique** : Pipelines DLT résilients avec gestion de la pagination et des retries.
 - **Performance TimeSeries** : Utilisation de **TimescaleDB** (Hypertables + Compression 90%) pour les chroniques.
-- **Automation** : Sensors Dagster pour déclencher les transformations dbt dès l'arrivée des données.
+- **Automation** : Schedules + sensors Dagster activables via variables d'environnement.
 - **Zero-Touch BI** : Stack de visualisation (Superset, CloudBeaver) pré-configurée et connectée.
 
 ---
@@ -150,6 +147,8 @@ ORDER BY n_live_tup DESC;
 - [Configuration](docs/CONFIGURATION.md) - Variables d'environnement et configuration
 - [Schéma BDD](docs/SCHEMA_BDD.md) - Structure des tables PostgreSQL
 - [Stockage ERA5](docs/ERA5_DATA_STORAGE.md) - Détails sur le stockage des données ERA5
+- [Intégration BDLISA](docs/BDLISA_INTEGRATION.md) - Référentiels et TME
+- [Runbook](docs/runbook.md) - Procédures d'exploitation et dépannage
 
 ## 🛠️ Technologies
 

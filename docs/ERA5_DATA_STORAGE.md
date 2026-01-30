@@ -10,7 +10,7 @@ Contrairement aux versions précédentes, le pipeline actuel n'archive plus les 
 ERA5 API (Copernicus CDS)
     │
     ▼
-[Job Dagster: era5_historical_load / era5_weekly_update]
+[Job Dagster: era5_historical_load / era5_weekly_update_job]
     │ 1. Téléchargement NetCDF (tmp)
     │ 2. Extraction xarray (In-Memory)
     │ 3. Insertion par Batch
@@ -51,9 +51,9 @@ dbt Silver/Gold Layers
 - **But** : Charger le backlog (1950 - Présent).
 - **Méthode** : Partitionné par blocs de 2 ans (ex: 2020-2021).
 - **Action** : Télécharge le NetCDF, extrait, insère, supprime le fichier.
-- **Idempotence** : Vérifie si des données existent pour la plage de date avant de lancer.
+- **Idempotence** : Supprime la plage existante (DELETE overlap), puis réinsère.
 
-### 2. Job Hebdomadaire (`era5_weekly_update`)
+### 2. Job Hebdomadaire (`era5_weekly_update_job`)
 - **But** : Mettre à jour les données récentes (J-5 à aujourd'hui).
 - **Logique "Smart Update"** :
     1. Vérifie la date max en base (`MAX(time)`).
