@@ -41,6 +41,13 @@ deduplicated AS (
         {{ cast_silver_text('code_bss') }} AS code_bss
     FROM source
     ORDER BY code_bss, {{ cast_silver_date('date_mesure') }}, niveau_nappe_eau DESC NULLS LAST
+),
+
+-- Ne garder que les chroniques dont la station existe (respect de la FK code_bss -> stg_piezo_stations)
+stations AS (
+    SELECT code_bss FROM {{ ref('stg_piezo_stations') }}
 )
 
-SELECT * FROM deduplicated
+SELECT d.*
+FROM deduplicated d
+INNER JOIN stations s ON d.code_bss = s.code_bss

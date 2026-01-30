@@ -2,10 +2,10 @@ version: 2
 
 models:
   - name: stg_piezo_chroniques_rejected
-    description: "Lignes rejetées par stg_piezo_chroniques (date/code_bss/mesure nuls ou invalides). Trace pour audit et qualité."
+    description: "Lignes rejetées par stg_piezo_chroniques (date/code_bss/mesure nuls, ou code_bss absent de stg_piezo_stations). Trace pour audit et qualité."
     columns:
       - name: rejection_reason
-        description: "Code du motif de rejet (DATE_MESURE_NULL, CODE_BSS_NULL, NIVEAU_NAPPE_NULL, PROFONDEUR_NAPPE_NULL, OTHER)"
+        description: "Code du motif de rejet (DATE_MESURE_NULL, CODE_BSS_NULL, NIVEAU_NAPPE_NULL, PROFONDEUR_NAPPE_NULL, STATION_INEXISTANTE, OTHER)"
       - name: _dlt_id
         description: "Identifiant unique de la ligne (bronze) pour déduplication incrémentale"
 
