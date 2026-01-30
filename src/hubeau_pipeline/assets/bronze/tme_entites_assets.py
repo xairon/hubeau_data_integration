@@ -124,12 +124,17 @@ def _find_and_read_csv_in_zip(
             ))
             first_csv = csv_names[0]
         with zf.open(first_csv) as f:
-            # BDLISA utilise souvent le point-virgule (format français)
-            df = pd.read_csv(f, encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=";")
+            raw = f.read()
+        # BDLISA : point-virgule ; encodage souvent Latin-1 (è, é, etc.)
+        try:
+            df = pd.read_csv(io.BytesIO(raw), encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=";")
+        except UnicodeDecodeError:
+            df = pd.read_csv(io.BytesIO(raw), encoding="latin-1", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=";")
         if df.shape[1] <= 1 and len(df.columns) == 1 and ";" in str(df.columns[0]):
-            # Une seule colonne avec ";" = mauvais séparateur, réessayer avec ","
-            with zf.open(first_csv) as f:
-                df = pd.read_csv(f, encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=",")
+            try:
+                df = pd.read_csv(io.BytesIO(raw), encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=",")
+            except UnicodeDecodeError:
+                df = pd.read_csv(io.BytesIO(raw), encoding="latin-1", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=",")
         raw_columns = list(df.columns)
         if context:
             context.log.info("CSV lu : %s — colonnes brutes : %s", first_csv, raw_columns)
