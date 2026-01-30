@@ -84,7 +84,7 @@ Tables créées automatiquement par DLT au premier run.
 |-------|-------------|--------|
 | `tme_entites_hydrogeo` | Entités hydrogéologiques (TME) | ~2k |
 
-**Source** : Asset Dagster `tme_entites_hydrogeo` (ZIP BDLISA / CSV TME)
+**Source** : Asset Dagster `tme_entites_hydrogeo` (TME.csv local prioritaire, sinon ZIP national)
 
 ### Métadonnées DLT
 
@@ -107,13 +107,15 @@ Tables nettoyées et standardisées depuis bronze.
 | `stg_hydrometry_sites` | Sites hydro nettoyés | `bronze.hydrometry_sites_raw` | - |
 | `stg_hydrometry_obs_elab` | Observations hydro nettoyées | `bronze.hydrometry_obs_elab_raw` | Observations non-nulles |
 | `stg_era5_timeseries` | Time series ERA5 nettoyées | `bronze.era5_france_timeseries` | Observations non-nulles |
-| `stg_tme_entites` | TME nettoyé | `bronze.tme_entites_hydrogeo` | Valeurs 'X' converties en NULL |
+| `stg_tme_entites` | TME nettoyé | `bronze.tme_entites_hydrogeo` | Typage et normalisation minimale |
+
+Note : en mode TME seul, les colonnes `libelle_*_eh` et la géométrie restent NULL.
 
 **Transformations appliquées** :
 - Type casting (VARCHAR → NUMERIC, DATE, etc.)
 - Renommage colonnes (standardisation)
 - Filtrage des valeurs NULL
-- Nettoyage des valeurs invalides ('X' → NULL)
+- Nettoyage léger (trim)
 
 ---
 

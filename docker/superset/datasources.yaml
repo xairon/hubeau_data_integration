@@ -157,3 +157,22 @@ databases:
           - column_name: niveau_alerte
             filterable: true
             groupby: true
+      # --- Autres tables Gold (ajoutées pour accès complet) ---
+      - table_name: agg_station_trends
+        schema: gold
+        description: "Agrégats de tendances par station (gold)"
+      - table_name: fct_monthly_chroniques
+        schema: gold
+        description: "Chroniques mensuelles agrégées (gold)"
+      - table_name: fct_yearly_stats
+        schema: gold
+        description: "Statistiques annuelles (gold)"
+      - table_name: int_daily_measurements
+        schema: gold
+        description: "Mesures quotidiennes agrégées (intermediate gold)"
+      - table_name: int_era5_for_stations
+        schema: gold
+        description: "ERA5 filtré pour stations (intermediate gold)"
+      - table_name: int_station_era5_mapping
+        schema: gold
+        description: "Mapping stations ↔ ERA5 + métadonnées TME (intermediate gold)"
