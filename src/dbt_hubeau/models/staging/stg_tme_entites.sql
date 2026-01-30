@@ -47,9 +47,13 @@ enriched AS (
     LEFT JOIN LATERAL (
         SELECT *
         FROM {{ source('staging', 'tme_entites_hydrogeo') }} t
-        WHERE TRIM(t.code_eh) = TRIM(base.code_eh)
-           OR REGEXP_REPLACE(TRIM(t.code_eh), '^0+', '') = REGEXP_REPLACE(TRIM(base.code_eh), '^0+', '')
-        ORDER BY CASE WHEN TRIM(t.code_eh) = TRIM(base.code_eh) THEN 0 ELSE 1 END
+        WHERE t.code_eh IS NOT NULL
+          AND TRIM(t.code_eh) != ''
+          AND (
+            UPPER(TRIM(t.code_eh)) = UPPER(TRIM(base.code_eh))
+            OR REGEXP_REPLACE(UPPER(TRIM(t.code_eh)), '^0+', '') = REGEXP_REPLACE(UPPER(TRIM(base.code_eh)), '^0+', '')
+          )
+        ORDER BY CASE WHEN UPPER(TRIM(t.code_eh)) = UPPER(TRIM(base.code_eh)) THEN 0 ELSE 1 END
         LIMIT 1
     ) tme ON true
 )

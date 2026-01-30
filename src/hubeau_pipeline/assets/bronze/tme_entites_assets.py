@@ -43,15 +43,30 @@ def _validate_schema_table(schema_name: str, table_name: str) -> None:
 CSV_TO_BRONZE = {
     "id": "tme_id",
     "CodeEH": "code_eh",
+    "Code EH": "code_eh",
+    "Code entite": "code_eh",
+    "Code entité": "code_eh",
+    "Code_entite": "code_eh",
     "LibelleEH": "libelle_eh",
+    "Libelle EH": "libelle_eh",
+    "Libelle entite": "libelle_eh",
+    "Libelle entité": "libelle_eh",
     "OrdreAbsEH": "ordre_abs_eh",
+    "OrdreAbs EH": "ordre_abs_eh",
     "NiveauEH": "niveau_eh",
+    "Niveau EH": "niveau_eh",
     "InclusEH": "inclus_eh",
+    "Inclus EH": "inclus_eh",
     "EtatEH": "etat_eh",
+    "Etat EH": "etat_eh",
     "NatureEH": "nature_eh",
+    "Nature EH": "nature_eh",
     "MilieuEH": "milieu_eh",
+    "Milieu EH": "milieu_eh",
     "ThemeEH": "theme_eh",
+    "Theme EH": "theme_eh",
     "OrigineEH": "origine_eh",
+    "Origine EH": "origine_eh",
 }
 # Variantes déjà en snake_case (ex. CSV BDLISA normalisé)
 for _v in list(CSV_TO_BRONZE.values()):
@@ -141,7 +156,41 @@ def _read_one_csv_from_zip(
                 rename[c] = normalized_to_bronze[n]
     df = df.rename(columns=rename)
     cols = [c for c in TME_BRONZE_COLUMNS if c in df.columns]
-    if not cols or "code_eh" not in df.columns:
+    if not cols:
+        if context:
+            context.log.warning(
+                "Aucune colonne TME reconnue dans %s (colonnes: %s)",
+                csv_path,
+                list(df.columns),
+            )
+        return None
+    if "code_eh" not in df.columns:
+        if context:
+            context.log.warning(
+                "Colonne code_eh absente dans %s (colonnes: %s)",
+                csv_path,
+                list(df.columns),
+            )
+        return None
+    # Exiger au moins un attribut TME (évite de charger des tables de codes département)
+    attr_candidates = [
+        "libelle_eh",
+        "niveau_eh",
+        "etat_eh",
+        "nature_eh",
+        "milieu_eh",
+        "theme_eh",
+        "origine_eh",
+        "ordre_abs_eh",
+        "inclus_eh",
+    ]
+    if not any(c in df.columns for c in attr_candidates):
+        if context:
+            context.log.info(
+                "CSV ignoré (pas d'attributs TME) : %s (colonnes: %s)",
+                csv_path,
+                list(df.columns),
+            )
         return None
     for c in TME_BRONZE_COLUMNS:
         if c not in df.columns:
@@ -172,10 +221,36 @@ def _read_all_tme_csv_from_zip(
         if not dfs:
             return None
         out = pd.concat(dfs, ignore_index=True)
-        out = out.drop_duplicates(subset=["code_eh"], keep="first")
+        out["code_eh"] = out["code_eh"].astype(str).str.strip()
+        # Exclure les codes département / agrégat (ex. 104, 121, 974) : garder uniquement
+        # les codes entité BDLISA (ex. 050AA01, 974AH) qui contiennent au moins une lettre.
+        before = len(out)
+        out = out[out["code_eh"].str.contains(r"[A-Za-z]", na=False)]
+        if context and len(out) < before:
+            context.log.info("TME : %s lignes exclues (codes département sans lettre)", before - len(out))
+
+        # Garder la meilleure ligne par code_eh : on privilégie celles avec attributs renseignés.
+        attr_cols = [
+            "libelle_eh",
+            "ordre_abs_eh",
+            "niveau_eh",
+            "inclus_eh",
+            "etat_eh",
+            "nature_eh",
+            "milieu_eh",
+            "theme_eh",
+            "origine_eh",
+        ]
+        for c in attr_cols:
+            if c in out.columns:
+                out[c] = out[c].replace("", None)
+        out["_attr_score"] = out[attr_cols].notna().sum(axis=1)
+        out = out.sort_values(["code_eh", "_attr_score"], ascending=[True, False])
+        out = out.drop_duplicates(subset=["code_eh"], keep="first").drop(columns=["_attr_score"])
+
         if context:
-            context.log.info("TME fusionné : %s lignes (après dédoublonnage code_eh)", len(out))
-        return out
+            context.log.info("TME fusionné : %s lignes (codes entité uniquement)", len(out))
+        return out if len(out) > 0 else None
 
 
 def _find_and_read_csv_in_zip(
@@ -233,8 +308,9 @@ def tme_entites_hydrogeo(
 ) -> dict:
     """
     Charge le TME dans bronze.tme_entites_hydrogeo.
-    Source : 1) zip BDLISA CSV national (contient TME) ;
-            2) zip config (gpkg, souvent sans CSV) ; 3) fichier TME.csv local. Sinon table vide.
+    Source : 1) fichier TME.csv local (prioritaire, si présent) ;
+            2) zip BDLISA CSV national (contient TME) ;
+            3) zip config (gpkg, souvent sans CSV). Sinon table vide.
     Fait partie du job reference_data_bronze (chargement des référentiels).
     """
     _validate_schema_table("bronze", "tme_entites_hydrogeo")
@@ -242,16 +318,22 @@ def tme_entites_hydrogeo(
     df: Optional[pd.DataFrame] = None
     source = "vide"
 
-    # 1) Archive CSV nationale : fusionner tous les CSV TME/entités (Métropole + DOM, etc.)
-    try:
-        zip_bytes = _fetch_zip(context, BDLISA_NATIONAL_CSV_URL)
-        df = _find_and_read_csv_in_zip(zip_bytes, context, concat_all=True)
-        if df is not None and len(df) > 0:
-            source = BDLISA_NATIONAL_CSV_URL
-    except Exception as e:
-        context.log.warning("Zip BDLISA CSV national non utilisé : %s", e)
+    # 1) Fichier local (prioritaire si présent)
+    df = _read_local_tme_csv(context)
+    if df is not None and len(df) > 0:
+        source = "TME.csv (local)"
 
-    # 2) Si rien, zip config (gpkg : souvent sans CSV)
+    # 2) Archive CSV nationale : fusionner tous les CSV TME/entités (Métropole + DOM, etc.)
+    if df is None or len(df) == 0:
+        try:
+            zip_bytes = _fetch_zip(context, BDLISA_NATIONAL_CSV_URL)
+            df = _find_and_read_csv_in_zip(zip_bytes, context, concat_all=True)
+            if df is not None and len(df) > 0:
+                source = BDLISA_NATIONAL_CSV_URL
+        except Exception as e:
+            context.log.warning("Zip BDLISA CSV national non utilisé : %s", e)
+
+    # 3) Zip config (gpkg : souvent sans CSV)
     if df is None or len(df) == 0:
         cfg = _load_bdlisa_config(context)
         url = cfg.get("url") or DEFAULT_BDLISA_GPKG_URL
@@ -264,17 +346,19 @@ def tme_entites_hydrogeo(
             except Exception as e:
                 context.log.warning("Zip BDLISA (gpkg) sans CSV ou erreur : %s", e)
 
-    # 3) Fallback fichier local
     if df is None or len(df) == 0:
-        df = _read_local_tme_csv(context)
-        if df is not None and len(df) > 0:
-            source = "TME.csv (local)"
-
-    if df is None or len(df) == 0:
-        context.log.warning("Aucune source TME trouvée — création table vide pour que dbt puisse tourner")
+        context.log.error("Aucune source TME trouvée — table vide, stg_tme_entites restera NULL")
         df = pd.DataFrame(columns=TME_BRONZE_COLUMNS)
     else:
         context.log.info("Source TME : %s — %s lignes", source, len(df))
+        # Vérifier la présence de codes entité (lettres) et de codes Métropole (0xx...)
+        code_series = df["code_eh"].astype(str).str.strip()
+        entity_count = code_series.str.contains(r"[A-Za-z]", na=False).sum()
+        metro_count = code_series.str.match(r"^0[0-9]{2}[A-Za-z]", na=False).sum()
+        if entity_count == 0:
+            context.log.warning("TME chargé sans codes entité (aucune lettre dans code_eh) — vérifier les CSV")
+        if metro_count == 0:
+            context.log.warning("Aucun code Métropole détecté dans TME — jointure BDLISA METRO impossible")
 
     # Toujours le même schéma (colonnes attendues par stg_tme_entites)
     for c in TME_BRONZE_COLUMNS:
