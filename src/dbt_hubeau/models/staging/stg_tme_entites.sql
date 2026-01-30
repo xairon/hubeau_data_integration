@@ -44,8 +44,14 @@ enriched AS (
         tme.inclus_eh,
         base.geometry
     FROM base
-    LEFT JOIN {{ source('staging', 'tme_entites_hydrogeo') }} tme
-        ON TRIM(base.code_eh) = TRIM(tme.code_eh)
+    LEFT JOIN LATERAL (
+        SELECT *
+        FROM {{ source('staging', 'tme_entites_hydrogeo') }} t
+        WHERE TRIM(t.code_eh) = TRIM(base.code_eh)
+           OR REGEXP_REPLACE(TRIM(t.code_eh), '^0+', '') = REGEXP_REPLACE(TRIM(base.code_eh), '^0+', '')
+        ORDER BY CASE WHEN TRIM(t.code_eh) = TRIM(base.code_eh) THEN 0 ELSE 1 END
+        LIMIT 1
+    ) tme ON true
 )
 SELECT
     enriched.tme_id,

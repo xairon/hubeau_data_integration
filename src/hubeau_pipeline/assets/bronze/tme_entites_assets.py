@@ -99,11 +99,94 @@ def _normalize_header(name: str) -> str:
     return s or "col"
 
 
-def _find_and_read_csv_in_zip(
+def _read_one_csv_from_zip(
+    zf: "zipfile.ZipFile",
+    csv_path: str,
+    context: Optional[AssetExecutionContext] = None,
+) -> Optional[pd.DataFrame]:
+    """Lit un CSV du zip, mappe les colonnes vers TME_BRONZE_COLUMNS, retourne un DataFrame ou None."""
+    try:
+        with zf.open(csv_path) as f:
+            raw = f.read()
+    except Exception as e:
+        if context:
+            context.log.warning("Impossible de lire %s : %s", csv_path, e)
+        return None
+
+    def _read_with_encoding(sep: str):
+        try:
+            return pd.read_csv(
+                io.BytesIO(raw), encoding="utf-8", dtype=str, keep_default_na=False,
+                on_bad_lines="warn", sep=sep
+            )
+        except UnicodeDecodeError:
+            return pd.read_csv(
+                io.BytesIO(raw), encoding="latin-1", dtype=str, keep_default_na=False,
+                on_bad_lines="warn", sep=sep
+            )
+
+    df = _read_with_encoding(";")
+    if df.shape[1] <= 1 and len(df.columns) == 1 and ("," in str(df.columns[0]) or ";" in str(df.columns[0])):
+        df = _read_with_encoding(",")
+    rename = {}
+    normalized_to_bronze = {_normalize_header(c): c for c in TME_BRONZE_COLUMNS}
+    for c in df.columns:
+        if c in CSV_TO_BRONZE:
+            rename[c] = CSV_TO_BRONZE[c]
+        elif c.strip() in CSV_TO_BRONZE:
+            rename[c] = CSV_TO_BRONZE[c.strip()]
+        else:
+            n = _normalize_header(c)
+            if n in normalized_to_bronze:
+                rename[c] = normalized_to_bronze[n]
+    df = df.rename(columns=rename)
+    cols = [c for c in TME_BRONZE_COLUMNS if c in df.columns]
+    if not cols or "code_eh" not in df.columns:
+        return None
+    for c in TME_BRONZE_COLUMNS:
+        if c not in df.columns:
+            df[c] = None
+    return df[TME_BRONZE_COLUMNS].copy()
+
+
+def _read_all_tme_csv_from_zip(
     zip_bytes: bytes,
     context: Optional[AssetExecutionContext] = None,
 ) -> Optional[pd.DataFrame]:
-    """Cherche un fichier CSV dans le zip BDLISA et retourne un DataFrame (colonnes mappées)."""
+    """Lit tous les CSV TME/entités du zip, les concatène et dédoublonne par code_eh (tous périmètres)."""
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        names = zf.namelist()
+        csv_names = [n for n in names if n.lower().endswith(".csv")]
+        tme_like = [n for n in csv_names if "tme" in n.lower() or "entite" in n.lower() or "entites" in n.lower()]
+        to_read = sorted(tme_like) if tme_like else sorted(csv_names)
+        if context:
+            context.log.info("CSV à fusionner (%s) : %s", len(to_read), to_read[:15])
+        dfs = []
+        for csv_path in to_read:
+            df = _read_one_csv_from_zip(zf, csv_path, context)
+            if df is not None and len(df) > 0 and "code_eh" in df.columns:
+                dfs.append(df)
+                if context:
+                    context.log.info("Lu %s : %s lignes", csv_path, len(df))
+        if not dfs:
+            return None
+        out = pd.concat(dfs, ignore_index=True)
+        out = out.drop_duplicates(subset=["code_eh"], keep="first")
+        if context:
+            context.log.info("TME fusionné : %s lignes (après dédoublonnage code_eh)", len(out))
+        return out
+
+
+def _find_and_read_csv_in_zip(
+    zip_bytes: bytes,
+    context: Optional[AssetExecutionContext] = None,
+    concat_all: bool = False,
+) -> Optional[pd.DataFrame]:
+    """Cherche un ou plusieurs CSV dans le zip BDLISA et retourne un DataFrame (colonnes mappées).
+    Si concat_all=True, lit et fusionne tous les CSV TME/entités (pour zip national multi-périmètres)."""
+    if concat_all:
+        return _read_all_tme_csv_from_zip(zip_bytes, context)
     import zipfile
     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
         names = zf.namelist()
@@ -113,7 +196,6 @@ def _find_and_read_csv_in_zip(
             context.log.info("CSV trouvés : %s", csv_names)
         if not csv_names:
             return None
-        # Priorité : TME.csv (tableau multi-échelles), puis fichiers *entite*
         tme_csv = [n for n in csv_names if n.endswith("TME.csv") or n.endswith("/TME.csv")]
         if tme_csv:
             first_csv = tme_csv[0]
@@ -123,43 +205,7 @@ def _find_and_read_csv_in_zip(
                 n,
             ))
             first_csv = csv_names[0]
-        with zf.open(first_csv) as f:
-            raw = f.read()
-
-        def _read_with_encoding(sep: str):
-            try:
-                return pd.read_csv(io.BytesIO(raw), encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=sep)
-            except UnicodeDecodeError:
-                return pd.read_csv(io.BytesIO(raw), encoding="latin-1", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=sep)
-
-        # BDLISA : TME.csv est souvent en virgule ; d'autres CSV en point-virgule
-        df = _read_with_encoding(";")
-        # Une seule colonne avec des virgules = mauvais séparateur
-        if df.shape[1] <= 1 and len(df.columns) == 1 and ("," in str(df.columns[0]) or ";" in str(df.columns[0])):
-            df = _read_with_encoding(",")
-        raw_columns = list(df.columns)
-        if context:
-            context.log.info("CSV lu : %s — colonnes brutes : %s", first_csv, raw_columns)
-        # Mapper : d'abord mapping exact, puis normalisé (ex. "Code EH" -> code_eh)
-        rename = {}
-        normalized_to_bronze = {_normalize_header(c): c for c in TME_BRONZE_COLUMNS}
-        for c in df.columns:
-            if c in CSV_TO_BRONZE:
-                rename[c] = CSV_TO_BRONZE[c]
-            elif c.strip() in CSV_TO_BRONZE:
-                rename[c] = CSV_TO_BRONZE[c.strip()]
-            else:
-                n = _normalize_header(c)
-                if n in normalized_to_bronze:
-                    rename[c] = normalized_to_bronze[n]
-        df = df.rename(columns=rename)
-        cols = [c for c in TME_BRONZE_COLUMNS if c in df.columns]
-        if context and not cols:
-            context.log.warning("Aucune colonne TME reconnue dans %s (colonnes après mapping : %s)", first_csv, list(df.columns))
-        if not cols:
-            return None
-        df = df[cols].copy()
-        return df
+        return _read_one_csv_from_zip(zf, first_csv, context)
 
 
 def _read_local_tme_csv(context: AssetExecutionContext) -> Optional[pd.DataFrame]:
@@ -187,8 +233,8 @@ def tme_entites_hydrogeo(
 ) -> dict:
     """
     Charge le TME dans bronze.tme_entites_hydrogeo.
-    Source : 1) zip BDLISA (même URL que bdlisa_entites_raw), extraction d'un CSV si présent ;
-            2) zip BDLISA CSV national ; 3) fichier TME.csv local. Sinon table vide.
+    Source : 1) zip BDLISA CSV national (contient TME) ;
+            2) zip config (gpkg, souvent sans CSV) ; 3) fichier TME.csv local. Sinon table vide.
     Fait partie du job reference_data_bronze (chargement des référentiels).
     """
     _validate_schema_table("bronze", "tme_entites_hydrogeo")
@@ -196,26 +242,27 @@ def tme_entites_hydrogeo(
     df: Optional[pd.DataFrame] = None
     source = "vide"
 
-    # 1) Zip BDLISA (config = même que gpkg)
-    cfg = _load_bdlisa_config(context)
-    url = cfg.get("url") or DEFAULT_BDLISA_GPKG_URL
+    # 1) Archive CSV nationale : fusionner tous les CSV TME/entités (Métropole + DOM, etc.)
     try:
-        zip_bytes = _fetch_zip(context, url)
-        df = _find_and_read_csv_in_zip(zip_bytes, context)
+        zip_bytes = _fetch_zip(context, BDLISA_NATIONAL_CSV_URL)
+        df = _find_and_read_csv_in_zip(zip_bytes, context, concat_all=True)
         if df is not None and len(df) > 0:
-            source = url
+            source = BDLISA_NATIONAL_CSV_URL
     except Exception as e:
-        context.log.warning("Zip BDLISA (gpkg) sans CSV ou erreur : %s", e)
+        context.log.warning("Zip BDLISA CSV national non utilisé : %s", e)
 
-    # 2) Si rien, essayer l'archive CSV nationale
-    if (df is None or len(df) == 0) and url != BDLISA_NATIONAL_CSV_URL:
-        try:
-            zip_bytes = _fetch_zip(context, BDLISA_NATIONAL_CSV_URL)
-            df = _find_and_read_csv_in_zip(zip_bytes, context)
-            if df is not None and len(df) > 0:
-                source = BDLISA_NATIONAL_CSV_URL
-        except Exception as e:
-            context.log.warning("Zip BDLISA CSV national non utilisé : %s", e)
+    # 2) Si rien, zip config (gpkg : souvent sans CSV)
+    if df is None or len(df) == 0:
+        cfg = _load_bdlisa_config(context)
+        url = cfg.get("url") or DEFAULT_BDLISA_GPKG_URL
+        if url != BDLISA_NATIONAL_CSV_URL:
+            try:
+                zip_bytes = _fetch_zip(context, url)
+                df = _find_and_read_csv_in_zip(zip_bytes, context)
+                if df is not None and len(df) > 0:
+                    source = url
+            except Exception as e:
+                context.log.warning("Zip BDLISA (gpkg) sans CSV ou erreur : %s", e)
 
     # 3) Fallback fichier local
     if df is None or len(df) == 0:
