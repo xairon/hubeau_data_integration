@@ -5,6 +5,7 @@
       {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['code_departement']},
+      {'columns': ['grandeur_hydro_principale']},
       {'columns': ['geometry'], 'type': 'gist'}
     ],
     post_hook=[
@@ -16,14 +17,59 @@
 }}
 
 -- Dimension stations hydrométriques enrichie
--- Source: stg_hydrometry_stations
+-- Source: stg_hydrometry_stations + fct_monthly_hydro + fct_yearly_hydro
 
 WITH stations AS (
     SELECT * FROM {{ ref('stg_hydrometry_stations') }}
 ),
 
--- On pourrait joindre ici avec des stats d'observations si on créait fct_monthly_hydro
--- Pour l'instant, c'est une dimension simple enrichie
+monthly_stats AS (
+    SELECT
+        code_station,
+        grandeur_hydro_elab,
+        MIN(mois) AS premiere_mesure,
+        MAX(mois) AS derniere_mesure,
+        SUM(nb_jours_mesures) AS nb_jours_total,
+        COUNT(*) AS nb_mois_total,
+        AVG(resultat_moyen) AS resultat_moyen_global,
+        MIN(resultat_min) AS resultat_min_global,
+        MAX(resultat_max) AS resultat_max_global,
+        STDDEV(resultat_moyen) AS resultat_stddev_global
+    FROM {{ ref('fct_monthly_hydro') }}
+    GROUP BY code_station, grandeur_hydro_elab
+),
+
+primary_grandeur AS (
+    SELECT DISTINCT ON (code_station)
+        code_station,
+        grandeur_hydro_elab
+    FROM monthly_stats
+    ORDER BY code_station, nb_jours_total DESC NULLS LAST
+),
+
+stats_globales AS (
+    SELECT
+        ms.*
+    FROM monthly_stats ms
+    INNER JOIN primary_grandeur pg
+        ON ms.code_station = pg.code_station
+       AND ms.grandeur_hydro_elab = pg.grandeur_hydro_elab
+),
+
+derniere_annee AS (
+    SELECT DISTINCT ON (code_station)
+        fy.code_station,
+        fy.grandeur_hydro_elab,
+        fy.annee AS annee_dernier_bilan,
+        fy.resultat_moyen_annuel AS resultat_moyen_dern_annee,
+        fy.classification_resultat_annuel AS classification_resultat_dern_annee,
+        fy.percentile_resultat_historique AS percentile_resultat_dern_annee
+    FROM {{ ref('fct_yearly_hydro') }} fy
+    INNER JOIN primary_grandeur pg
+        ON fy.code_station = pg.code_station
+       AND fy.grandeur_hydro_elab = pg.grandeur_hydro_elab
+    ORDER BY fy.code_station, fy.annee DESC
+),
 
 metadata AS (
     SELECT
@@ -53,4 +99,26 @@ metadata AS (
     FROM stations
 )
 
-SELECT * FROM metadata
+SELECT
+    m.*,
+    pg.grandeur_hydro_elab AS grandeur_hydro_principale,
+    sg.premiere_mesure,
+    sg.derniere_mesure,
+    sg.nb_jours_total,
+    sg.nb_mois_total,
+    sg.resultat_moyen_global,
+    sg.resultat_min_global,
+    sg.resultat_max_global,
+    sg.resultat_stddev_global,
+    da.annee_dernier_bilan,
+    da.resultat_moyen_dern_annee,
+    da.classification_resultat_dern_annee,
+    da.percentile_resultat_dern_annee
+FROM metadata m
+LEFT JOIN primary_grandeur pg ON m.code_station = pg.code_station
+LEFT JOIN stats_globales sg
+    ON m.code_station = sg.code_station
+   AND pg.grandeur_hydro_elab = sg.grandeur_hydro_elab
+LEFT JOIN derniere_annee da
+    ON m.code_station = da.code_station
+   AND pg.grandeur_hydro_elab = da.grandeur_hydro_elab

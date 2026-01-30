@@ -120,7 +120,7 @@ models:
   - name: stations_piezo_carte
     description: |
       Mart "prêt carte" pour Superset : une ligne par station avec géométrie (geom),
-      entité BDLISA (code_eh, libelle_eh, …) et indicateurs (niveau_alerte, tendance_classification).
+      entité TME (code_eh, libelle_eh, …) et indicateurs (niveau_alerte, tendance_classification).
       Évite les jointures côté BI pour les calques "stations piézo" avec libellés et alertes.
     columns:
       - name: code_bss
@@ -128,7 +128,7 @@ models:
       - name: geom
         description: "Géométrie PostGIS (point station)"
       - name: code_eh
-        description: "Code entité hydrogéologique BDLISA"
+        description: "Code entité hydrogéologique TME"
       - name: libelle_eh
         description: "Libellé entité hydrogéologique"
       - name: niveau_alerte
@@ -150,3 +150,174 @@ models:
         tests:
           - accepted_values:
               values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
+
+  - name: hydro_daily_chroniques
+    description: "Table finale hydrométrie combinant observations et météo ERA5"
+    columns:
+      - name: code_station
+        tests:
+          - not_null
+      - name: date
+        tests:
+          - not_null
+      - name: grandeur_hydro_elab
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_station
+            - date
+            - grandeur_hydro_elab
+
+  - name: fct_monthly_hydro
+    description: "Agrégations mensuelles des mesures hydrométriques et météo"
+    columns:
+      - name: code_station
+        tests:
+          - not_null
+      - name: mois
+        tests:
+          - not_null
+      - name: grandeur_hydro_elab
+        tests:
+          - not_null
+      - name: resultat_moyen
+        tests:
+          - not_null
+
+  - name: fct_yearly_hydro
+    description: "Statistiques annuelles hydrométriques et classification par quantiles"
+    columns:
+      - name: code_station
+        tests:
+          - not_null
+      - name: annee
+        tests:
+          - not_null
+      - name: grandeur_hydro_elab
+        tests:
+          - not_null
+      - name: classification_resultat_annuel
+        tests:
+          - accepted_values:
+              values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+
+  - name: agg_hydro_trends
+    description: "Tendances saisonnières hydrométriques par station"
+    columns:
+      - name: code_station
+        tests:
+          - not_null
+      - name: saison
+        tests:
+          - accepted_values:
+              values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
+      - name: classification_tendance
+        tests:
+          - accepted_values:
+              values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
+
+  - name: dim_hydro_stations
+    description: "Dimension Stations hydrométriques enrichie avec statistiques"
+    columns:
+      - name: code_station
+        tests:
+          - unique
+          - not_null
+
+  - name: stations_hydro_carte
+    description: |
+      Mart "prêt carte" pour Superset : une ligne par station hydrométrique avec géométrie (geom)
+      et indicateurs hydrométriques principaux. Évite les jointures côté BI.
+    columns:
+      - name: code_station
+        tests: [unique, not_null]
+      - name: geom
+        description: "Géométrie PostGIS (point station)"
+
+  - name: dim_date
+    description: "Dimension temps pour analyses (jour, mois, semaine, trimestre)"
+    columns:
+      - name: date
+        tests: [unique, not_null]
+
+  - name: dim_geography
+    description: "Dimension géographique issue des stations piézo et hydro"
+    columns: []
+
+  - name: ml_features_piezo_daily
+    description: "Features ML journalières piézométrie"
+    columns:
+      - name: code_bss
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+
+  - name: ml_anomalies_piezo_daily
+    description: "Détection d'anomalies piézométrie (z-score)"
+    columns:
+      - name: code_bss
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+
+  - name: ml_correlations_piezo_station
+    description: "Corrélations stationnaires piézométrie ↔ météo"
+    columns:
+      - name: code_bss
+        tests: [not_null, unique]
+
+  - name: ml_train_test_piezo_daily
+    description: "Dataset ML piézométrie avec split train/validation/test"
+    columns:
+      - name: code_bss
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: dataset_split
+        tests:
+          - accepted_values:
+              values: ['train', 'validation', 'test']
+
+  - name: ml_features_hydro_daily
+    description: "Features ML journalières hydrométrie"
+    columns:
+      - name: code_station
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: grandeur_hydro_elab
+        tests: [not_null]
+
+  - name: ml_anomalies_hydro_daily
+    description: "Détection d'anomalies hydrométrie (z-score)"
+    columns:
+      - name: code_station
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: grandeur_hydro_elab
+        tests: [not_null]
+
+  - name: ml_correlations_hydro_station
+    description: "Corrélations stationnaires hydrométrie ↔ météo"
+    columns:
+      - name: code_station
+        tests: [not_null]
+      - name: grandeur_hydro_elab
+        tests: [not_null]
+
+  - name: ml_train_test_hydro_daily
+    description: "Dataset ML hydrométrie avec split train/validation/test"
+    columns:
+      - name: code_station
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: grandeur_hydro_elab
+        tests: [not_null]
+      - name: dataset_split
+        tests:
+          - accepted_values:
+              values: ['train', 'validation', 'test']

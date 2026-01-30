@@ -41,20 +41,25 @@ Variables utiles :
 
 ## 🟠 Data Issues
 
-### Libellés BDLISA (libelle_eh, etc.) NULL dans stations_piezo_carte / mapping
+### Libellés TME (libelle_eh, etc.) NULL dans stations_piezo_carte / mapping
 **Symptoms**: `libelle_eh` (et éventuellement `code_eh`) toujours NULL dans `gold.stations_piezo_carte` ou `gold.int_station_era5_mapping`.
 
 **Cause**: 
 - `int_station_era5_mapping` est en **incrémental** : les lignes déjà présentes ne sont pas recalculées.
-- Ou jointure TME (code / spatial) qui ne matche pas (stations sans `codes_bdlisa`, ou hors polygones BDLISA).
+- Ou jointure TME (code / spatial) qui ne matche pas (stations sans `codes_bdlisa`, ou hors géométries TME).
+- Ou le fichier TME.csv source ne contient pas les libellés complets.
 
 **Solution**:
-1. Forcer un recalcul complet du mapping :
+1. Vérifier que `bronze.tme_entites_hydrogeo` contient des données :
+   ```sql
+   SELECT COUNT(*), COUNT(libelle_eh) FROM bronze.tme_entites_hydrogeo;
+   ```
+2. Forcer un recalcul complet du mapping :
    ```bash
    docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'
    ```
-2. Si toujours NULL après run : exécuter `scripts/diagnose_tme_mapping.sql` (sur la base) pour vérifier `avec_libelle_eh` vs `sans_libelle_eh`, et `codes_bdlisa` renseigné ou non.
-3. Vérifier que `silver.stg_tme_entites` contient bien `libelle_eh` (et `code_eh`). Les colonnes niveau/etat/nature/milieu/theme/origine restent souvent NULL avec le layer 0 du gpkg BDLISA (voir `docs/BDLISA_INTEGRATION.md`).
+3. Si toujours NULL après run : exécuter `scripts/diagnose_tme_mapping.sql` (sur la base) pour vérifier `avec_libelle_eh` vs `sans_libelle_eh`, et `codes_bdlisa` renseigné ou non.
+4. Vérifier que `silver.stg_tme_entites` contient bien `libelle_eh` (et `code_eh`). Voir `docs/BDLISA_INTEGRATION.md` pour plus de détails sur les sources TME.
 
 ### Gap in ERA5 Data
 **Symptoms**: Missing dates in `bronze.era5_france_timeseries`

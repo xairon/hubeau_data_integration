@@ -1,0 +1,84 @@
+{{
+  config(
+    materialized = 'table',
+    indexes = [
+      {'columns': ['code_station'], 'unique': True},
+      {'columns': ['code_site']},
+      {'columns': ['grandeur_hydro_principale']},
+      {'columns': ['geom'], 'type': 'gist'}
+    ],
+    post_hook = [
+      "{{ add_primary_key(['code_station']) }}"
+    ]
+  )
+}}
+
+-- Mart "prêt carte" pour Superset : une ligne par station hydrométrique avec géométrie + indicateurs.
+
+WITH mapping AS (
+    SELECT
+        code_station,
+        code_site,
+        geom,
+        station_latitude AS latitude,
+        station_longitude AS longitude,
+        code_departement,
+        nom_departement,
+        code_region,
+        libelle_region,
+        libelle_station,
+        libelle_site,
+        type_site,
+        surface_bv,
+        code_cours_eau,
+        libelle_cours_eau,
+        uri_cours_eau
+    FROM {{ ref('int_hydro_station_era5_mapping') }}
+),
+dim AS (
+    SELECT
+        code_station,
+        grandeur_hydro_principale,
+        premiere_mesure,
+        derniere_mesure,
+        nb_jours_total,
+        nb_mois_total,
+        resultat_moyen_global,
+        resultat_min_global,
+        resultat_max_global,
+        resultat_stddev_global,
+        classification_resultat_dern_annee,
+        percentile_resultat_dern_annee
+    FROM {{ ref('dim_hydro_stations') }}
+)
+
+SELECT
+    m.code_station,
+    m.code_site,
+    m.geom,
+    m.latitude,
+    m.longitude,
+    m.code_departement,
+    m.nom_departement,
+    m.code_region,
+    m.libelle_region,
+    m.libelle_station,
+    m.libelle_site,
+    m.type_site,
+    m.surface_bv,
+    m.code_cours_eau,
+    m.libelle_cours_eau,
+    m.uri_cours_eau,
+    d.grandeur_hydro_principale,
+    d.premiere_mesure,
+    d.derniere_mesure,
+    d.nb_jours_total,
+    d.nb_mois_total,
+    d.resultat_moyen_global,
+    d.resultat_min_global,
+    d.resultat_max_global,
+    d.resultat_stddev_global,
+    d.classification_resultat_dern_annee,
+    d.percentile_resultat_dern_annee
+FROM mapping m
+LEFT JOIN dim d ON m.code_station = d.code_station

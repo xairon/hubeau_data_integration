@@ -35,41 +35,7 @@ sources:
           warn_after: {count: 3, period: day}
           error_after: {count: 7, period: day}
         loaded_at_field: "date_obs_elab::timestamp"
-      # BDLISA + Sandre (données intégrées via pipeline Dagster, plus de seeds)
-      - name: bdlisa_entites_raw
-        description: Référentiel BDLISA V3 brut (GeoPackage → PostGIS)
-        freshness: null
-      - name: bdlisa_entites
-        description: Vue BDLISA schéma fixe (code_eh, libelle_eh, ...) pour dbt
-        freshness: null
+      # Référentiel TME (entités hydrogéologiques)
       - name: tme_entites_hydrogeo
-        description: Attributs TME (niveau, etat, nature, milieu, theme, origine) depuis TME.csv — enrichit stg_tme_entites
-        freshness: null
-      - name: ref_niveau_eh
-        description: Nomenclature Sandre - Niveau entité hydrogéologique
-        freshness: null
-      - name: ref_nature_eh
-        description: Nomenclature Sandre - Nature entité hydrogéologique
-        freshness: null
-      - name: ref_etat_eh
-        description: Nomenclature Sandre - État nappe
-        freshness: null
-      - name: ref_theme_eh
-        description: Nomenclature Sandre - Thème / formation géologique
-        freshness: null
-      - name: ref_milieu_eh
-        description: Nomenclature Sandre / BDLISA - Type de milieu (porosité)
-        freshness: null
-      - name: ref_origine_eh
-        description: Nomenclature Sandre / BDLISA - Potentialités aquifères
-        freshness: null
-      # Référentiels géographiques (calques Superset)
-      - name: referentiel_regions
-        description: Contours régions (data.gouv.fr GeoJSON 1000m)
-        freshness: null
-      - name: referentiel_departements
-        description: Contours départements (data.gouv.fr GeoJSON 1000m)
-        freshness: null
-      - name: referentiel_zones_hydro
-        description: Zones hydrographiques BD Carthage (Sandre)
+        description: Attributs TME (niveau, etat, nature, milieu, theme, origine) depuis TME.csv local ou ZIP national
         freshness: null

@@ -1,86 +1,80 @@
-# Intégration BDLISA
+# Intégration TME (Entités Hydrogéologiques)
 
-La [BDLISA](https://bdlisa.eaufrance.fr/) (Base de Données des LImites des Systèmes Aquifères) est le référentiel hydrogéologique français. Ce document décrit comment l’intégrer au pipeline (données + nomenclatures).
+⚠️ **Note**: BDLISA et les nomenclatures Sandre ont été retirés du pipeline. Seul le référentiel TME est actuellement intégré.
 
-## Nomenclatures : BDLISA vs Sandre
+## Référentiel TME
 
-Le site BDLISA **ne publie pas** les listes de codes/libellés (Niveau, Etat, Nature, Milieu, Thème, Origine) comme pages ou fichiers séparés. Les nomenclatures officielles viennent du **Sandre** (dictionnaire PRL, SAQ 2002-1).
+Le pipeline intègre uniquement les **attributs TME (Tableau Multi-Échelles)** qui contiennent les codes et descriptions des entités hydrogéologiques.
 
-**Mode actuel (simplifié)** : seules les données TME sont intégrées, **sans** chargement Sandre. Les libellés `libelle_*_eh` ne sont donc pas renseignés.
+### Source des données
 
-## Téléchargement des données BDLISA
+**Asset Dagster** : `tme_entites_hydrogeo`
 
-- **Page officielle** : [bdlisa.eaufrance.fr/telechargement](https://bdlisa.eaufrance.fr/telechargement)
-- **Formats** : Geodatabase, Shapefile, SQLite, **GeoPackage**, CSV
-- **Périmètres** : Métropole, ou par région
+Le pipeline charge le fichier TME depuis les sources suivantes (par ordre de priorité) :
 
-On charge le **GeoPackage** (géométrie PostGIS). Lien direct métropole (V3) :
-
-- `https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip`
-
-## Intégration dans le pipeline (mode simplifié)
-
-1. **Asset `tme_entites_hydrogeo`**  
-   Charge le TME (attributs niveau, etat, nature, milieu, theme, origine) dans `bronze.tme_entites_hydrogeo`.  
-   Source : fichier local `TME.csv` (prioritaire), puis ZIP BDLISA national, puis ZIP gpkg (si CSV présent).
-   Chemins locaux reconnus :
-   - `TME.csv` à la racine du repo
+1. **Fichier local TME.csv** (prioritaire) :
+   - `TME.csv` à la racine du projet
    - `D:/BDLISA_V3_NATIONAL-csv(1)/CSV/TME.csv`
-   - variable d’environnement `BDLISA_CSV_DIR` (dossier contenant `TME.csv`)
+   - Variable d'environnement `BDLISA_CSV_DIR` (dossier contenant `TME.csv`)
 
-2. **dbt `stg_tme_entites`**  
-   Lit **uniquement** `source('staging', 'tme_entites_hydrogeo')`.  
-   Pas de jointure Sandre, pas de géométrie BDLISA.
+2. **ZIP national BDLISA** (fallback) :
+   - URL : `https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip`
+   - Extrait le fichier CSV du ZIP si présent
 
-## Alignement des codes : TME (codes EH)
+### Tables créées
 
-Le pipeline utilise les **codes EH** provenant du TME.  
-Vérification rapide :
+| Couche | Table | Description |
+|--------|-------|-------------|
+| **Bronze** | `bronze.tme_entites_hydrogeo` | Données brutes TME (codes EH + attributs) |
+| **Silver** | `silver.stg_tme_entites` | TME nettoyé et typé |
 
-`SELECT code_eh FROM bronze.tme_entites_hydrogeo WHERE code_eh LIKE '221AA%' LIMIT 5;`
+### Colonnes TME
 
----
+Les tables contiennent les colonnes suivantes :
 
-## Pourquoi des NULL en silver et gold ? (mode simplifié)
+- `code_eh` : Code de l'entité hydrogéologique
+- `libelle_eh` : Libellé de l'entité (si disponible)
+- `niveau_eh` : Niveau hiérarchique (1=National, 2=Régional, 3=Local)
+- `etat_eh` : État de l'entité
+- `nature_eh` : Nature de l'entité
+- `milieu_eh` : Type de milieu
+- `theme_eh` : Thème géologique
+- `origine_eh` : Potentialités aquifères
 
-Les valeurs NULL dans les colonnes `libelle_*_eh` en **silver** et **gold** viennent d'une seule cause : **Sandre est désactivé** dans le mode simplifié.
+⚠️ **Note**: Les colonnes `libelle_*_eh` et `geometry` peuvent être NULL selon la source de données disponible.
 
-Chaîne :
+## Utilisation dans le pipeline
 
-1. **Source (TME)**  
-   `bronze.tme_entites_hydrogeo` contient les codes EH et attributs (niveau, état, nature, ...).
+Le référentiel TME est utilisé dans :
 
-2. **Silver**  
-   `stg_tme_entites` reprend les codes et **n’ajoute pas** de libellés Sandre.
+1. **`int_station_era5_mapping`** (gold) : Enrichit les stations piézométriques avec les métadonnées TME
+2. **`hubeau_daily_chroniques`** (gold) : Inclut les colonnes TME pour chaque observation
+3. **`dim_piezo_stations`** (gold) : Métadonnées des stations enrichies avec TME
 
-3. **Gold**  
-   Les marts recopient ces colonnes → les `libelle_*_eh` restent NULL.
+## Vérification
 
-**En résumé** : ce n'est pas un bug du pipeline. Les tables `ref_*_eh` en bronze sont bien remplies (code + libelle), mais comme le **fichier BDLISA** ne fournit pas les codes niveau/etat/nature/milieu/theme/origine, on n'a rien à joindre : la source ne les expose pas, donc bronze → silver → gold propagent des NULL pour ces champs.
+Pour vérifier le chargement du TME :
 
----
+```sql
+-- Compter les entités TME chargées
+SELECT COUNT(*) FROM bronze.tme_entites_hydrogeo;
 
-## Géométrie
+-- Voir un échantillon
+SELECT code_eh, libelle_eh, niveau_eh, nature_eh 
+FROM bronze.tme_entites_hydrogeo 
+LIMIT 10;
 
-La géométrie **n’est pas intégrée** en mode simplifié.  
-Le GeoPackage BDLISA disponible expose des codes EC (`codeec`) qui ne matchent pas les codes EH du TME.
-
-Pour vérifier les colonnes réellement présentes :
-
-```bash
-python scripts/inspect_bdlisa_gpkg.py          # layer 0
-python scripts/inspect_bdlisa_gpkg.py --list-layers
+-- Vérifier l'utilisation dans gold
+SELECT COUNT(DISTINCT code_eh) as nb_entites
+FROM gold.hubeau_daily_chroniques
+WHERE code_eh IS NOT NULL;
 ```
 
-Dépendances : `geopandas`, `httpx`. L’asset `bdlisa_entites_raw` logue aussi les colonnes et le mapping TME dans Dagster.
-
-## Config
-
-- `configs/bdlisa/bdlisa_entites.yml` : URL du ZIP et options (périmètre, format, `layer_index` / `layer_indexes`).
-
-## Références
+## Référence
 
 - [BDLISA – Accueil](https://bdlisa.eaufrance.fr/)
 - [BDLISA – Téléchargement](https://bdlisa.eaufrance.fr/telechargement)
-- [BDLISA – Services de valorisation (WMS/WFS)](https://bdlisa.eaufrance.fr/decouvrir/les-services-de-valorisation-de-la-bdlisa)
-- [Sandre – Dictionnaire PRL](https://api.sandre.eaufrance.fr/definitions/v1/dictionnaire/PRL/1.0)
+
+## Évolution future
+
+L'intégration complète de BDLISA (géométries) et des nomenclatures Sandre (libellés) pourra être réactivée ultérieurement selon les besoins.

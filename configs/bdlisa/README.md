@@ -1,6 +1,18 @@
-# Config BDLISA
+# Config TME (Référentiel des Entités Hydrogéologiques)
 
-Configuration pour l’ingestion du référentiel [BDLISA](https://bdlisa.eaufrance.fr/) (entités hydrogéologiques).
+Configuration pour l'ingestion du référentiel TME (Tableau Multi-Échelles).
 
-- **bdlisa_entites.yml** : URL du ZIP CSV (national ou régional) et table bronze cible.
-- Voir [docs/BDLISA_INTEGRATION.md](../../docs/BDLISA_INTEGRATION.md) pour l’intégration dans le pipeline.
+- **bdlisa_entites.yml** : Configuration pour le téléchargement du fichier TME depuis le ZIP national ou URL custom.
+- Voir [docs/BDLISA_INTEGRATION.md](../../docs/BDLISA_INTEGRATION.md) pour l'intégration dans le pipeline.
+
+## Source des données
+
+Le pipeline charge le fichier TME.csv depuis :
+1. Fichier local `TME.csv` (prioritaire)
+2. ZIP national BDLISA (fallback)
+3. URL custom configurée dans `bdlisa_entites.yml`
+
+## Note
+
+BDLISA complet (géométries) et les nomenclatures Sandre ont été retirés du pipeline.  
+Seul le référentiel TME de base est intégré.

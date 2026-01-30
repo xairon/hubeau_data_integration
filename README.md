@@ -66,7 +66,7 @@ Le projet suit une architecture **Medallion** modernisée avec **TimescaleDB** p
 - **Objectif à terme** : exploiter l’ensemble des données dans Superset (dashboards, cartes, calques : BDLISA, stations, chroniques, météo). Voir [docs/SUPERSET.md](docs/SUPERSET.md).
 - 1. Crée le compte admin (Identifiants définis via variables d'environnement)
 - 2. Connecte-toi (Identifiants définis dans `.env`)
-- 3. La connexion **"Hub'Eau Data Warehouse"** est déjà là (tables gold + calques carto importés au démarrage).
+- 3. La connexion **"Hub'Eau Data Warehouse"** est déjà là (tables gold importées au démarrage).
 
 ## ✨ Fonctionnalités Clés
 
@@ -91,10 +91,17 @@ Tables optimisées pour le reporting et l'analyse.
 | Table | Description | Granularité |
 |-------|-------------|-------------|
 | **`hubeau_daily_chroniques`** | **Fact Table Principale** (Piézo + Météo) | Jour |
+| **`hydro_daily_chroniques`** | **Fact Table Principale** (Hydrométrie + Météo) | Jour |
 | `fct_monthly_chroniques` | Agrégats mensuels et variations | Mois |
 | `fct_yearly_stats` | Bilans annuels, hydrologie, classifications | Année |
+| `fct_monthly_hydro` | Agrégats mensuels hydrométrie | Mois |
+| `fct_yearly_hydro` | Bilans annuels hydrométrie | Année |
 | `agg_station_trends` | Analyse des tendances saisonnières (pentes) | Saison |
+| `agg_hydro_trends` | Analyse des tendances hydrométriques | Saison |
 | `dim_piezo_stations` | Station master avec KPIs et alertes | Station |
+| `dim_hydro_stations` | Stations hydrométriques enrichies | Station |
+| `stations_piezo_carte` | Stations piézo prêtes pour cartes | Station |
+| `stations_hydro_carte` | Stations hydro prêtes pour cartes | Station |
 
 ## 🔧 Commandes Utiles
 
@@ -147,7 +154,6 @@ ORDER BY n_live_tup DESC;
 - [Configuration](docs/CONFIGURATION.md) - Variables d'environnement et configuration
 - [Schéma BDD](docs/SCHEMA_BDD.md) - Structure des tables PostgreSQL
 - [Stockage ERA5](docs/ERA5_DATA_STORAGE.md) - Détails sur le stockage des données ERA5
-- [Intégration BDLISA](docs/BDLISA_INTEGRATION.md) - Référentiels et TME
 - [Runbook](docs/runbook.md) - Procédures d'exploitation et dépannage
 
 ## 🛠️ Technologies

@@ -92,3 +92,65 @@ models:
           combination_of_columns:
             - era5_latitude
             - era5_longitude
+
+  - name: int_hydro_daily_measurements
+    description: "Mesures quotidiennes agrégées (hydrométrie)"
+    columns:
+      - name: code_station
+        description: "Code station hydrométrique"
+        tests:
+          - not_null
+      - name: date_obs_elab
+        description: "Date de la mesure hydrométrique"
+        tests:
+          - not_null
+      - name: grandeur_hydro_elab
+        description: "Grandeur hydrométrique"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_station
+            - date_obs_elab
+            - grandeur_hydro_elab
+
+  - name: int_hydro_station_era5_mapping
+    description: "Mapping stations hydrométriques → grille ERA5. Incrémental : ne calcule que pour les stations absentes."
+    columns:
+      - name: code_station
+        description: "Code station hydrométrique unique"
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('stg_hydrometry_stations')
+              field: code_station
+      - name: era5_latitude
+        description: "Latitude du point grille ERA5"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 41.0
+              max_value: 52.0
+      - name: era5_longitude
+        description: "Longitude du point grille ERA5"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: -5.5
+              max_value: 10.0
+
+  - name: int_era5_for_hydro_stations
+    description: "Données ERA5 filtrées pour les points de grille utilisés par les stations hydrométriques"
+    columns:
+      - name: latitude
+        tests:
+          - not_null
+      - name: longitude
+        tests:
+          - not_null
+      - name: era5_date
+        description: "Date ERA5 (time casté en date)"
+        tests:
+          - not_null

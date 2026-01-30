@@ -14,7 +14,7 @@ ERA5 API ──────┘
 
 | Schéma | Gestion | Contenu |
 |--------|---------|---------|
-| `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + référentiels |
+| `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + TME (`tme_entites_hydrogeo`) |
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `silver_rejects` | dbt rejects | Lignes filtrées (exceptions) avec `rejection_reason` — audit, qualité |
 | `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
@@ -32,7 +32,7 @@ Les tables suivantes sont converties en **Hypertables** (PK incluant la colonne 
 
 - **Géométries** : `make_point(longitude, latitude)` → `geometry(Point, 4326)` (WGS84). Index **GIST** sur toutes les colonnes `geometry` / `geom`.
 - **Distances** : utiliser `::geography` pour des mètres exacts : `ST_Distance(geom::geography, ...)`.
-- **KNN** : l’opérateur `<->` s’appuie sur l’index GIST (ex. plus proche point ERA5 dans `int_station_era5_mapping`).
+- **KNN** : l'opérateur `<->` s'appuie sur l'index GIST (ex. plus proche point ERA5 dans `int_station_era5_mapping`).
 
 ## 📇 Index (silver / gold)
 
@@ -42,15 +42,15 @@ Les tables suivantes sont converties en **Hypertables** (PK incluant la colonne 
 
 ---
 
-## Tables Bronze (DLT)
+## Tables Bronze (DLT + Assets Dagster)
 
-Tables créées automatiquement par DLT au premier run.
+Tables créées automatiquement par DLT et assets Dagster au premier run.
 
 ### Piézométrie
 
 | Table | Description | Volume estimé |
 |-------|-------------|---------------|
-| `piezometry_stations_raw` | Stations BSS | ~23k |
+| `piezometry_stations_raw` | Stations BSS (piézométrie) | ~23k |
 | `piezometry_chroniques_raw` | Mesures niveaux nappes | ~23M |
 
 **Colonnes principales** :
@@ -78,13 +78,15 @@ Tables créées automatiquement par DLT au premier run.
 **Colonnes principales** :
 - `era5_france_timeseries` : `time`, `latitude`, `longitude`, `temperature_2m`, `total_precipitation`, `potential_evaporation`
 
-### Référentiels (Assets Dagster)
+### Référentiel TME (Asset Dagster)
 
 | Table | Description | Volume |
 |-------|-------------|--------|
 | `tme_entites_hydrogeo` | Entités hydrogéologiques (TME) | ~2k |
 
 **Source** : Asset Dagster `tme_entites_hydrogeo` (TME.csv local prioritaire, sinon ZIP national)
+
+**Colonnes** : `code_eh`, `libelle_eh`, `niveau_eh`, `etat_eh`, `nature_eh`, `milieu_eh`, `theme_eh`, `origine_eh`
 
 ### Métadonnées DLT
 
@@ -109,19 +111,18 @@ Tables nettoyées et standardisées depuis bronze.
 | `stg_era5_timeseries` | Time series ERA5 nettoyées | `bronze.era5_france_timeseries` | Observations non-nulles |
 | `stg_tme_entites` | TME nettoyé | `bronze.tme_entites_hydrogeo` | Typage et normalisation minimale |
 
-Note : en mode TME seul, les colonnes `libelle_*_eh` et la géométrie restent NULL.
-
 **Transformations appliquées** :
 - Type casting (VARCHAR → NUMERIC, DATE, etc.)
 - Renommage colonnes (standardisation)
 - Filtrage des valeurs NULL
 - Nettoyage léger (trim)
+- Création de géométries PostGIS (`geometry` / `geom`)
 
 ---
 
 ## Tables de rejet (silver_rejects)
 
-**Bonnes pratiques** : les lignes exclues en silver (mesure nulle, clé manquante, etc.) ne sont pas supprimées sans trace. Elles sont écrites dans des tables **rejet** dans le schéma `silver_rejects`, avec une colonne `rejection_reason` pour l’audit et la qualité.
+**Bonnes pratiques** : les lignes exclues en silver (mesure nulle, clé manquante, etc.) ne sont pas supprimées sans trace. Elles sont écrites dans des tables **rejet** dans le schéma `silver_rejects`, avec une colonne `rejection_reason` pour l'audit et la qualité.
 
 | Table | Source | Motifs de rejet (exemples) |
 |-------|--------|----------------------------|
@@ -137,25 +138,34 @@ Voir `src/dbt_hubeau/models/rejects/README.md` pour les requêtes utiles.
 
 Tables transformées et prêtes pour l'analyse.
 
-### Intermediate
+### Intermediate (Piézométrie + Hydrométrie)
 
 | Table | Description | Source |
 |-------|-------------|--------|
 | `int_daily_measurements` | Mesures quotidiennes agrégées (piézo) | `silver.stg_piezo_chroniques` |
-| `int_station_era5_mapping` | Mapping stations → grille ERA5 + métadonnées TME | `silver.stg_piezo_stations` + `silver.stg_tme_entites` |
+| `int_station_era5_mapping` | Mapping stations piézo → grille ERA5 + métadonnées TME | `silver.stg_piezo_stations` + `silver.stg_tme_entites` |
 | `int_era5_grid_points` | Points de grille ERA5 uniques (pour jointure spatiale) | `silver.stg_era5_timeseries` |
-| `int_era5_for_stations` | ERA5 filtré pour les points de grille utilisés | `silver.stg_era5_timeseries` |
+| `int_era5_for_stations` | ERA5 filtré pour les points de grille utilisés par les stations piézo | `silver.stg_era5_timeseries` |
 
 **Détails** :
 - `int_daily_measurements` : Agrégation par `code_bss` et `date_mesure` (AVG)
 - `int_station_era5_mapping` : Mapping spatial + jointure avec TME
-- `int_era5_for_stations` : Filtrage ERA5 sur les points de grille utilisés par les stations
+- `int_era5_for_stations` : Filtrage ERA5 sur les points utilisés par piézométrie
 
-### Marts
+| `int_hydro_daily_measurements` | Mesures quotidiennes agrégées (hydrométrie) | `silver.stg_hydrometry_obs_elab` |
+| `int_hydro_station_era5_mapping` | Mapping stations hydrométriques → grille ERA5 | `silver.stg_hydrometry_stations` |
+| `int_era5_for_hydro_stations` | ERA5 filtré pour les stations hydrométriques | `silver.stg_era5_timeseries` |
+
+**Détails hydrométrie** :
+- `int_hydro_daily_measurements` : Agrégation par `code_station`, `date_obs_elab`, `grandeur_hydro_elab`
+- `int_hydro_station_era5_mapping` : Mapping spatial + métadonnées station/site
+- `int_era5_for_hydro_stations` : Filtrage ERA5 sur les points utilisés par hydrométrie
+
+### Marts (Piézométrie)
 
 #### `hubeau_daily_chroniques`
 
-**Table finale** : Combine piézométrie + météo ERA5 + métadonnées TME.
+**Table fact principale** : Combine piézométrie + météo ERA5 + métadonnées TME.
 
 | Colonne | Type | Description |
 |---------|------|-------------|
@@ -168,7 +178,7 @@ Tables transformées et prêtes pour l'analyse.
 | `total_precipitation` | NUMERIC | Précipitations ERA5 (mm) - **NON NULL** |
 | `potential_evaporation` | NUMERIC | Évaporation ERA5 (mm) - **NON NULL** |
 | **Métadonnées station** | | |
-| `codes_bdlisa` | VARCHAR | Codes BD-LISA |
+| `codes_bdlisa` | VARCHAR | Codes TME |
 | `code_commune_insee` | VARCHAR | Code INSEE |
 | `nom_commune` | VARCHAR | Nom commune |
 | `altitude_station` | NUMERIC | Altitude (m) |
@@ -189,53 +199,145 @@ Tables transformées et prêtes pour l'analyse.
 | `era5_latitude` | NUMERIC | Latitude point grille ERA5 |
 | `era5_longitude` | NUMERIC | Longitude point grille ERA5 |
 
-**Index** :
-- `(code_bss, date)` - Recherche par station et date
-- `(date)` - Recherche par date
-- `(code_departement)` - Recherche par département
-- `(code_eh)` - Recherche par entité hydrogéologique
-
-**Contraintes** :
-- **Toutes les colonnes d'observation sont NON NULL** (INNER JOIN)
-- Une ligne = une mesure piézo + météo ERA5 + métadonnées TME pour une date donnée
-
-**Table principale** : `gold.hubeau_daily_chroniques`
-- Combine piézométrie + météo ERA5 + métadonnées TME
-- **Toutes les colonnes d'observation sont non-nulles** (INNER JOIN)
-- Prête pour l'analyse
+**Optimisations** :
 - **Hypertable (1 an)** + Compression active
-
-### Nouveaux Marts Analytiques
+- Index sur `(code_bss, date)`, `(date)`, `(code_departement)`, `(code_eh)`
 
 #### `fct_monthly_chroniques`
+
 **Granularité** : Station x Mois
-- Agrégats : Moyennes, Min, Max, Ecart-type
-- Variations : vs mois précédent, vs annee précédente
+
+Agrégats mensuels :
+- Moyennes, Min, Max, Écart-type
+- Variations : vs mois précédent, vs année précédente
 - Moyennes mobiles : 3 mois, 12 mois
-- **Hypertable (5 ans)**
+- **Hypertable (5 ans)** + Compression (730 jours)
 
 #### `fct_yearly_stats`
+
 **Granularité** : Station x Année
-- Agrégats : Moyennes annuelles, Bilan hydrique
-- Percentiles historiques (Rank)
-- Classification annuelle : `TRES_BAS` ... `TRES_HAUT`
+
+Agrégats annuels :
+- Moyennes annuelles, Bilan hydrique
+- Percentiles historiques
+- Classification annuelle : `TRES_BAS`, `BAS`, `NORMAL`, `HAUT`, `TRES_HAUT`
 - **Hypertable (10 ans)**
 
 #### `agg_station_trends`
+
 **Granularité** : Station x Saison
+
+Tendances saisonnières :
 - Régression linéaire (Slope) sur la saison
-- Classification tendance : `HAUSSE_FORTE`, `STABLE`, etc.
+- Classification tendance : `HAUSSE_FORTE`, `HAUSSE_LEGERE`, `STABLE`, `BAISSE_LEGERE`, `BAISSE_FORTE`
+- Projection à 5 ans (extrapolation linéaire)
 
 #### `dim_piezo_stations`
+
 **Granularité** : Station
-- Table dimensionnelle enrichie
+
+Table dimensionnelle enrichie :
 - Statistiques globales (Date début/fin, nb mesures)
-- Indicateurs techniques
+- Indicateurs techniques (niveau moyen, amplitude, tendance)
+- Niveau d'alerte : `NORMAL`, `VIGILANCE`, `ALERTE`
+- Qualité de tendance : `FIABLE`, `INDICATIVE`, `FAIBLE`, `NON_CALCULEE`
+
+#### `stations_piezo_carte`
+
+**Granularité** : Station
+
+Mart "prêt carte" pour Superset :
+- Une ligne par station avec géométrie PostGIS
+- Libellés TME enrichis
+- Indicateurs d'alerte et tendance
+- **Optimisé pour les visualisations cartographiques**
+
+### Marts (Hydrométrie)
+
+#### `hydro_daily_chroniques`
+
+**Table fact principale hydrométrie** : combine observations hydrométriques + météo ERA5.
+
+- **Granularité** : Station × Jour × Grandeur
+- Colonnes principales : `code_station`, `code_site`, `date`, `grandeur_hydro_elab`, `resultat_obs_elab`
+- Métadonnées station/site + météo ERA5 intégrées
+- **Hypertable (1 an)** + Compression active
+
+#### `fct_monthly_hydro`
+
+**Granularité** : Station × Mois × Grandeur
+
+- Agrégats mensuels (moyenne, min, max, stddev)
+- Moyennes mobiles 3/12 mois
+- Variations vs mois précédent et vs année précédente
+- **Hypertable (5 ans)** + Compression (730 jours)
+
+#### `fct_yearly_hydro`
+
+**Granularité** : Station × Année × Grandeur
+
+- Agrégats annuels + percentiles historiques
+- Classification annuelle : `TRES_BAS`, `BAS`, `NORMAL`, `HAUT`, `TRES_HAUT`
+
+#### `agg_hydro_trends`
+
+**Granularité** : Station × Saison × Grandeur
+
+- Tendances saisonnières (régression linéaire)
+- Classification tendance : `HAUSSE_FORTE`, `HAUSSE_LEGERE`, `STABLE`, `BAISSE_LEGERE`, `BAISSE_FORTE`
+- Projection à 5 ans
 
 #### `dim_hydro_stations`
-**Granularité** : Station Hydro
-- Dimension des stations hydrométriques
-- Enrichissement géographique et administratif
+
+**Granularité** : Station
+
+Table dimensionnelle enrichie :
+- Métadonnées stations hydrométriques
+- Géométrie PostGIS
+- Statut station (`ACTIVE` / `FERMEE`)
+- Statistiques globales et indicateurs (grandeur principale)
+
+#### `stations_hydro_carte`
+
+**Granularité** : Station
+
+Mart "prêt carte" pour Superset :
+- Une ligne par station avec géométrie PostGIS
+- Indicateurs hydrométriques principaux
+- **Optimisé pour les visualisations cartographiques**
+
+### Dimensions transverses
+
+#### `dim_date`
+
+**Granularité** : Jour
+
+Dimension temps construite à partir des faits piézo et hydro :
+- `year`, `quarter`, `month`, `week`, `day_of_year`, `iso_day_of_week`
+- Flag `is_weekend`
+
+#### `dim_geography`
+
+Dimension géographique consolidée depuis les stations piézo et hydro :
+- `code_commune`, `nom_commune`
+- `code_departement`, `nom_departement`
+- `code_region`, `nom_region`
+
+### Tables ML / IA
+
+#### Piézométrie
+
+- `ml_features_piezo_daily` : features journalières (lags, rolling, deltas)
+- `ml_anomalies_piezo_daily` : détection d'anomalies (z-score)
+- `ml_correlations_piezo_station` : corrélations stationnaires météo
+- `ml_train_test_piezo_daily` : dataset avec split train/validation/test
+
+#### Hydrométrie
+
+- `ml_features_hydro_daily` : features journalières (lags, rolling, deltas)
+- `ml_anomalies_hydro_daily` : détection d'anomalies (z-score)
+- `ml_correlations_hydro_station` : corrélations stationnaires météo
+- `ml_train_test_hydro_daily` : dataset avec split train/validation/test
 
 ---
 
@@ -323,6 +425,7 @@ SELECT
     MIN(date) AS date_debut,
     MAX(date) AS date_fin
 FROM gold.hubeau_daily_chroniques
+WHERE code_eh IS NOT NULL
 GROUP BY code_eh, libelle_eh
 ORDER BY nb_mesures DESC;
 ```
@@ -347,6 +450,17 @@ ORDER BY mois;
 Les schémas sont créés automatiquement :
 - `bronze` : Créé par DLT et assets Dagster au premier run
 - `silver` : Créé par dbt au premier run
+- `silver_rejects` : Créé par dbt au premier run
 - `gold` : Créé par dbt au premier run
 
-**Note** : Si les schémas n'existent pas, ils seront créés automatiquement lors du premier run des jobs.
+---
+
+## Évolution Future
+
+### Priorité 1 : Référentiels géographiques
+- Ajouter des contours administratifs (régions, départements) si besoin cartographique avancé
+- Ajouter des zones hydrographiques (BD Carthage) si disponible
+
+### Priorité 2 : Optimisation performance
+- Vues matérialisées pour dashboards lourds
+- Agrégations pré-calculées à l'échelle régionale/départementale

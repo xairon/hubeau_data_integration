@@ -25,7 +25,7 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
                                 ▼
          ┌──────────────────────────────────────────────────────┐
         │         PostgreSQL - Schéma: bronze                  │
-        │  Tables brutes : *_raw ; BDLISA + Sandre (ref_*_eh)  │
+        │  Tables brutes : *_raw + TME (tme_entites_hydrogeo)  │
          └──────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -48,14 +48,14 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
          │    dbt Intermediate + Marts (Transformation)         │
          │  • Mapping spatial stations → grille ERA5            │
          │  • Agrégation quotidienne                            │
-         │  • Jointures piézo + météo + TME                     │
+        │  • Jointures piézo/hydro + météo + TME               │
          └──────────────────────────────────────────────────────┘
                                 │
                                 ▼
          ┌──────────────────────────────────────────────────────┐
          │         PostgreSQL - Schéma: gold                    │
          │  Tables transformées : int_* + marts                 │
-         │  Fact Tables : hubeau_daily, fct_monthly, fct_yearly │
+        │  Fact Tables : hubeau_daily, hydro_daily, fct_*      │
          │  Optimisation : Hypertables TimescaleDB + Compression│
          └──────────────────────────────────────────────────────┘
                                 │
@@ -116,7 +116,7 @@ Pipeline de données en architecture Medallion (Bronze → Silver → Gold) pour
 
 | Schéma | Gestion | Contenu |
 |--------|---------|---------|
-| `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + BDLISA + nomenclatures Sandre (`ref_*_eh`) |
+| `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + TME (`tme_entites_hydrogeo`) |
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
 
@@ -226,7 +226,7 @@ Chaque station est reliée à son point de grille "réellement" le plus proche g
 | `hydrometry_stations_raw` | Stations hydro | ~5k |
 | `hydrometry_obs_elab_raw` | Observations hydro | ~15M |
 | `era5_france_timeseries` | Time series ERA5 (Direct Load) | ~300M |
-| `tme_entites_hydrogeo` | Référentiel TME (asset Dagster, CSV/ZIP BDLISA) | ~2k |
+| `tme_entites_hydrogeo` | Référentiel TME (asset Dagster, fichier TME.csv local ou ZIP national) | ~2k |
 
 ### Silver (dbt staging)
 
@@ -248,12 +248,16 @@ Chaque station est reliée à son point de grille "réellement" le plus proche g
 | `int_daily_measurements` | Mesures quotidiennes agrégées (piézo) |
 | `int_station_era5_mapping` | Mapping stations → grille ERA5 + métadonnées TME |
 | `int_era5_for_stations` | ERA5 filtré pour les points de grille utilisés |
+| `int_hydro_daily_measurements` | Mesures quotidiennes agrégées (hydrométrie) |
+| `int_hydro_station_era5_mapping` | Mapping stations hydrométriques → grille ERA5 |
+| `int_era5_for_hydro_stations` | ERA5 filtré pour les stations hydrométriques |
 
 #### Marts
 
 | Table | Description |
 |-------|-------------|
 | **`hubeau_daily_chroniques`** | **Table finale : Piézo + Météo + TME** |
+| **`hydro_daily_chroniques`** | **Table finale : Hydrométrie + Météo ERA5** |
 
 **Table principale** : `gold.hubeau_daily_chroniques`
 - Combine piézométrie + météo ERA5 + métadonnées TME
@@ -265,6 +269,11 @@ Chaque station est reliée à son point de grille "réellement" le plus proche g
 - `fct_yearly_stats` : Bilans annuels + classifications (Hypertable 10 ans)
 - `dim_piezo_stations` : Master data stations enrichi
 - `agg_station_trends` : Tendances saisonnières et projections
+ - `fct_monthly_hydro` : Agrégats mensuels hydrométrie (Hypertable 5 ans)
+ - `fct_yearly_hydro` : Bilans annuels hydrométrie
+ - `agg_hydro_trends` : Tendances hydrométriques saisonnières
+ - `dim_hydro_stations` : Master data stations hydrométriques enrichie
+ - `stations_hydro_carte` : Calque carto stations hydrométriques
 
 ## Docker Services
 

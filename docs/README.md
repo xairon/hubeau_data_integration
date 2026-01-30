@@ -10,7 +10,7 @@
 - **[Architecture](ARCHITECTURE.md)** - Architecture détaillée du pipeline
 - **[Schéma BDD](SCHEMA_BDD.md)** - Structure des tables PostgreSQL
 - **[Stockage ERA5](ERA5_DATA_STORAGE.md)** - Détails sur le stockage ERA5
-- **[Intégration BDLISA](BDLISA_INTEGRATION.md)** - Référentiels, TME et nomenclatures
+- **[Intégration TME](BDLISA_INTEGRATION.md)** - Référentiel TME (entités hydrogéologiques)
 
 ## 🔧 Utilisation
 
