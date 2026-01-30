@@ -32,6 +32,20 @@ On charge le **GeoPackage** (géométrie PostGIS). Lien direct métropole (V3) :
 4. **dbt `stg_tme_entites`**  
    Lit `source('staging', 'bdlisa_entites')`, enrichit avec `source('staging', 'tme_entites_hydrogeo')` si présent (jointure sur `code_eh`), puis joint les `source('staging', 'ref_*_eh')` pour les libellés.
 
+## Alignement des codes : bdlisa_entites (METRO) vs tme_entites_hydrogeo (TME)
+
+**bdlisa_entites** vient du gpkg **METRO** (Métropole) → codes type `020AB10`, `030AA01`, etc.  
+**tme_entites_hydrogeo** vient du TME (zip NATIONAL ou fichier local) → doit contenir **les mêmes codes** pour que la jointure en silver remplisse les colonnes _eh.
+
+- Si **tme_entites_hydrogeo** est chargé depuis le **fichier local** `TME.csv` (souvent Réunion uniquement : 974*, 974AH, …), il n’y a **aucun recouvrement** avec les codes Métropole → toutes les colonnes _eh restent NULL en silver.
+- Il faut charger le TME depuis le **zip BDLISA NATIONAL** (`BDLISA_V3_NATIONAL-csv.zip` → `CSV/TME.csv`), qui contient Métropole + DOM. Sur le serveur : lancer l’asset **tme_entites_hydrogeo** (ou le job **reference_data_bronze**) et vérifier dans les logs que la source est bien l’URL du zip NATIONAL et non le fichier local.
+
+Vérification rapide :  
+`SELECT code_eh FROM bronze.tme_entites_hydrogeo WHERE code_eh LIKE '020%' LIMIT 5;`  
+→ si aucun résultat, la table n’a pas les codes Métropole ; recharger depuis le zip NATIONAL.
+
+---
+
 ## Pourquoi des NULL en silver et gold ? (chaîne de causalité)
 
 Les valeurs NULL dans les colonnes `*_eh` (niveau, etat, nature, milieu, theme, origine et leurs `libelle_*_eh`) en **silver** et **gold** viennent d'une seule cause : **le GeoPackage BDLISA V3 Métropole (layer 0) ne contient pas ces champs**.
