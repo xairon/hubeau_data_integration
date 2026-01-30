@@ -107,6 +107,30 @@ def _upsert_ref_table(
     return len(rows)
 
 
+def _merge_ref_table(
+    conn,
+    schema: str,
+    table: str,
+    rows: List[Tuple[str, str]],
+    context: AssetExecutionContext,
+) -> int:
+    """Insère des codes manquants sans écraser l'existant."""
+    _validate_schema_table(schema, table)
+    full = f"{schema}.{table}"
+    with conn.cursor() as cur:
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        cur.execute(f"CREATE TABLE IF NOT EXISTS {full} (code TEXT NOT NULL, libelle TEXT)")
+        cur.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_code ON {full} (code)")
+        execute_values(
+            cur,
+            f"INSERT INTO {full} (code, libelle) VALUES %s ON CONFLICT (code) DO NOTHING",
+            rows,
+        )
+    conn.commit()
+    context.log.info("  %s: +%s lignes (merge)", full, len(rows))
+    return len(rows)
+
+
 @asset(
     description="Nomenclatures Sandre (entités hydrogéologiques) chargées dans bronze.ref_*_eh — source API Sandre NSA + fallback BDLISA",
     group_name="bronze",
@@ -152,22 +176,28 @@ def sandre_nomenclatures_eh(
     with pg.get_connection() as conn:
         total += _upsert_ref_table(conn, "bronze", "ref_niveau_eh", REF_NIVEAU_EH, context)
 
-    # 3) Si l'API n'a rien renvoyé (ou erreur), fallback en dur pour les 5 nomenclatures TME
-    if data is None or not refs:
-        from hubeau_pipeline.assets.bronze._sandre_fallback import (
-            REF_ETAT_EH,
-            REF_MILIEU_EH,
-            REF_NATURE_EH,
-            REF_ORIGINE_EH,
-            REF_THEME_EH,
-        )
+    # 3) Toujours compléter avec les fallbacks (codes manquants, ex. X)
+    from hubeau_pipeline.assets.bronze._sandre_fallback import (
+        REF_ETAT_EH,
+        REF_MILIEU_EH,
+        REF_NATURE_EH,
+        REF_ORIGINE_EH,
+        REF_THEME_EH,
+    )
 
-        with pg.get_connection() as conn:
+    with pg.get_connection() as conn:
+        if data is None or not refs:
             total += _upsert_ref_table(conn, "bronze", "ref_nature_eh", REF_NATURE_EH, context)
             total += _upsert_ref_table(conn, "bronze", "ref_etat_eh", REF_ETAT_EH, context)
             total += _upsert_ref_table(conn, "bronze", "ref_theme_eh", REF_THEME_EH, context)
             total += _upsert_ref_table(conn, "bronze", "ref_milieu_eh", REF_MILIEU_EH, context)
             total += _upsert_ref_table(conn, "bronze", "ref_origine_eh", REF_ORIGINE_EH, context)
+        else:
+            total += _merge_ref_table(conn, "bronze", "ref_nature_eh", REF_NATURE_EH, context)
+            total += _merge_ref_table(conn, "bronze", "ref_etat_eh", REF_ETAT_EH, context)
+            total += _merge_ref_table(conn, "bronze", "ref_theme_eh", REF_THEME_EH, context)
+            total += _merge_ref_table(conn, "bronze", "ref_milieu_eh", REF_MILIEU_EH, context)
+            total += _merge_ref_table(conn, "bronze", "ref_origine_eh", REF_ORIGINE_EH, context)
 
     context.log.info("Nomenclatures Sandre chargées: %s lignes au total", total)
     return {"tables": 6, "total_rows": total}

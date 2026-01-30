@@ -2,7 +2,7 @@
 Full Bootstrap Job - Complete Database Population (Sequential)
 
 A single job that populates the ENTIRE database from scratch:
-0. Load reference data (BDLISA + Sandre nomenclatures) — requis pour stg_tme_entites
+0. Load reference data (TME uniquement) — requis pour stg_tme_entites
 1. Load all station metadata
 2. Load chroniques SEQUENTIALLY (1990-present, one year at a time)
 3. Load ERA5 SEQUENTIALLY (1990-present, 2-year chunks)
@@ -169,9 +169,8 @@ def bootstrap_start(context: OpExecutionContext) -> Nothing:
 @op(ins={"start": In(Nothing)}, out=Out(Nothing), required_resource_keys={"pg"})
 def load_reference_data(context: OpExecutionContext) -> Nothing:
     """Load reference data: BDLISA + TME.csv + Sandre nomenclatures (ref_*_eh). Required for stg_tme_entites."""
-    from ..assets.bronze.bdlisa_assets import bdlisa_entites_raw
     from ..assets.bronze.tme_entites_assets import tme_entites_hydrogeo
-    from ..assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
+    
     from ..resources import PostgreSQLResource
 
     context.log.info("📚 STEP 0/5: Loading reference data (BDLISA + TME attributs + Sandre nomenclatures)...")
@@ -184,9 +183,7 @@ def load_reference_data(context: OpExecutionContext) -> Nothing:
         _mark_partition_start(conn, job_name, partition_key)
     pg: PostgreSQLResource = context.resources.pg
     try:
-        bdlisa_entites_raw(context, pg)
         tme_entites_hydrogeo(context, pg)
-        sandre_nomenclatures_eh(context, pg)
     except Exception as e:
         with get_db_connection() as conn:
             _mark_partition_failed(conn, job_name, partition_key, str(e))

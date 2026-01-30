@@ -9,6 +9,7 @@ Source prioritaire : archive BDLISA (API / téléchargement), config : configs/b
 """
 
 import io
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -285,8 +286,15 @@ def _find_and_read_csv_in_zip(
 
 def _read_local_tme_csv(context: AssetExecutionContext) -> Optional[pd.DataFrame]:
     """Fallback : lit TME.csv depuis la racine du dépôt ou CWD."""
+    extra_paths = []
+    env_dir = os.environ.get("BDLISA_CSV_DIR")
+    if env_dir:
+        extra_paths.append(Path(env_dir) / "TME.csv")
+    extra_paths.append(Path("D:/BDLISA_V3_NATIONAL-csv(1)/CSV/TME.csv"))
     for base in (Path(__file__).resolve().parents[4], Path.cwd()):
-        path = base / "TME.csv"
+        extra_paths.append(base / "TME.csv")
+
+    for path in extra_paths:
         if path.exists():
             context.log.info("Lecture TME.csv local : %s", path)
             df = pd.read_csv(path, encoding="utf-8", dtype=str, keep_default_na=False)

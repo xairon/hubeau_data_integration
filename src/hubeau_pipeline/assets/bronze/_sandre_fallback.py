@@ -16,6 +16,7 @@ REF_NATURE_EH: List[Tuple[str, str]] = [
     ("6", "Unité semi-perméable"),
     ("7", "Unité imperméable"),
     ("12", "Grand système multicouche"),
+    ("X", "Non renseigné"),
 ]
 REF_ETAT_EH: List[Tuple[str, str]] = [
     ("0", "Non renseigné"),
@@ -25,6 +26,7 @@ REF_ETAT_EH: List[Tuple[str, str]] = [
     ("4", "Entité hydrogéologique alternativement libre puis captive"),
     ("5", "Entité hydrogéologique partiellement captive"),
     ("6", "Non défini (hors nomenclature SAQ 2002-1)"),
+    ("X", "Non renseigné"),
 ]
 REF_THEME_EH: List[Tuple[str, str]] = [
     ("0", "Inconnu"),
@@ -33,6 +35,7 @@ REF_THEME_EH: List[Tuple[str, str]] = [
     ("3", "Socle"),
     ("4", "Intensément plissés de montagne"),
     ("5", "Volcanisme"),
+    ("X", "Non renseigné"),
 ]
 REF_MILIEU_EH: List[Tuple[str, str]] = [
     ("0", "Inconnu"),
@@ -46,10 +49,12 @@ REF_MILIEU_EH: List[Tuple[str, str]] = [
     ("8", "Mixte"),
     ("9", "Autre"),
     ("10", "Non applicable"),
+    ("X", "Non renseigné"),
 ]
 REF_ORIGINE_EH: List[Tuple[str, str]] = [
     ("1", "Forte potentialité aquifère"),
     ("2", "Potentialité aquifère moyenne"),
     ("3", "Faible potentialité aquifère"),
     ("4", "Nulle ou très faible potentialité"),
+    ("X", "Non renseigné"),
 ]
