@@ -113,13 +113,23 @@ def _find_and_read_csv_in_zip(
             context.log.info("CSV trouvés : %s", csv_names)
         if not csv_names:
             return None
-        csv_names.sort(key=lambda n: (
-            0 if ("entite" in n.lower() or "tme" in n.lower() or "entites" in n.lower()) else 1,
-            n,
-        ))
-        first_csv = csv_names[0]
+        # Priorité : TME.csv (tableau multi-échelles), puis fichiers *entite*
+        tme_csv = [n for n in csv_names if n.endswith("TME.csv") or n.endswith("/TME.csv")]
+        if tme_csv:
+            first_csv = tme_csv[0]
+        else:
+            csv_names.sort(key=lambda n: (
+                0 if ("entite" in n.lower() or "tme" in n.lower() or "entites" in n.lower()) else 1,
+                n,
+            ))
+            first_csv = csv_names[0]
         with zf.open(first_csv) as f:
-            df = pd.read_csv(f, encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn")
+            # BDLISA utilise souvent le point-virgule (format français)
+            df = pd.read_csv(f, encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=";")
+        if df.shape[1] <= 1 and len(df.columns) == 1 and ";" in str(df.columns[0]):
+            # Une seule colonne avec ";" = mauvais séparateur, réessayer avec ","
+            with zf.open(first_csv) as f:
+                df = pd.read_csv(f, encoding="utf-8", dtype=str, keep_default_na=False, on_bad_lines="warn", sep=",")
         raw_columns = list(df.columns)
         if context:
             context.log.info("CSV lu : %s — colonnes brutes : %s", first_csv, raw_columns)
