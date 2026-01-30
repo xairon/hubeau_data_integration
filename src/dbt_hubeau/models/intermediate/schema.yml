@@ -23,7 +23,7 @@ models:
             - date_mesure
 
   - name: int_station_era5_mapping
-    description: "Mapping stations piézo → grille ERA5 avec métadonnées TME"
+    description: "Mapping stations piézo → grille ERA5 avec métadonnées TME. Incrémental : ne calcule que pour les stations absentes (pas de rebuild complet)."
     columns:
       - name: code_bss
         description: "Code BSS unique de la station"

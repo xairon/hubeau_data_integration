@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = 'code_bss',
+    incremental_strategy = 'append',
     indexes=[
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['era5_latitude', 'era5_longitude']},
@@ -16,15 +18,18 @@
 -- Mapping spatial: Stations piézo → Point de grille ERA5 le plus proche
 -- Utilise PostGIS KNN (opérateur <->) pour trouver le vrai nearest neighbor
 -- TME (libellés BDLISA): jointure par code (TRIM) → fallback par n'importe quel code dans codes_bdlisa → fallback spatial (ST_Contains).
--- Materialized = table pour rebuild complet à chaque run (libellés TME à jour).
+-- Incrémental : ne calcule que pour les stations absentes de la table (stations et grille ERA5 changent rarement).
 
 WITH stations AS (
     SELECT * FROM {{ ref('stg_piezo_stations') }}
     WHERE geometry IS NOT NULL
       -- Filtre pour la France métropolitaine (Hexagone) uniquement
-      -- Les DOM-TOM n'ont pas de couverture ERA5 dans ce dataset
       AND y >= 41.0 AND y <= 51.5 
       AND x >= -5.5 AND x <= 10.0
+      {% if is_incremental() %}
+      -- Ne traiter que les stations pas encore mappées
+      AND code_bss NOT IN (SELECT code_bss FROM {{ this }})
+      {% endif %}
 ),
 
 era5_grid AS (
