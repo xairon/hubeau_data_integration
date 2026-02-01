@@ -18,6 +18,7 @@ import pandas as pd
 import geopandas as gpd
 from dagster import AssetExecutionContext, asset, ConfigurableResource
 from pydantic import Field
+from psycopg2 import sql
 
 from hubeau_pipeline.resources import PostgreSQLResource
 
@@ -110,9 +111,16 @@ def _write_bdlisa_to_postgis(
     full_table = f"{schema_name}.{table_name}"
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+            cur.execute(
+                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
+            )
             # Drop dependent view first to avoid DROP TABLE failure (commit needed before to_postgis)
-            cur.execute(f"DROP VIEW IF EXISTS {schema_name}.bdlisa_entites CASCADE")
+            cur.execute(
+                sql.SQL("DROP VIEW IF EXISTS {}.{} CASCADE").format(
+                    sql.Identifier(schema_name),
+                    sql.Literal("bdlisa_entites")
+                )
+            )
         conn.commit()
     engine = create_engine(pg.get_dsn())
     gdf.to_postgis(
@@ -267,11 +275,26 @@ def _load_csv_fallback(
     full_table = f"{cfg['schema_name']}.{cfg['table_name']}"
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {cfg['schema_name']}")
+            cur.execute(
+                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(cfg["schema_name"]))
+            )
             cols = list(df.columns)
-            col_defs = ", ".join(f'"{c}" TEXT' for c in cols)
-            cur.execute(f'DROP TABLE IF EXISTS {full_table}')
-            cur.execute(f'CREATE TABLE {full_table} ({col_defs})')
+            col_defs = sql.SQL(", ").join(
+                sql.SQL("{} TEXT").format(sql.Identifier(c)) for c in cols
+            )
+            cur.execute(
+                sql.SQL("DROP TABLE IF EXISTS {}.{}").format(
+                    sql.Identifier(cfg["schema_name"]),
+                    sql.Identifier(cfg["table_name"])
+                )
+            )
+            cur.execute(
+                sql.SQL("CREATE TABLE {}.{} ({})").format(
+                    sql.Identifier(cfg["schema_name"]),
+                    sql.Identifier(cfg["table_name"]),
+                    col_defs
+                )
+            )
             conn.commit()
         batch_size = 5000
         rows_inserted = 0

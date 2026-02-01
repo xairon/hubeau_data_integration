@@ -34,6 +34,7 @@ from .dbt_jobs import (
     dbt_test_job,
     dbt_freshness_job,
     dbt_quality_job,
+    dbt_docs_job,
 )
 
 # Full Bootstrap Job (Complete population with partition iteration)
@@ -63,6 +64,7 @@ all_jobs = [
     dbt_test_job,
     dbt_freshness_job,
     dbt_quality_job,
+    dbt_docs_job,
     # Données de référence (BDLISA + Sandre)
     reference_data_bronze_job,
     # Full Bootstrap (complete population)
@@ -90,6 +92,7 @@ __all__ = [
     "dbt_test_job",
     "dbt_freshness_job",
     "dbt_quality_job",
+    "dbt_docs_job",
     # Données de référence (BDLISA + Sandre)
     "reference_data_bronze_job",
     # Full Bootstrap (complete population)

@@ -24,6 +24,7 @@ from .jobs import (
     dbt_silver_gold_pipeline_job,
     era5_weekly_job,
     reference_data_bronze_job,
+    dbt_docs_job,
 )
 
 
@@ -102,6 +103,18 @@ def daily_era5_schedule(context: ScheduleEvaluationContext):
 
 
 # ==============================================================================
+# WEEKLY SCHEDULE - dbt Documentation Generation
+# ==============================================================================
+
+weekly_dbt_docs_schedule = ScheduleDefinition(
+    job=dbt_docs_job,
+    cron_schedule="0 5 * * 0",  # Dimanche 5h00 UTC (hebdomadaire)
+    default_status=DEFAULT_SCHEDULE_STATUS,
+    description="Weekly: Generate dbt documentation (catalog.json + manifest.json)",
+)
+
+
+# ==============================================================================
 # EXPORTS
 # ==============================================================================
 
@@ -110,5 +123,6 @@ all_schedules = [
     daily_hydrometry_schedule,
     daily_dbt_schedule,
     daily_era5_schedule,
+    weekly_dbt_docs_schedule,
     monthly_reference_data_schedule,
 ]

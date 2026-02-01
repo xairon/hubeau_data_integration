@@ -237,16 +237,21 @@ services:
     restart: unless-stopped
 
 volumes:
-  # ATTENTION: Ne JAMAIS utiliser "docker compose down -v" ou "docker system prune --volumes"
-  # Ces commandes SUPPRIMENT les données !
-  # Pour arrêter : docker compose down (sans -v)
-  # Pour nettoyer les images : docker system prune (sans --volumes)
+  # ============================================================================
+  # VOLUMES PERSISTANTS - PROTECTION MAXIMALE CONTRE SUPPRESSION ACCIDENTELLE
+  # ============================================================================
+  # IMPORTANT: Les volumes externes ne sont PAS supprimés par "docker compose down -v"
+  # Ils doivent être créés manuellement AVANT le premier démarrage:
+  #   docker volume create brgm_postgres_data
+  #   docker volume create brgm_dagster_pg_data
+  #   docker volume create brgm_cloudbeaver_data
+  # ============================================================================
   postgres_data:
-    driver: local
-    # Pour rendre le volume "externe" (protection contre suppression accidentelle), décommenter:
-    # external: true
-    # Puis créer manuellement: docker volume create hubeau_data_integration_postgres_data
+    external: true
+    name: brgm_postgres_data
   dagster_pg_data:
-    driver: local
+    external: true
+    name: brgm_dagster_pg_data
   cloudbeaver_data:
-    driver: local
+    external: true
+    name: brgm_cloudbeaver_data

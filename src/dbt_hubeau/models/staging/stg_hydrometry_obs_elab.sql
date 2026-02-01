@@ -12,7 +12,8 @@
     post_hook=[
       "{{ add_primary_key(['code_site', 'date_obs_elab', 'grandeur_hydro_elab']) }}",
       "{{ convert_to_hypertable('date_obs_elab', '1 year') }}",
-      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}"
+      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}",
+      "{{ enable_compression(segment_by=['code_site', 'grandeur_hydro_elab'], order_by='date_obs_elab DESC', compress_after='90 days') }}"
     ]
   )
 }}
@@ -30,10 +31,17 @@ WITH sites AS (
     SELECT code_site FROM {{ ref('stg_hydrometry_sites') }}
 ),
 
+-- Validation: s'assurer que des sites existent avant de continuer
+validation AS (
+    SELECT COUNT(*) as site_count FROM sites
+),
+
 source AS (
     SELECT o.*
     FROM {{ source('staging', 'hydrometry_obs_elab_raw') }} o
     INNER JOIN sites ON o.code_site = sites.code_site
+    CROSS JOIN validation v
+    WHERE v.site_count > 0  -- CRITICAL: Fail if no sites (prevents silent data loss)
     WHERE o.date_obs_elab IS NOT NULL
       AND o.code_site IS NOT NULL
       AND o.grandeur_hydro_elab IS NOT NULL

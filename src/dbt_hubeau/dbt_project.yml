@@ -15,6 +15,12 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Variables globales pour les modèles incrémentaux
+vars:
+  # Fenêtre de rechargement pour corrections tardives (en jours)
+  piezometry_incremental_lookback_days: 30  # 30 jours pour gérer les corrections
+  hydrometry_incremental_lookback_days: 30  # 30 jours pour gérer les corrections
+
 # Hooks exécutés au début de chaque run dbt (idempotents, safe si tables n'existent pas encore)
 on-run-start:
   - "DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='bronze' AND table_name='era5_france_timeseries') THEN CREATE INDEX IF NOT EXISTS idx_era5_lat_lon_time ON bronze.era5_france_timeseries (latitude, longitude, time); CREATE INDEX IF NOT EXISTS idx_era5_time ON bronze.era5_france_timeseries (time); END IF; END $$;"

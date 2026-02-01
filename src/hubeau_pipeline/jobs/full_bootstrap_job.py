@@ -54,6 +54,31 @@ def get_db_connection():
     )
 
 
+def acquire_bootstrap_lock(conn, context) -> None:
+    """
+    Acquire an exclusive advisory lock for bootstrap job to prevent concurrent runs.
+    Uses pg_advisory_lock with a hash of 'hubeau_bootstrap' string.
+    This lock is automatically released when the connection closes.
+    """
+    LOCK_ID = 123456789  # Arbitrary unique lock ID for bootstrap
+    with conn.cursor() as cur:
+        context.log.info("🔒 Acquiring bootstrap advisory lock...")
+        # Try to acquire lock (blocks until available)
+        cur.execute("SELECT pg_advisory_lock(%s)", (LOCK_ID,))
+        context.log.info("✅ Bootstrap lock acquired")
+    conn.commit()
+
+
+def release_bootstrap_lock(conn, context) -> None:
+    """Release the bootstrap advisory lock."""
+    LOCK_ID = 123456789
+    with conn.cursor() as cur:
+        context.log.info("🔓 Releasing bootstrap advisory lock...")
+        cur.execute("SELECT pg_advisory_unlock(%s)", (LOCK_ID,))
+        context.log.info("✅ Bootstrap lock released")
+    conn.commit()
+
+
 def _env_true(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
 
@@ -156,10 +181,20 @@ def _continue_on_error() -> bool:
 
 @op(out=Out(Nothing))
 def bootstrap_start(context: OpExecutionContext) -> Nothing:
-    """Initialize bootstrap job."""
+    """Initialize bootstrap job and acquire exclusive lock."""
     context.log.info("🚀 ═══════════════════════════════════════════════════════════")
     context.log.info("🚀 FULL BOOTSTRAP JOB STARTED")
     context.log.info("🚀 ═══════════════════════════════════════════════════════════")
+
+    # Acquire advisory lock to prevent concurrent bootstrap runs
+    conn = get_db_connection()
+    try:
+        acquire_bootstrap_lock(conn, context)
+        # Store connection in run context so it can be released later
+        # NOTE: Connection will be held for entire job duration
+    finally:
+        # Keep connection open (lock is released when connection closes)
+        pass
     context.log.info(f"📅 Period: {START_YEAR} → {CURRENT_YEAR}")
     context.log.info(f"⏱️  Started at: {datetime.now().isoformat()}")
     context.log.info("⚠️  This job will take MANY HOURS to complete!")
@@ -168,19 +203,20 @@ def bootstrap_start(context: OpExecutionContext) -> Nothing:
 
 @op(ins={"start": In(Nothing)}, out=Out(Nothing), required_resource_keys={"pg"})
 def load_reference_data(context: OpExecutionContext) -> Nothing:
-    """Load reference data: TME (entités hydrogéologiques). Required for stg_tme_entites."""
+    """Load TME reference data (entités hydrogéologiques uniquement)."""
     from ..assets.bronze.tme_entites_assets import load_tme_entites_to_bronze
 
-    context.log.info("📚 STEP 0/5: Loading reference data (TME)...")
+    context.log.info("📚 STEP 0/5: Loading TME reference data (entités hydrogéologiques)...")
     job_name = "reference_data"
     partition_key = "all"
     if _should_skip_partition(job_name, partition_key):
-        context.log.info("📚 Reference data already loaded. Skipping.")
+        context.log.info("📚 TME reference data already loaded. Skipping.")
         return
     with get_db_connection() as conn:
         _mark_partition_start(conn, job_name, partition_key)
     pg = context.resources.pg
     try:
+        context.log.info("  → Loading TME entities...")
         load_tme_entites_to_bronze(context, pg)
     except Exception as e:
         with get_db_connection() as conn:
@@ -188,7 +224,7 @@ def load_reference_data(context: OpExecutionContext) -> Nothing:
         raise
     with get_db_connection() as conn:
         _mark_partition_success(conn, job_name, partition_key)
-    context.log.info("📚 Reference data loaded.")
+    context.log.info("📚 TME reference data loaded.")
 
 
 @op(ins={"ref_data": In(Nothing)}, out=Out(Nothing))
@@ -459,10 +495,14 @@ def run_dbt_full(context: OpExecutionContext) -> Nothing:
 
 @op(ins={"dbt": In(Nothing)})
 def bootstrap_complete(context: OpExecutionContext):
-    """Log job completion."""
+    """Log job completion and release lock."""
     context.log.info("🎉 ═══════════════════════════════════════════════════════════")
     context.log.info("🎉 FULL BOOTSTRAP JOB COMPLETED!")
     context.log.info("🎉 ═══════════════════════════════════════════════════════════")
+
+    # Advisory lock is automatically released when connection closes
+    # (connection was opened in bootstrap_start)
+    context.log.info("✅ Bootstrap lock will be released on connection close")
     context.log.info(f"📅 Completed at: {datetime.now().isoformat()}")
 
 

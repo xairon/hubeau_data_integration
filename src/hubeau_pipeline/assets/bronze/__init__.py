@@ -23,8 +23,14 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
     ERA5_PARTITIONS_DEF,
 )
 
-# TME attributs (niveau, etat, nature, ...) depuis TME.csv — enrichit stg_tme_entites
+# Reference Data: TME, nomenclatures, geographic refs
 from hubeau_pipeline.assets.bronze.tme_entites_assets import tme_entites_hydrogeo
+from hubeau_pipeline.assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
+from hubeau_pipeline.assets.bronze.referentiel_geo_assets import (
+    referentiel_regions,
+    referentiel_departements,
+    referentiel_zones_hydro,
+)
 
 __all__ = [
     # Hub'Eau Historical
@@ -39,8 +45,12 @@ __all__ = [
     # ERA5
     "era5_france_timeseries_historical",
     "era5_weekly_update",
-    # TME attributs (TME.csv)
+    # Reference Data - ALL reference assets
     "tme_entites_hydrogeo",
+    "sandre_nomenclatures_eh",
+    "referentiel_regions",
+    "referentiel_departements",
+    "referentiel_zones_hydro",
     # Configs
     "MODE_PARTITIONS",
     "ERA5_PARTITIONS_DEF",

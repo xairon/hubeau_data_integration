@@ -5,6 +5,7 @@ import dlt
 import csv
 import logging
 import time
+import random
 from io import StringIO
 from typing import Iterator, Dict, Any, List
 from dlt.sources.helpers.rest_client import RESTClient
@@ -44,26 +45,44 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
     import time as time_module
     
     log = context.log.info if context else logger.info
-    
+
     MAX_RETRIES = 5
     BASE_DELAY = 2  # seconds
-    
+    MAX_DELAY = 300  # 5 minutes max delay
+    PAGINATION_TIMEOUT = 3600  # 1 hour total timeout for pagination
+
     def request_with_retry(url, params=None):
-        """Make request with exponential backoff retry for 5xx errors."""
+        """Make request with exponential backoff + jitter retry for transient errors."""
         for attempt in range(MAX_RETRIES):
             try:
-                response = requests.get(url, params=params)
+                response = requests.get(url, params=params, timeout=60)
                 response.raise_for_status()
                 return response
             except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code in [500, 502, 503, 504]:
+                # Retry on: 429 (rate limit), 408 (timeout), 5xx (server errors)
+                if e.response is not None and e.response.status_code in [408, 429, 500, 502, 503, 504]:
                     if attempt < MAX_RETRIES - 1:
-                        delay = BASE_DELAY * (2 ** attempt)
-                        log(f"⚠️ API returned {e.response.status_code}, retry {attempt + 1}/{MAX_RETRIES} in {delay}s...")
-                        time_module.sleep(delay)
+                        # Exponential backoff with jitter
+                        delay = min(BASE_DELAY * (2 ** attempt), MAX_DELAY)
+                        jitter = random.uniform(0, delay * 0.1)  # ±10% jitter
+                        total_delay = delay + jitter
+                        log(f"⚠️ API returned {e.response.status_code}, retry {attempt + 1}/{MAX_RETRIES} in {total_delay:.1f}s...")
+                        time_module.sleep(total_delay)
                         continue
                 raise
-            except Exception as e:
+            except requests.exceptions.Timeout as e:
+                if attempt < MAX_RETRIES - 1:
+                    delay = min(BASE_DELAY * (2 ** attempt), MAX_DELAY)
+                    log(f"⚠️ Request timeout, retry {attempt + 1}/{MAX_RETRIES} in {delay}s...")
+                    time_module.sleep(delay)
+                    continue
+                raise
+            except requests.exceptions.ConnectionError as e:
+                if attempt < MAX_RETRIES - 1:
+                    delay = min(BASE_DELAY * (2 ** attempt), MAX_DELAY)
+                    log(f"⚠️ Connection error, retry {attempt + 1}/{MAX_RETRIES} in {delay}s...")
+                    time_module.sleep(delay)
+                    continue
                 raise
         return None  # Should not reach here
     
@@ -86,8 +105,16 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
     
     page = 1
     total_yielded = 0
-    
+    start_time = time_module.time()
+
     while True:
+        # Check pagination timeout
+        elapsed_time = time_module.time() - start_time
+        if elapsed_time > PAGINATION_TIMEOUT:
+            raise TimeoutError(
+                f"Pagination timeout after {elapsed_time:.0f}s (max {PAGINATION_TIMEOUT}s). "
+                f"Pages fetched: {page}, records: {total_yielded}"
+            )
         records = list(parse_csv_stream(response.text))
         page_count = len(records)
         

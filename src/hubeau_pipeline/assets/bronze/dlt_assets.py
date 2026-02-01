@@ -13,6 +13,7 @@ import os
 import yaml
 import dlt
 import psycopg2
+from psycopg2 import sql
 from dlt.destinations import postgres
 from dagster import AssetExecutionContext, StaticPartitionsDefinition, Output, MetadataValue, AssetIn
 from dagster_dlt import DagsterDltResource, dlt_assets, DagsterDltTranslator
@@ -113,19 +114,20 @@ def piezometry_stations_source():
 def _clean_partition_data(table_name: str, schema: str, year: str, date_column: str, logger=None) -> int:
     """
     Nettoie les données existantes pour une partition (année) avant rechargement.
-    
+    Uses advisory lock to prevent concurrent cleanup of same partition.
+
     Args:
         table_name: Nom de la table (ex: "piezometry_chroniques_raw")
         schema: Schéma de la table (ex: "bronze")
         year: Année de la partition (ex: "2020")
         date_column: Nom de la colonne de date (ex: "date_mesure")
         logger: Logger Dagster (optionnel)
-    
+
     Returns:
         Nombre de lignes supprimées
     """
     log = logger.info if logger else print
-    
+
     try:
         host = os.environ.get("PG_HOST", "postgres")
         db = os.environ.get("PG_DB", "postgres")
@@ -139,8 +141,17 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
             user=user,
             password=password,
         )
-        
+
         with conn:
+            # Acquire advisory lock for this specific partition
+            # Lock ID = hash of table_name + year to avoid conflicts between partitions
+            lock_string = f"{schema}.{table_name}:{year}"
+            lock_id = abs(hash(lock_string)) % (2**31)  # 32-bit integer
+
+            with conn.cursor() as cur:
+                log(f"🔒 Acquiring lock for partition {lock_string}...")
+                cur.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+                log(f"✅ Lock acquired for partition {lock_string}")
             with conn.cursor() as cur:
                 # Vérifier si la table existe
                 cur.execute("""
@@ -160,12 +171,20 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                 # Compter les lignes existantes pour cette année
                 # Note: date_column peut être VARCHAR dans bronze
                 # On utilise LIKE pour filtrer par année (plus robuste que EXTRACT sur VARCHAR)
-                cur.execute(f"""
-                    SELECT COUNT(*) 
-                    FROM "{schema}"."{table_name}"
-                    WHERE "{date_column}" IS NOT NULL
-                      AND "{date_column}"::text LIKE %s
-                """, (f"{year}-%",))
+                cur.execute(
+                    sql.SQL("""
+                        SELECT COUNT(*)
+                        FROM {}.{}
+                        WHERE {} IS NOT NULL
+                          AND {}::text LIKE %s
+                    """).format(
+                        sql.Identifier(schema),
+                        sql.Identifier(table_name),
+                        sql.Identifier(date_column),
+                        sql.Identifier(date_column)
+                    ),
+                    (f"{year}-%",)
+                )
                 
                 existing_count = cur.fetchone()[0]
                 
@@ -177,26 +196,42 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                 # Note: date_column peut être VARCHAR dans bronze
                 # On utilise LIKE pour filtrer par année (plus robuste que EXTRACT sur VARCHAR)
                 log(f"🧹 Suppression de {existing_count:,} lignes existantes pour l'année {year}...")
-                cur.execute(f"""
-                    DELETE FROM "{schema}"."{table_name}"
-                    WHERE "{date_column}" IS NOT NULL
-                      AND "{date_column}"::text LIKE %s
-                """, (f"{year}-%",))
+                cur.execute(
+                    sql.SQL("""
+                        DELETE FROM {}.{}
+                        WHERE {} IS NOT NULL
+                          AND {}::text LIKE %s
+                    """).format(
+                        sql.Identifier(schema),
+                        sql.Identifier(table_name),
+                        sql.Identifier(date_column),
+                        sql.Identifier(date_column)
+                    ),
+                    (f"{year}-%",)
+                )
                 
                 deleted_count = cur.rowcount
                 conn.commit()
-                
+
+                # Release advisory lock
+                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+                log(f"🔓 Lock released for partition {lock_string}")
+
                 log(f"✅ {deleted_count:,} lignes supprimées pour l'année {year}")
                 return deleted_count
                 
     except Exception as e:
-        error_msg = f"❌ Erreur lors du nettoyage de la partition {year}: {e}"
+        error_msg = f"❌ CRITICAL: Erreur lors du nettoyage de la partition {year}: {e}"
         if logger:
             logger.error(error_msg)
         else:
             print(error_msg, flush=True)
-        # Ne pas bloquer le chargement si le nettoyage échoue
-        return 0
+        # FAIL HARD: cleanup errors indicate data corruption risk
+        # Better to fail explicitly than proceed with corrupted state
+        raise RuntimeError(
+            f"Partition cleanup failed for {schema}.{table_name} year {year}. "
+            f"Cannot proceed with load to avoid data corruption. Error: {e}"
+        ) from e
 
 
 def _fetch_distinct_column_values(table_name: str, column_name: str, logger=None) -> List[str]:
@@ -247,9 +282,10 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
     
     @dlt.resource(
         name="piezometry_chroniques_raw",
-        write_disposition="append",  # append: doublons légitimes possibles (même station/date)
-        # Pas de primary_key: plusieurs mesures légitimes par station/date possibles
-        # Les doublons de relance sont gérés via _dlt_id (hash des données)
+        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
+        primary_key=["code_bss", "date_mesure"],  # Clé composite : une mesure par station/date
+        # Note: même si l'API retourne plusieurs mesures par station/date (différents mode_obtention),
+        # dbt ne conserve qu'une seule mesure (celle avec niveau_nappe_eau le plus élevé)
         parallelized=False
     )
     def _resource():
@@ -322,7 +358,8 @@ def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
     
     @dlt.resource(
         name="hydrometry_obs_elab_raw",
-        write_disposition="append",  # append car doublons légitimes possibles
+        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
+        primary_key=["code_site", "date_obs_elab", "grandeur_hydro_elab"],  # Clé composite unique
         parallelized=False
     )
     def _resource():
@@ -585,13 +622,14 @@ def create_piezometry_chroniques_daily_resource(days_back: int = 7, dagster_cont
     
     @dlt.resource(
         name="piezometry_chroniques_raw",
-        write_disposition="append",
+        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
+        primary_key=["code_bss", "date_mesure"],  # Clé composite unique
         parallelized=False
     )
     def _resource():
         logger = dagster_context.log if dagster_context else None
         log = logger.info if logger else print
-        
+
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
         
         station_codes = _fetch_distinct_column_values(
@@ -625,13 +663,14 @@ def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=Non
     
     @dlt.resource(
         name="hydrometry_obs_elab_raw",
-        write_disposition="append",
+        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
+        primary_key=["code_site", "date_obs_elab", "grandeur_hydro_elab"],  # Clé composite unique
         parallelized=False
     )
     def _resource():
         logger = dagster_context.log if dagster_context else None
         log = logger.info if logger else print
-        
+
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
         
         station_codes = _fetch_distinct_column_values(

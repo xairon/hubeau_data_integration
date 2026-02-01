@@ -2,10 +2,9 @@ resource:
   name: piezometry_chroniques_raw
   endpoint: /chroniques.csv
   base_url: https://hubeau.eaufrance.fr/api/v1/niveaux_nappes
-  # Pas de primary_key: plusieurs chroniques légitimes possibles pour même station/date
-  # (différents mode_obtention, statut, qualification, valeurs)
-  # Les doublons de relance sont évités via _dlt_id (hash des données généré par DLT)
-  primary_key: null
+  # Primary key composite: dbt ne conserve qu'une mesure par (code_bss, date_mesure)
+  # Utilisation de write_disposition="merge" pour éviter doublons sur retry
+  primary_key: ["code_bss", "date_mesure"]
 extraction:
   default_params: {}
   # Note: API v1 doesn't support 'size' parameter

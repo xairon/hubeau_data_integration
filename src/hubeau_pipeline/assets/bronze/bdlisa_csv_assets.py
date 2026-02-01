@@ -15,6 +15,7 @@ from typing import Iterable, List, Optional
 
 import pandas as pd
 from dagster import AssetExecutionContext, asset
+from psycopg2 import sql
 from psycopg2.extras import execute_values
 
 from hubeau_pipeline.resources import PostgreSQLResource
@@ -62,15 +63,24 @@ def _load_csv_to_table(
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("CREATE SCHEMA IF NOT EXISTS bronze")
-            cur.execute(f"DROP TABLE IF EXISTS bronze.{table_name}")
+            cur.execute(
+                sql.SQL("DROP TABLE IF EXISTS bronze.{}").format(sql.Identifier(table_name))
+            )
 
     for chunk in _iter_csv_chunks(path, sep):
         if columns is None:
             columns = [_normalize_col(c) for c in list(chunk.columns)]
-            col_defs = ", ".join(f'"{c}" TEXT' for c in columns)
+            col_defs = sql.SQL(", ").join(
+                sql.SQL("{} TEXT").format(sql.Identifier(c)) for c in columns
+            )
             with pg.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"CREATE TABLE bronze.{table_name} ({col_defs})")
+                    cur.execute(
+                        sql.SQL("CREATE TABLE bronze.{} ({})").format(
+                            sql.Identifier(table_name),
+                            col_defs
+                        )
+                    )
                 conn.commit()
 
         chunk.columns = columns

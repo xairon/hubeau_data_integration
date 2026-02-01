@@ -285,8 +285,9 @@ def process_era5_range_to_timeseries(
             context.log.info("📄 Format détecté: NetCDF direct.")
 
         context.log.info(f"📊 Opening NetCDF: {actual_nc_path}")
-        ds = xr.open_dataset(actual_nc_path, engine='h5netcdf')
-        
+        # Open with chunking to handle large files efficiently (memory optimization)
+        ds = xr.open_dataset(actual_nc_path, engine='h5netcdf', chunks={'time': 365})
+
         # Filter exact dates
         time_dim = 'valid_time' if 'valid_time' in ds.dims else 'time'
         ds = ds.sel({time_dim: slice(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))})

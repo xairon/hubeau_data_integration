@@ -1,9 +1,10 @@
 resource:
-  name: hydrometry_observations_raw
+  name: hydrometry_obs_elab_raw
   endpoint: /obs_elab.csv
   base_url: https://hubeau.eaufrance.fr/api/v2/hydrometrie
-  # Primary key pour déduplication (merge) - évite les doublons si job relancé
-  primary_key: ["code_entite", "date_obs_elab"]
+  # PRIMARY KEY composite : une mesure par (code_site, date_obs_elab, grandeur_hydro_elab)
+  # Must match dbt unique_key in stg_hydrometry_obs_elab.sql
+  primary_key: ["code_site", "date_obs_elab", "grandeur_hydro_elab"]
 extraction:
   default_params:
     grandeur_hydro_elab: QmnJ  # Daily mean flow (Débit moyen journalier)
@@ -12,7 +13,7 @@ extraction:
     date_debut: date_debut_obs_elab  # Start date parameter name
     date_fin: date_fin_obs_elab      # End date parameter name
   station_slicing:
-    station_param: code_entite
+    station_param: code_site  # CRITICAL: Hub'Eau API uses code_site, not code_entite
     batch_size: 20
 performance:
   parallelism: 1

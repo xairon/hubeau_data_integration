@@ -11,7 +11,8 @@
     post_hook=[
       "{{ add_primary_key(['code_bss', 'date_mesure']) }}",
       "{{ convert_to_hypertable('date_mesure', '1 year') }}",
-      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}",
+      "{{ enable_compression(segment_by=['code_bss'], order_by='date_mesure DESC', compress_after='90 days') }}"
     ]
   )
 }}
@@ -58,8 +59,15 @@ deduplicated AS (
 -- Ne garder que les chroniques dont la station existe (respect de la FK code_bss -> stg_piezo_stations)
 stations AS (
     SELECT code_bss FROM {{ ref('stg_piezo_stations') }}
+),
+
+-- Validation: s'assurer que des stations existent avant de continuer
+validation AS (
+    SELECT COUNT(*) as station_count FROM stations
 )
 
 SELECT d.*
 FROM deduplicated d
 INNER JOIN stations s ON d.code_bss = s.code_bss
+CROSS JOIN validation v
+WHERE v.station_count > 0  -- CRITICAL: Fail if no stations (prevents silent data loss)

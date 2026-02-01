@@ -15,6 +15,7 @@ import httpx
 import geopandas as gpd
 import pandas as pd
 from dagster import AssetExecutionContext, asset
+from psycopg2 import sql
 
 from hubeau_pipeline.resources import PostgreSQLResource
 
@@ -69,7 +70,9 @@ def _geojson_to_postgis(
     engine = create_engine(pg.get_dsn())
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+            cur.execute(
+                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
+            )
     gdf.to_postgis(
         table_name,
         engine,
@@ -121,7 +124,9 @@ def _shp_zip_to_postgis(
     engine = create_engine(pg.get_dsn())
     with pg.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+            cur.execute(
+                sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema_name))
+            )
     gdf.to_postgis(
         table_name,
         engine,

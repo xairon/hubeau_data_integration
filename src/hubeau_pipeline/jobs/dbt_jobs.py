@@ -93,3 +93,43 @@ def dbt_quality_job():
     """Combined job: freshness check then tests."""
     tests = run_dbt_tests()
     run_dbt_source_freshness()
+
+
+# ==============================================================================
+# DBT DOCS JOB - Auto-generate Documentation
+# ==============================================================================
+
+@op(
+    required_resource_keys={"dbt"},
+    description="Generate dbt documentation (catalog.json + manifest.json)",
+)
+def run_dbt_docs_generate(context):
+    """
+    Execute dbt docs generate to create documentation artifacts.
+    Generates:
+    - catalog.json: Database catalog (columns, types, stats)
+    - manifest.json: dbt project metadata (models, tests, lineage)
+
+    These files are used by 'dbt docs serve' to render the documentation site.
+    """
+    dbt: DbtCliResource = context.resources.dbt
+
+    context.log.info("📚 Generating dbt documentation...")
+
+    # Run dbt docs generate command
+    docs_result = dbt.cli(["docs", "generate"], context=context).wait()
+
+    context.log.info("✅ dbt documentation generated successfully")
+    context.log.info("📂 Documentation artifacts saved to: target/catalog.json, target/manifest.json")
+    context.log.info("💡 To view docs locally: cd src/dbt_hubeau && dbt docs serve")
+
+    return "dbt docs generated"
+
+
+@job(
+    description="Generate dbt documentation (catalog + manifest)",
+    tags={"dagster/concurrency_key": "dbt_pipeline"},
+)
+def dbt_docs_job():
+    """Job to generate dbt documentation artifacts."""
+    run_dbt_docs_generate()

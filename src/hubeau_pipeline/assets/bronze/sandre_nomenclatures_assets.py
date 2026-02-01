@@ -16,6 +16,7 @@ from typing import List, Tuple
 
 import httpx
 from dagster import AssetExecutionContext, asset
+from psycopg2 import sql
 from psycopg2.extras import execute_values
 
 from hubeau_pipeline.resources import PostgreSQLResource
@@ -97,11 +98,33 @@ def _upsert_ref_table(
     _validate_schema_table(schema, table)
     full = f"{schema}.{table}"
     with conn.cursor() as cur:
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        cur.execute(f"DROP TABLE IF EXISTS {full}")
-        cur.execute(f"CREATE TABLE {full} (code TEXT NOT NULL, libelle TEXT)")
-        execute_values(cur, f"INSERT INTO {full} (code, libelle) VALUES %s", rows)
-        cur.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_code ON {full} (code)")
+        cur.execute(
+            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
+        )
+        cur.execute(
+            sql.SQL("DROP TABLE IF EXISTS {}.{}").format(
+                sql.Identifier(schema), sql.Identifier(table)
+            )
+        )
+        cur.execute(
+            sql.SQL("CREATE TABLE {}.{} (code TEXT NOT NULL, libelle TEXT)").format(
+                sql.Identifier(schema), sql.Identifier(table)
+            )
+        )
+        execute_values(
+            cur,
+            sql.SQL("INSERT INTO {}.{} (code, libelle) VALUES %s").format(
+                sql.Identifier(schema), sql.Identifier(table)
+            ).as_string(conn),
+            rows
+        )
+        cur.execute(
+            sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}.{} (code)").format(
+                sql.Identifier(f"idx_{table}_code"),
+                sql.Identifier(schema),
+                sql.Identifier(table)
+            )
+        )
     conn.commit()
     context.log.info("  %s: %s lignes", full, len(rows))
     return len(rows)
@@ -118,12 +141,26 @@ def _merge_ref_table(
     _validate_schema_table(schema, table)
     full = f"{schema}.{table}"
     with conn.cursor() as cur:
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        cur.execute(f"CREATE TABLE IF NOT EXISTS {full} (code TEXT NOT NULL, libelle TEXT)")
-        cur.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_code ON {full} (code)")
+        cur.execute(
+            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
+        )
+        cur.execute(
+            sql.SQL("CREATE TABLE IF NOT EXISTS {}.{} (code TEXT NOT NULL, libelle TEXT)").format(
+                sql.Identifier(schema), sql.Identifier(table)
+            )
+        )
+        cur.execute(
+            sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}.{} (code)").format(
+                sql.Identifier(f"idx_{table}_code"),
+                sql.Identifier(schema),
+                sql.Identifier(table)
+            )
+        )
         execute_values(
             cur,
-            f"INSERT INTO {full} (code, libelle) VALUES %s ON CONFLICT (code) DO NOTHING",
+            sql.SQL("INSERT INTO {}.{} (code, libelle) VALUES %s ON CONFLICT (code) DO NOTHING").format(
+                sql.Identifier(schema), sql.Identifier(table)
+            ).as_string(conn),
             rows,
         )
     conn.commit()

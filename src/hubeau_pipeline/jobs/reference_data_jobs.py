@@ -1,8 +1,8 @@
 """
-Jobs Données de Référence - TME uniquement (mode simplifié)
+Jobs Données de Référence - TME uniquement
 
-Charge le bronze minimal utilisé par dbt :
-- tme_entites_hydrogeo : attributs TME (codes EH)
+Charge uniquement les entités hydrogéologiques TME (bronze.tme_entites_hydrogeo).
+Les autres référentiels (Sandre, géo) ne sont pas activés pour l'instant.
 """
 
 from dagster import AssetSelection, define_asset_job
@@ -12,7 +12,8 @@ from ..assets.bronze.tme_entites_assets import tme_entites_hydrogeo
 reference_data_bronze_job = define_asset_job(
     name="reference_data_bronze",
     description=(
-        "Charge les données de référence Bronze minimales : TME (entités hydrogéologiques, codes EH)."
+        "Charge les données de référence TME uniquement (entités hydrogéologiques). "
+        "Les autres référentiels (Sandre, géo) ne sont pas activés."
     ),
     selection=AssetSelection.assets(
         tme_entites_hydrogeo,

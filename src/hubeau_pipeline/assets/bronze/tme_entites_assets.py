@@ -17,6 +17,7 @@ from typing import Optional
 import httpx
 import pandas as pd
 from dagster import AssetExecutionContext, asset
+from psycopg2 import sql
 from psycopg2.extras import execute_values
 
 from hubeau_pipeline.resources import PostgreSQLResource
@@ -367,8 +368,12 @@ def load_tme_entites_to_bronze(context: AssetExecutionContext, pg: PostgreSQLRes
         with conn.cursor() as cur:
             cur.execute("CREATE SCHEMA IF NOT EXISTS bronze")
             cur.execute("DROP TABLE IF EXISTS bronze.tme_entites_hydrogeo")
-            col_defs = ", ".join(f'"{c}" TEXT' for c in TME_BRONZE_COLUMNS)
-            cur.execute(f"CREATE TABLE bronze.tme_entites_hydrogeo ({col_defs})")
+            col_defs = sql.SQL(", ").join(
+                sql.SQL("{} TEXT").format(sql.Identifier(c)) for c in TME_BRONZE_COLUMNS
+            )
+            cur.execute(
+                sql.SQL("CREATE TABLE bronze.tme_entites_hydrogeo ({})").format(col_defs)
+            )
             if len(df) > 0:
                 values = [tuple(row) for row in df.to_numpy().tolist()]
                 execute_values(
