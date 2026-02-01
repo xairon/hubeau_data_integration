@@ -228,10 +228,11 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     )
 
     # Load configs and run pipeline
+    # IMPORTANT: Les noms doivent correspondre aux assets DLT (*_raw) pour que dbt fonctionne
     configs = [
-        ("piezometry_stations", "configs/hubeau/piezometry_stations.yml"),
-        ("hydrometry_sites", "configs/hubeau/hydrometry_sites.yml"),
-        ("hydrometry_stations", "configs/hubeau/hydrometry_stations.yml"),
+        ("piezometry_stations_raw", "configs/hubeau/piezometry_stations.yml"),
+        ("hydrometry_sites_raw", "configs/hubeau/hydrometry_sites.yml"),
+        ("hydrometry_stations_raw", "configs/hubeau/hydrometry_stations.yml"),
     ]
     
     try:
@@ -264,7 +265,7 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
 @op(ins={"stations": In(Nothing)}, out=Out(Nothing))
 def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     """Load ALL chroniques SEQUENTIALLY (1990-present)."""
-    from ..sources.hubeau_csv_source import hubeau_chroniques_year, hubeau_stations
+    from ..sources.hubeau_csv_source import hubeau_chroniques_year
     
     import dlt
     from dlt.destinations import postgres
@@ -294,14 +295,14 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     apis = [
         {
             "name": "piezometry",
-            "stations_config": "configs/hubeau/piezometry_stations.yml",
+            "stations_table": "piezometry_stations_raw",
             "chroniques_config": "configs/hubeau/piezometry_chroniques.yml",
             "station_code_field": "code_bss",
             "table_name": "piezometry_chroniques_raw"
         },
         {
             "name": "hydrometry",
-            "stations_config": "configs/hubeau/hydrometry_stations.yml",
+            "stations_table": "hydrometry_sites_raw",  # code_site vient des sites, pas stations
             "chroniques_config": "configs/hubeau/hydrometry_obs_elab.yml",
             "station_code_field": "code_site",
             "table_name": "hydrometry_obs_elab_raw"
@@ -311,17 +312,18 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     for api in apis:
         context.log.info(f"📊 Processing {api['name']} chroniques...")
         
-        # Load station codes
-        with open(api["stations_config"]) as f:
-            stations_config = yaml.safe_load(f)
-        
+        # Load station codes FROM DATABASE (stations already loaded in step 1)
         station_codes = []
-        for record in hubeau_stations(stations_config, dagster_context=context):
-            code = record.get(api["station_code_field"])
-            if code:
-                station_codes.append(code)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'''
+                    SELECT DISTINCT "{api["station_code_field"]}" 
+                    FROM bronze."{api["stations_table"]}" 
+                    WHERE "{api["station_code_field"]}" IS NOT NULL
+                ''')
+                station_codes = [row[0] for row in cur.fetchall()]
         
-        context.log.info(f"  📍 Found {len(station_codes):,} stations")
+        context.log.info(f"  📍 Found {len(station_codes):,} stations in database")
         
         # Load chroniques year by year
         with open(api["chroniques_config"]) as f:

@@ -1,8 +1,9 @@
+{% set reprocess_from_ts = var('era5_reprocess_from_timestamp', none) %}
 {{
   config(
     materialized = 'incremental',
     unique_key = ['latitude', 'longitude', 'time'],
-    incremental_strategy = 'append',
+    incremental_strategy = 'delete+insert' if reprocess_from_ts is not none else 'append',
     indexes = [
       {'columns': ['latitude', 'longitude', 'time'], 'unique': True},
       {'columns': ['time'], 'type': 'brin'},
@@ -21,8 +22,6 @@
 -- Source: bronze.era5_france_timeseries
 -- Silver: typage, déduplication, PostGIS. Incremental append (MERGE non supporté sur hypertables compressées).
 -- Primary Key: latitude + longitude + time. Filtre incrémental: time > max(time).
-
-{% set reprocess_from_ts = var('era5_reprocess_from_timestamp', none) %}
 
 WITH source AS (
     SELECT * FROM {{ source('staging', 'era5_france_timeseries') }}

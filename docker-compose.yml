@@ -21,20 +21,10 @@ services:
     restart: unless-stopped
 
   # Hub'Eau database (PostGIS + TimescaleDB)
+  # ATTENTION: Ne PAS ajouter de "command:" sur l'image HA - cela bypass l'entrypoint Patroni !
   postgres:
     image: timescale/timescaledb-ha:pg16
     container_name: brgm-postgres
-    command:
-      [
-        "postgres",
-        "-c", "shared_buffers=512MB",
-        "-c", "work_mem=32MB",
-        "-c", "maintenance_work_mem=256MB",
-        "-c", "max_wal_size=4GB",
-        "-c", "checkpoint_timeout=15min",
-        "-c", "wal_compression=on",
-        "-c", "synchronous_commit=off"
-      ]
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-REDACTED}
       POSTGRES_DB: ${PG_DB:-postgres}
@@ -179,7 +169,7 @@ services:
       - ./scripts:/app/scripts:ro
     command: [ "dagster-daemon", "run" ]
     healthcheck:
-      test: [ "CMD", "python", "-c", "import sys; sys.exit(0)" ]
+      test: [ "CMD-SHELL", "dagster-daemon health-check || exit 1" ]
       interval: 30s
       timeout: 10s
       start_period: 60s
@@ -247,8 +237,15 @@ services:
     restart: unless-stopped
 
 volumes:
+  # ATTENTION: Ne JAMAIS utiliser "docker compose down -v" ou "docker system prune --volumes"
+  # Ces commandes SUPPRIMENT les données !
+  # Pour arrêter : docker compose down (sans -v)
+  # Pour nettoyer les images : docker system prune (sans --volumes)
   postgres_data:
     driver: local
+    # Pour rendre le volume "externe" (protection contre suppression accidentelle), décommenter:
+    # external: true
+    # Puis créer manuellement: docker volume create hubeau_data_integration_postgres_data
   dagster_pg_data:
     driver: local
   cloudbeaver_data:

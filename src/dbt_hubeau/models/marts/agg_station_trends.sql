@@ -2,7 +2,8 @@
   config(
     materialized = 'table',
     indexes = [
-      {'columns': ['code_bss'], 'unique': True},
+      {'columns': ['code_bss', 'saison'], 'unique': True},
+      {'columns': ['code_bss']},
       {'columns': ['classification_tendance']},
       {'columns': ['saison']},
       {'columns': ['code_departement']}
