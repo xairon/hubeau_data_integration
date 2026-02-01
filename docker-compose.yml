@@ -24,6 +24,17 @@ services:
   postgres:
     image: timescale/timescaledb-ha:pg16
     container_name: brgm-postgres
+    command:
+      [
+        "postgres",
+        "-c", "shared_buffers=512MB",
+        "-c", "work_mem=32MB",
+        "-c", "maintenance_work_mem=256MB",
+        "-c", "max_wal_size=4GB",
+        "-c", "checkpoint_timeout=15min",
+        "-c", "wal_compression=on",
+        "-c", "synchronous_commit=off"
+      ]
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD:-REDACTED}
       POSTGRES_DB: ${PG_DB:-postgres}

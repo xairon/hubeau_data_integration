@@ -9,4 +9,4 @@ hubeau_pipeline:
       port: "{{ env_var('PG_PORT', '5432') | int }}"
       dbname: "{{ env_var('PG_DB', 'postgres') }}"
       schema: public # temporary schema
-      threads: 4
+      threads: 1

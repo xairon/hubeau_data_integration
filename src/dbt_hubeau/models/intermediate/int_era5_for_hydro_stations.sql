@@ -1,3 +1,4 @@
+{% set enable_compress = var('enable_timescale_compression', false) %}
 {{
   config(
     materialized = 'table',
@@ -9,9 +10,8 @@
     post_hook = [
       "{{ add_primary_key(['latitude', 'longitude', 'era5_date']) }}",
       "{{ convert_to_hypertable('era5_date', '1 year') }}",
-      "{{ add_foreign_key(['latitude', 'longitude'], 'int_era5_grid_points', ['era5_latitude', 'era5_longitude']) }}",
-      "{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='era5_date DESC', compress_after='365 days') }}"
-    ]
+      "{{ add_foreign_key(['latitude', 'longitude'], 'int_era5_grid_points', ['era5_latitude', 'era5_longitude']) }}"
+    ] + (["{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='era5_date DESC', compress_after='365 days') }}"] if enable_compress else [])
   )
 }}
 
