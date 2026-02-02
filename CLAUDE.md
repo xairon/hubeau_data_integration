@@ -108,11 +108,20 @@ docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{
 **Available Jobs**:
 - `full_bootstrap_job`: Complete database population (TME → stations → chroniques → ERA5 → dbt)
 - `reference_data_bronze_job`: Load TME reference data only
-- `dbt_silver_gold_pipeline_job`: Run full dbt transformation (Silver + Gold)
+
+**dbt Jobs (4-Stage Pipeline)**:
+```
+Stage 1: dbt_shared_staging_job     → ERA5 timeseries + grid points (prerequisite)
+Stage 2: dbt_piezo_pipeline_job     → Piezometry domain (can run in PARALLEL)
+         dbt_hydro_pipeline_job     → Hydrometry domain (can run in PARALLEL)
+Stage 3: dbt_shared_dimensions_job  → dim_date, dim_geography (run LAST)
+```
+- `dbt_silver_gold_pipeline_job`: Run ALL dbt models (for bootstrap/full refresh)
 - `dbt_test_job`: Run dbt data quality tests
 - `dbt_docs_job`: Generate dbt documentation (hebdomadaire: dimanche 5h UTC)
 - `dbt_quality_job`: Combined freshness + tests
-- Daily jobs: `daily_piezometry_bronze_job`, `daily_hydrometry_bronze_job`, `era5_weekly_job`
+
+**Daily Bronze Jobs**: `daily_piezometry_bronze_job`, `daily_hydrometry_bronze_job`, `era5_weekly_job`
 
 ### Initial Data Load
 ```bash

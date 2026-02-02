@@ -30,7 +30,16 @@ from .era5_jobs import (
 
 # Jobs dbt
 from .dbt_jobs import (
+    # Full pipeline (bootstrap/full refresh)
     dbt_silver_gold_pipeline_job,
+    # Shared staging (run FIRST)
+    dbt_shared_staging_job,
+    # Domain-specific pipelines (can run in parallel after shared staging)
+    dbt_piezo_pipeline_job,
+    dbt_hydro_pipeline_job,
+    # Shared dimensions (run LAST after domain pipelines)
+    dbt_shared_dimensions_job,
+    # Quality & docs
     dbt_test_job,
     dbt_freshness_job,
     dbt_quality_job,
@@ -59,8 +68,16 @@ all_jobs = [
     # Jobs ERA5
     era5_meteo_job,
     era5_weekly_job,
-    # Jobs dbt (Silver/Gold layers)
+    # Jobs dbt - Full pipeline (bootstrap/full refresh)
     dbt_silver_gold_pipeline_job,
+    # Jobs dbt - Shared staging (run FIRST)
+    dbt_shared_staging_job,
+    # Jobs dbt - Domain-specific pipelines (parallel)
+    dbt_piezo_pipeline_job,
+    dbt_hydro_pipeline_job,
+    # Jobs dbt - Shared dimensions (run LAST)
+    dbt_shared_dimensions_job,
+    # Jobs dbt - Quality & docs
     dbt_test_job,
     dbt_freshness_job,
     dbt_quality_job,
@@ -87,8 +104,16 @@ __all__ = [
     # Jobs ERA5
     "era5_meteo_job",
     "era5_weekly_job",
-    # Jobs dbt (Silver/Gold layers)
+    # Jobs dbt - Full pipeline (bootstrap/full refresh)
     "dbt_silver_gold_pipeline_job",
+    # Jobs dbt - Shared staging (run FIRST)
+    "dbt_shared_staging_job",
+    # Jobs dbt - Domain-specific pipelines (parallel)
+    "dbt_piezo_pipeline_job",
+    "dbt_hydro_pipeline_job",
+    # Jobs dbt - Shared dimensions (run LAST)
+    "dbt_shared_dimensions_job",
+    # Jobs dbt - Quality & docs
     "dbt_test_job",
     "dbt_freshness_job",
     "dbt_quality_job",
