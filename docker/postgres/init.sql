@@ -6,6 +6,10 @@
 -- Enable TimescaleDB (time-series optimization)
 CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 
+-- TimescaleDB: autoriser la décompression illimitée pour les DML sur hypertables compressées
+-- (évite "tuple decompression limit exceeded" sur stg_piezo_chroniques et autres modèles incrémentaux)
+ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0;
+
 -- Enable PostGIS (geospatial support)
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS postgis_topology;

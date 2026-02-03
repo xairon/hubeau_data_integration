@@ -37,6 +37,19 @@ Variables utiles :
 2. If 2-year chunk fails, consider running smaller date ranges manually
 3. Check [CDS Status](https://cds.climate.copernicus.eu/)
 
+### TimescaleDB "tuple decompression limit exceeded" (stg_piezo_chroniques, etc.)
+**Symptoms**: `Database Error in model stg_piezo_chroniques ... tuple decompression limit exceeded by operation. current limit: 100000, tuples decompressed: 23608652`
+**Cause**: DML incrémental (delete+insert) sur une hypertable TimescaleDB compressée ; la limite par défaut (100 000 tuples décompressés par transaction) est dépassée.
+**Solution (une fois, sur la base existante)** :
+```sql
+ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0;
+```
+Puis **redémarrer le worker** (ou toute connexion existante) pour que les nouvelles connexions prennent le paramètre. Ex. :
+```bash
+docker compose restart dlt_worker
+```
+Relancer ensuite le job dbt. Pour les nouveaux déploiements, ce réglage est déjà dans `docker/postgres/init.sql`.
+
 ---
 
 ## 🟠 Data Issues
