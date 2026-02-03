@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_station', 'saison', 'grandeur_hydro_elab'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_station', 'saison', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['classification_tendance']},
@@ -16,9 +18,20 @@
 
 -- Table analytique dédiée aux tendances hydrométriques (par saison)
 -- Source: fct_monthly_hydro
+-- INCREMENTAL: recalcul des stations récentes uniquement.
 
-WITH monthly AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_station
+    FROM {{ ref('hydro_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+monthly AS (
     SELECT * FROM {{ ref('fct_monthly_hydro') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
 ),
 
 -- Calcul des saisons

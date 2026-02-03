@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_station', 'annee', 'grandeur_hydro_elab'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_station', 'annee', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_station']},
@@ -19,9 +21,20 @@
 
 -- Statistiques annuelles par station hydrométrique
 -- Source: fct_monthly_hydro
+-- INCREMENTAL: recalcul complet des stations récentes (toutes années).
 
-WITH monthly AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_station
+    FROM {{ ref('hydro_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+monthly AS (
     SELECT * FROM {{ ref('fct_monthly_hydro') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
 ),
 
 yearly_agg AS (

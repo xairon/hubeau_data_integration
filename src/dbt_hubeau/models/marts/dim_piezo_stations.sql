@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['code_departement']},
@@ -17,9 +19,20 @@
 -- Dimension stations piézométriques enrichie
 -- Combine métadonnées + statistiques calculées + tendances
 -- Source: stg_piezo_stations + fct_yearly_stats + fct_monthly_chroniques
+-- INCREMENTAL: recalcul des stations récentes uniquement.
 
-WITH stations AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_bss
+    FROM {{ ref('hubeau_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+stations AS (
     SELECT * FROM {{ ref('stg_piezo_stations') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
 ),
 
 -- Stats globales par station (toute la période)
@@ -48,6 +61,9 @@ stats_globales AS (
         AVG(precipitation_totale) AS precipitation_moyenne_mensuelle
         
     FROM {{ ref('fct_monthly_chroniques') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
     GROUP BY code_bss
 ),
 
@@ -69,6 +85,9 @@ tendance_recente AS (
         
     FROM {{ ref('fct_monthly_chroniques') }}
     WHERE mois >= CURRENT_DATE - INTERVAL '5 years'
+    {% if is_incremental() %}
+      AND code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
     GROUP BY code_bss
     HAVING COUNT(*) >= 24  -- Au moins 2 ans de données
 ),
@@ -82,6 +101,9 @@ derniere_annee AS (
         classification_niveau_annuel AS classification_derniere_annee,
         percentile_niveau_historique AS percentile_derniere_annee
     FROM {{ ref('fct_yearly_stats') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
     ORDER BY code_bss, annee DESC
 )
 

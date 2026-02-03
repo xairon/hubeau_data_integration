@@ -30,7 +30,9 @@ from .jobs import (
     daily_hydrometry_bronze_job,
     dbt_shared_staging_job,
     dbt_piezo_pipeline_job,
+    dbt_piezo_pipeline_daily_job,
     dbt_hydro_pipeline_job,
+    dbt_hydro_pipeline_daily_job,
     dbt_shared_dimensions_job,
     era5_weekly_job,
     reference_data_bronze_job,
@@ -83,19 +85,19 @@ daily_dbt_shared_staging_schedule = ScheduleDefinition(
 
 # Stage 2a: Piezo pipeline runs at 6h00 UTC (after shared staging)
 daily_dbt_piezo_schedule = ScheduleDefinition(
-    job=dbt_piezo_pipeline_job,
+    job=dbt_piezo_pipeline_daily_job,
     cron_schedule="0 6 * * *",  # 6h00 UTC
     default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: dbt Piezometry pipeline (Silver -> Gold)",
+    description="Daily: dbt Piezometry pipeline (streaming-optimized)",
 )
 
 # Stage 2b: Hydro pipeline runs at 6h00 UTC (after shared staging)
 # Runs IN PARALLEL with piezo pipeline (different concurrency keys)
 daily_dbt_hydro_schedule = ScheduleDefinition(
-    job=dbt_hydro_pipeline_job,
+    job=dbt_hydro_pipeline_daily_job,
     cron_schedule="0 6 * * *",  # 6h00 UTC
     default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: dbt Hydrometry pipeline (Silver -> Gold)",
+    description="Daily: dbt Hydrometry pipeline (streaming-optimized)",
 )
 
 # Stage 3: Shared dimensions run at 7h00 UTC (after both domain pipelines complete)

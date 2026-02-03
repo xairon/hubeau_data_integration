@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_station', 'date', 'grandeur_hydro_elab'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_station', 'date', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_station']},
@@ -20,9 +22,21 @@
 
 -- Table finale : Hydrométrie + ERA5 (sans artefact DLT, types explicites)
 -- Filtrage des valeurs nulles : fait en silver (stg_hydrometry_obs_elab, stg_era5_timeseries)
+-- INCREMENTAL: ne traite que la fenêtre (lookback) pour le streaming nocturne.
 
-WITH measurements AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH date_bounds AS (
+    SELECT
+        (SELECT COALESCE(MAX(date), '1900-01-01'::date) - INTERVAL '{{ lookback_days }} days' FROM {{ this }}) AS start_date,
+        (SELECT MAX(date_obs_elab) FROM {{ ref('int_hydro_daily_measurements') }}) AS end_date
+),
+measurements AS (
     SELECT * FROM {{ ref('int_hydro_daily_measurements') }}
+    {% if is_incremental() %}
+    WHERE date_obs_elab >= (SELECT start_date FROM date_bounds)
+      AND date_obs_elab <= (SELECT end_date FROM date_bounds)
+    {% endif %}
 ),
 
 mapping AS (
@@ -31,6 +45,10 @@ mapping AS (
 
 era5_filtered AS (
     SELECT * FROM {{ ref('int_era5_for_hydro_stations') }}
+    {% if is_incremental() %}
+    WHERE era5_date >= (SELECT start_date FROM date_bounds)
+      AND era5_date <= (SELECT end_date FROM date_bounds)
+    {% endif %}
 ),
 
 final AS (

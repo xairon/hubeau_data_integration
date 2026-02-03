@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss', 'date_mesure'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss', 'date_mesure'], 'unique': True},
       {'columns': ['code_bss']},
@@ -15,10 +17,18 @@
 }}
 
 -- Mesures quotidiennes agrégées (moyenne par station × date)
--- Source: stg_piezo_chroniques (filtrage des valeurs nulles fait en silver)
+-- Source: stg_piezo_chroniques. INCREMENTAL: ne traite que la fenêtre (lookback) pour le streaming nocturne.
+
+{% set lookback_days = var('streaming_lookback_days', 7) %}
 
 WITH chroniques AS (
     SELECT * FROM {{ ref('stg_piezo_chroniques') }}
+    {% if is_incremental() %}
+    WHERE date_mesure >= (
+        SELECT COALESCE(MAX(date_mesure), '1900-01-01'::date) - INTERVAL '{{ lookback_days }} days'
+        FROM {{ this }}
+    )
+    {% endif %}
 )
 
 SELECT

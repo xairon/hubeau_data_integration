@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss', 'annee'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss', 'annee'], 'unique': True},
       {'columns': ['code_bss']},
@@ -18,9 +20,20 @@
 -- Statistiques annuelles par station piézométrique
 -- Source: fct_monthly_chroniques
 -- Calcule synthèse annuelle + comparaisons inter-annuelles + percentiles historiques
+-- INCREMENTAL: recalcul complet des stations récentes (toutes années).
 
-WITH monthly AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_bss
+    FROM {{ ref('hubeau_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+monthly AS (
     SELECT * FROM {{ ref('fct_monthly_chroniques') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
 ),
 
 yearly_agg AS (

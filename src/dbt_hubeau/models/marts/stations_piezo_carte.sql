@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss'], 'unique': True},
       {'columns': ['code_eh']},
@@ -15,8 +17,16 @@
 
 -- Mart "prêt carte" pour Superset : une ligne par station avec géométrie + entité BDLISA + indicateurs (alerte, tendance).
 -- Évite les jointures côté BI : une seule table pour les calques "stations piézo" avec libellés et alertes.
+-- INCREMENTAL: recalcul des stations récentes uniquement.
 
-WITH mapping AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_bss
+    FROM {{ ref('hubeau_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+mapping AS (
     SELECT
         code_bss,
         geom,
@@ -44,6 +54,9 @@ WITH mapping AS (
         era5_longitude,
         era5_distance_m
     FROM {{ ref('int_station_era5_mapping') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
 ),
 dim AS (
     SELECT
@@ -61,6 +74,9 @@ dim AS (
         derniere_mesure,
         nb_mesures_total
     FROM {{ ref('dim_piezo_stations') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
 )
 
 SELECT

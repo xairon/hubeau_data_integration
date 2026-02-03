@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss', 'mois'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss', 'mois'], 'unique': True},
       {'columns': ['code_bss']},
@@ -19,9 +21,19 @@
 -- Agrégation mensuelle des chroniques piézométriques
 -- Source: hubeau_daily_chroniques (fact table quotidienne)
 -- Calcule stats mensuelles + moyennes mobiles pour analyse tendancielle
+-- INCREMENTAL: recalcul partiel sur une fenêtre mensuelle pour le streaming daily.
+
+{% set months_lookback = var('streaming_monthly_lookback_months', 18) %}
 
 WITH daily AS (
     SELECT * FROM {{ ref('hubeau_daily_chroniques') }}
+    {% if is_incremental() %}
+    WHERE date >= (
+        SELECT COALESCE(MAX(mois), '1900-01-01'::date)
+               - INTERVAL '{{ months_lookback }} months'
+        FROM {{ this }}
+    )
+    {% endif %}
 ),
 
 monthly_agg AS (

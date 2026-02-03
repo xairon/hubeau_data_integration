@@ -35,7 +35,9 @@ from .dbt_jobs import (
     # Shared staging (run FIRST)
     dbt_shared_staging_job,
     # Domain-specific pipelines (can run in parallel after shared staging)
+    dbt_piezo_pipeline_daily_job,
     dbt_piezo_pipeline_job,
+    dbt_hydro_pipeline_daily_job,
     dbt_hydro_pipeline_job,
     # Shared dimensions (run LAST after domain pipelines)
     dbt_shared_dimensions_job,
@@ -73,7 +75,9 @@ all_jobs = [
     # Jobs dbt - Shared staging (run FIRST)
     dbt_shared_staging_job,
     # Jobs dbt - Domain-specific pipelines (parallel)
+    dbt_piezo_pipeline_daily_job,
     dbt_piezo_pipeline_job,
+    dbt_hydro_pipeline_daily_job,
     dbt_hydro_pipeline_job,
     # Jobs dbt - Shared dimensions (run LAST)
     dbt_shared_dimensions_job,
@@ -109,7 +113,9 @@ __all__ = [
     # Jobs dbt - Shared staging (run FIRST)
     "dbt_shared_staging_job",
     # Jobs dbt - Domain-specific pipelines (parallel)
+    "dbt_piezo_pipeline_daily_job",
     "dbt_piezo_pipeline_job",
+    "dbt_hydro_pipeline_daily_job",
     "dbt_hydro_pipeline_job",
     # Jobs dbt - Shared dimensions (run LAST)
     "dbt_shared_dimensions_job",

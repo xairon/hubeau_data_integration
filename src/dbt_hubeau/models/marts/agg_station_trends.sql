@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_bss', 'saison'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss', 'saison'], 'unique': True},
       {'columns': ['code_bss']},
@@ -18,9 +20,20 @@
 -- Table analytique dédiée aux tendances de long terme
 -- Permet des analyses plus fines que dim_piezo_stations (par saison)
 -- Source: fct_monthly_chroniques
+-- INCREMENTAL: recalcul des stations récentes uniquement.
 
-WITH monthly AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_bss
+    FROM {{ ref('hubeau_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+monthly AS (
     SELECT * FROM {{ ref('fct_monthly_chroniques') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
 ),
 
 -- Calcul des saisons

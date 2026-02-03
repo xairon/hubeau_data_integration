@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_station'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
@@ -14,8 +16,16 @@
 }}
 
 -- Mart "prêt carte" pour Superset : une ligne par station hydrométrique avec géométrie + indicateurs.
+-- INCREMENTAL: recalcul des stations récentes uniquement.
 
-WITH mapping AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_station
+    FROM {{ ref('hydro_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+mapping AS (
     SELECT
         code_station,
         code_site,
@@ -34,6 +44,9 @@ WITH mapping AS (
         libelle_cours_eau,
         uri_cours_eau
     FROM {{ ref('int_hydro_station_era5_mapping') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
 ),
 dim AS (
     SELECT
@@ -50,6 +63,9 @@ dim AS (
         classification_resultat_dern_annee,
         percentile_resultat_dern_annee
     FROM {{ ref('dim_hydro_stations') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
 )
 
 SELECT

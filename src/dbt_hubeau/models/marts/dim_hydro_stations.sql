@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_station'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
@@ -18,9 +20,20 @@
 
 -- Dimension stations hydrométriques enrichie
 -- Source: stg_hydrometry_stations + fct_monthly_hydro + fct_yearly_hydro
+-- INCREMENTAL: recalcul des stations récentes uniquement.
 
-WITH stations AS (
+{% set lookback_days = var('streaming_lookback_days', 7) %}
+
+WITH recent_stations AS (
+    SELECT DISTINCT code_station
+    FROM {{ ref('hydro_daily_chroniques') }}
+    WHERE date >= CURRENT_DATE - INTERVAL '{{ lookback_days }} days'
+),
+stations AS (
     SELECT * FROM {{ ref('stg_hydrometry_stations') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
 ),
 
 monthly_stats AS (
@@ -36,6 +49,9 @@ monthly_stats AS (
         MAX(resultat_max) AS resultat_max_global,
         STDDEV(resultat_moyen) AS resultat_stddev_global
     FROM {{ ref('fct_monthly_hydro') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
     GROUP BY code_station, grandeur_hydro_elab
 ),
 
@@ -65,6 +81,9 @@ derniere_annee AS (
         fy.classification_resultat_annuel AS classification_resultat_dern_annee,
         fy.percentile_resultat_historique AS percentile_resultat_dern_annee
     FROM {{ ref('fct_yearly_hydro') }} fy
+    {% if is_incremental() %}
+    WHERE fy.code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
     INNER JOIN primary_grandeur pg
         ON fy.code_station = pg.code_station
        AND fy.grandeur_hydro_elab = pg.grandeur_hydro_elab

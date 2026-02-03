@@ -1,6 +1,8 @@
 {{
   config(
-    materialized = 'table',
+    materialized = 'incremental',
+    unique_key = ['code_station', 'date_obs_elab', 'grandeur_hydro_elab'],
+    incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_station', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
@@ -18,9 +20,18 @@
 
 -- Mesures quotidiennes agrégées (hydrométrie)
 -- Source: stg_hydrometry_obs_elab (filtrage des valeurs nulles fait en silver)
+-- INCREMENTAL: ne traite que la fenêtre (lookback) pour le streaming nocturne.
+
+{% set lookback_days = var('streaming_lookback_days', 7) %}
 
 WITH observations AS (
     SELECT * FROM {{ ref('stg_hydrometry_obs_elab') }}
+    {% if is_incremental() %}
+    WHERE date_obs_elab >= (
+        SELECT COALESCE(MAX(date_obs_elab), '1900-01-01'::date) - INTERVAL '{{ lookback_days }} days'
+        FROM {{ this }}
+    )
+    {% endif %}
 )
 
 SELECT

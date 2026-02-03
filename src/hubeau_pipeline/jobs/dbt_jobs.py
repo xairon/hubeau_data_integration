@@ -73,6 +73,47 @@ PIEZO_MODELS = [
     "stg_piezo_chroniques_rejected",
 ]
 
+# ==============================================================================
+# PIEZOMETRY DAILY PIPELINE (Streaming-optimized)
+# ==============================================================================
+
+# Daily piezo models: staging -> intermediate -> daily mart only
+# Excludes monthly/yearly aggregates and dimensions to keep runtime short
+PIEZO_DAILY_MODELS = [
+    # Staging (Silver) - piezo specific
+    "stg_piezo_stations",
+    "stg_piezo_chroniques",
+    "stg_tme_entites",
+    # Intermediate (Gold)
+    "int_daily_measurements",
+    "int_station_era5_mapping",
+    "int_era5_for_stations",
+    # Daily + gold marts (incremental)
+    "hubeau_daily_chroniques",
+    "fct_monthly_chroniques",
+    "fct_yearly_stats",
+    "agg_station_trends",
+    "dim_piezo_stations",
+    "stations_piezo_carte",
+    # Rejects
+    "stg_piezo_chroniques_rejected",
+]
+
+dbt_piezo_pipeline_daily_job = define_asset_job(
+    name="dbt_piezo_pipeline_daily",
+    description=(
+        "Run DAILY dbt transformation for PIEZOMETRY (streaming-optimized). "
+        "PREREQUISITE: Run dbt_shared_staging_job first. "
+        "Excludes monthly/yearly aggregates and dimensions to keep runtime short."
+    ),
+    selection=build_dbt_asset_selection(
+        [hubeau_dbt_assets],
+        dbt_select=" ".join(PIEZO_DAILY_MODELS),
+    ),
+    tags={"dagster/concurrency_key": "dbt_piezo", "domain": "piezo", "frequency": "daily"},
+    hooks=set(),
+)
+
 dbt_piezo_pipeline_job = define_asset_job(
     name="dbt_piezo_pipeline",
     description=(
@@ -116,6 +157,47 @@ HYDRO_MODELS = [
     "stg_hydrometry_obs_elab_rejected",
     "stg_hydrometry_stations_rejected",
 ]
+
+# ==============================================================================
+# HYDROMETRY DAILY PIPELINE (Streaming-optimized)
+# ==============================================================================
+
+# Daily hydro models: staging -> intermediate -> daily mart + gold (incremental)
+HYDRO_DAILY_MODELS = [
+    # Staging (Silver) - hydro specific
+    "stg_hydrometry_sites",
+    "stg_hydrometry_stations",
+    "stg_hydrometry_obs_elab",
+    # Intermediate (Gold)
+    "int_hydro_daily_measurements",
+    "int_hydro_station_era5_mapping",
+    "int_era5_for_hydro_stations",
+    # Daily + gold marts (incremental)
+    "hydro_daily_chroniques",
+    "fct_monthly_hydro",
+    "fct_yearly_hydro",
+    "agg_hydro_trends",
+    "dim_hydro_stations",
+    "stations_hydro_carte",
+    # Rejects
+    "stg_hydrometry_obs_elab_rejected",
+    "stg_hydrometry_stations_rejected",
+]
+
+dbt_hydro_pipeline_daily_job = define_asset_job(
+    name="dbt_hydro_pipeline_daily",
+    description=(
+        "Run DAILY dbt transformation for HYDROMETRY (streaming-optimized). "
+        "PREREQUISITE: Run dbt_shared_staging_job first. "
+        "Includes daily facts + incremental marts."
+    ),
+    selection=build_dbt_asset_selection(
+        [hubeau_dbt_assets],
+        dbt_select=" ".join(HYDRO_DAILY_MODELS),
+    ),
+    tags={"dagster/concurrency_key": "dbt_hydro", "domain": "hydro", "frequency": "daily"},
+    hooks=set(),
+)
 
 dbt_hydro_pipeline_job = define_asset_job(
     name="dbt_hydro_pipeline",
