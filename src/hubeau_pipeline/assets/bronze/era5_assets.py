@@ -392,9 +392,10 @@ def era5_weekly_update(context: AssetExecutionContext):
     Cela économise les appels API et le réseau en ne demandant que ce qu'on n'a pas encore.
     """
     days_back_default = 14
-    
-    # 1. Déterminer date de fin (Today - 5 jours délai ERA5)
-    end_date = datetime.now() - timedelta(days=5)
+    # Délai de publication Copernicus CDS (configurable via env, défaut 5 jours)
+    lag_days = int(os.getenv("ERA5_AVAILABILITY_LAG_DAYS", "5"))
+    # 1. Déterminer date de fin (Today - N jours : données ERA5 publiées avec retard)
+    end_date = datetime.now() - timedelta(days=lag_days)
     
     # 2. Chercher MAX(time) en base
     last_date_in_db = None

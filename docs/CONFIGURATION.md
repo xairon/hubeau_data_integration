@@ -64,6 +64,14 @@ Les variables DLT sont automatiquement dérivées des variables PostgreSQL :
 BOOTSTRAP_PARTITIONS=chroniques:piezometry:2020,era5:1990-1991
 ```
 
+### Délais de publication (données jusqu'à quand ?)
+
+| Variable | Description | Défaut | Effet |
+|----------|-------------|--------|--------|
+| `ERA5_AVAILABILITY_LAG_DAYS` | Nombre de jours à retirer à « aujourd'hui » pour la date de fin ERA5 (job weekly). | `5` | Données ERA5 jusqu'à **(aujourd'hui − N)**. Copernicus CDS publie avec ~5 jours de retard ; réduire à 3 si le catalogue est à jour. |
+
+**Piézométrie (daily)** : le job demande la plage **(aujourd'hui − 7 jours) → aujourd'hui** (heure Paris). Si vous n'avez des données que jusqu'à J−3, vérifier dans l'UI Dagster que le job `daily_piezometry_bronze` a bien tourné les derniers jours (Runs → filtre par job). En cas d'échec ou d'absence de run, relancer le job manuellement.
+
 ## Configuration Locale
 
 ### Fichier `.env`

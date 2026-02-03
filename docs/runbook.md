@@ -61,6 +61,38 @@ Variables utiles :
 3. Si toujours NULL après run : exécuter `scripts/diagnose_tme_mapping.sql` (sur la base) pour vérifier `avec_libelle_eh` vs `sans_libelle_eh`, et `codes_bdlisa` renseigné ou non.
 4. Vérifier que `silver.stg_tme_entites` contient bien `libelle_eh` (et `code_eh`). Voir `docs/BDLISA_INTEGRATION.md` pour plus de détails sur les sources TME.
 
+### Données daily : dernière date (piézo / hydro)
+**Symptoms**: Données piézométriques ou hydrométriques qui s'arrêtent avant « aujourd'hui » (ex. on est le 3 février, dernière date = 30 janvier).
+
+**Diagnostic** :
+```sql
+-- Dernière date piézo (bronze)
+SELECT MAX(date_mesure) AS derniere_date_piezo FROM bronze.piezometry_chroniques_raw;
+-- Dernière date hydro (bronze)
+SELECT MAX(date_obs_elab::date) AS derniere_date_hydro FROM bronze.hydrometry_obs_elab_raw;
+```
+
+**Causes possibles** :
+1. Le job **daily_piezometry_bronze** (ou **daily_hydrometry_bronze**) n'a pas tourné ou a échoué les derniers jours (scheduler désactivé, container arrêté, erreur).
+2. L'API Hub'Eau publie avec un délai (peu fréquent pour les chroniques).
+
+**Solution** :
+1. Dans Dagster UI → **Runs** : filtrer par job `daily_piezometry_bronze` (ou `daily_hydrometry_bronze`) et vérifier qu'un run a réussi chaque jour (ex. 31/01, 01/02, 02/02).
+2. Si des runs ont échoué : corriger la cause (logs du worker), puis relancer le job manuellement pour rattraper.
+3. Le job demande **(aujourd'hui − 7 jours) → aujourd'hui** (heure Paris, 4h UTC = 5h Paris). S'assurer que le daemon Dagster et le worker tournent bien à 4h UTC.
+
+### Dernière date ERA5 (job weekly)
+**Symptoms**: Données ERA5 qui s'arrêtent à « aujourd'hui − 5 jours » (ex. le 3 février, dernière date = 29 janvier).
+
+**Explication** : C'est **volontaire**. Le job `era5_weekly_update` charge jusqu'à **(aujourd'hui − N)** avec N = 5 par défaut (délai de publication Copernicus CDS). Voir `ERA5_AVAILABILITY_LAG_DAYS` dans `docs/CONFIGURATION.md`.
+
+**Pour aller plus près du temps réel** (si CDS est à jour) :
+```bash
+# Dans .env ou variables d'environnement du worker
+ERA5_AVAILABILITY_LAG_DAYS=3
+```
+Puis redémarrer le worker et relancer le job ERA5 weekly.
+
 ### Gap in ERA5 Data
 **Symptoms**: Missing dates in `bronze.era5_france_timeseries`
 **Diagnosis**:
