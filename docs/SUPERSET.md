@@ -74,8 +74,18 @@ Exemples de visualisations :
 ## Configuration actuelle
 
 - **Base Superset** : La connexion PostgreSQL est configurée automatiquement au démarrage
-- **Tables exposées** : Les tables gold et silver listées ci-dessus sont accessibles
+- **Datasources** : Définis dans `docker/superset/datasources.yaml` (gold, silver, bronze). Toutes les tables marts, dimensions et calques carto y sont déclarées.
 - **Redis** : Utilisé pour le cache des dashboards
+
+### Mettre à jour les datasets après changement de BDD
+
+Si le schéma ou les tables ont évolué, ré-importer les datasources :
+
+```bash
+docker exec <conteneur_superset> superset import_datasources -p /app/datasources.yaml
+```
+
+Ou redémarrer le conteneur Superset (l’init ré-importe le YAML au démarrage).
 
 ---
 
