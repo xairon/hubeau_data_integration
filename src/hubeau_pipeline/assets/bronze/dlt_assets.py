@@ -381,7 +381,8 @@ def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
         
         log("🔄 Démarrage du générateur de ressource DLT (hydrometry obs_elab)...")
 
-        # IMPORTANT: API uses code_site (from sites), not code_station (from stations)
+        # Fetch site codes from hydrometry_sites_raw.code_site
+        # These are passed as "code_entite" query parameter (NOT "code_site" which is ignored by obs_elab API!)
         station_codes = _fetch_distinct_column_values(
             "hydrometry_sites_raw",
             "code_site",

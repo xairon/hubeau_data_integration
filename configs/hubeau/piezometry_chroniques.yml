@@ -17,7 +17,7 @@ extraction:
     enabled: true                  # This endpoint REQUIRES station codes
     station_param: code_bss        # Parameter name for station code
     stations_endpoint: /stations.csv  # Endpoint to fetch station list
-    batch_size: 50                 # Number of stations per batch (comma-separated codes)
+    batch_size: 100                # ~2-3k rows/batch with 50 → ~4-6k with 100. Safe under 2083 char URL limit.
 performance:
   parallelism: 1
   batch_size: 5000

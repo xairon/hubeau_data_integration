@@ -48,8 +48,8 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
 
     MAX_RETRIES = 5
     BASE_DELAY = 2  # seconds
-    MAX_DELAY = 300  # 5 minutes max delay
-    REQUEST_TIMEOUT = 900  # 15 minutes - Hub'Eau can be slow
+    MAX_DELAY = 120  # 2 minutes max delay between retries
+    REQUEST_TIMEOUT = 120  # 2 minutes - fail fast and retry rather than hang
 
     def request_with_retry(url, params=None):
         """Make request with exponential backoff + jitter retry for transient errors."""
@@ -107,14 +107,21 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
     page = 1
     total_yielded = 0
     MAX_PAGES = 10000  # Safety limit against infinite pagination
+    pagination_start_time = time_module.time()
 
     while page <= MAX_PAGES:
+        page_start = time_module.time()
         records = list(parse_csv_stream(response.text))
         page_count = len(records)
         
         for record in records:
             total_yielded += 1
             yield record
+        
+        # Log progress every 5 pages for visibility during long pagination
+        if page % 5 == 0 or page == 1:
+            elapsed_pages = time_module.time() - pagination_start_time
+            log(f"  📄 Page {page}: {page_count} records (total: {total_yielded:,}, elapsed: {elapsed_pages:.1f}s)")
         
         # Check for next page in Link header
         link_header = response.headers.get('Link', '')
@@ -155,7 +162,8 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
         log(f"⚠️ Reached maximum pagination limit ({MAX_PAGES} pages). Results may be truncated.")
 
     if page > 1:
-        log(f"  ↳ Fetched {total_yielded:,} records ({page} pages)")
+        elapsed_total_pages = time_module.time() - pagination_start_time
+        log(f"  ↳ Fetched {total_yielded:,} records ({page} pages in {elapsed_total_pages:.1f}s)")
 
 def batch_stations(stations: List[str], batch_size: int = 50) -> Iterator[List[str]]:
     for i in range(0, len(stations), batch_size):
@@ -215,7 +223,10 @@ def hubeau_chroniques_year(
     # log(f"� Traitement de {total_stations:,} stations en {total_batches} lots de {batch_size} pour l'année {year}")
     
     total_records = 0
+    empty_batches = 0
     batch_start_time = time.time()
+    last_heartbeat = time.time()
+    HEARTBEAT_INTERVAL = 60  # Log heartbeat every 60 seconds
     
     # Simple, standard batching loop
     for batch_idx, station_batch in enumerate(batch_stations(station_codes, batch_size), 1):
@@ -241,9 +252,19 @@ def hubeau_chroniques_year(
             batch_records += 1
             
             if total_records == 1:
-                 log(f"🔍 SAMPLE RECORD: {record}")
+                log(f"🔍 SAMPLE RECORD: {record}")
+            
+            # Heartbeat: log periodically so the user knows we're still alive
+            now = time.time()
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                elapsed = now - batch_start_time
+                log(f"💓 Heartbeat: lot {batch_idx}/{total_batches} | {batch_records:,} records dans ce lot | Total: {total_records:,} | Elapsed: {elapsed/60:.1f}min")
+                last_heartbeat = now
             
             yield record
+        
+        if batch_records == 0:
+            empty_batches += 1
         
         # Log progress for every batch
         elapsed = time.time() - batch_start_time
@@ -257,6 +278,8 @@ def hubeau_chroniques_year(
 
     elapsed_total = time.time() - batch_start_time
     log(f"✅ Année {year} terminée: {total_records:,} enregistrements au total en {elapsed_total/60:.1f} minutes")
+    if empty_batches > 0:
+        log(f"ℹ️ {empty_batches}/{total_batches} lots étaient vides (stations sans données pour {year})")
 
 
 def hubeau_chroniques_daily(
