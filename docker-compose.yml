@@ -31,7 +31,7 @@ services:
       POSTGRES_DB: ${PG_DB:-postgres}
       POSTGRES_USER: ${PG_USER:-postgres}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/home/postgresql/pgdata
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "49502:5432" # PostgreSQL - fixed port
