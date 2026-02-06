@@ -18,11 +18,7 @@ services:
       timeout: 3s
       retries: 20
       start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
+    mem_limit: 2G
     restart: unless-stopped
 
   # Hub'Eau database (PostGIS + TimescaleDB)
@@ -45,11 +41,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 12G
+    mem_limit: 12G
     restart: unless-stopped
 
   # DLT Worker - Pipeline execution
@@ -103,11 +95,7 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 8G
+    mem_limit: 8G
     restart: unless-stopped
 
   # Dagster Web UI
@@ -151,11 +139,7 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
+    mem_limit: 2G
     restart: unless-stopped
 
   # Dagster Daemon - Schedules & Sensors
@@ -194,11 +178,7 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
+    mem_limit: 2G
     restart: unless-stopped
 
   # Adminer - Database Management UI
@@ -210,11 +190,7 @@ services:
       - postgres
     ports:
       - "49501:8080" # Adminer UI
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
+    mem_limit: 512M
 
   # Redis - Cache for Superset
   redis:
@@ -227,11 +203,7 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
+    mem_limit: 512M
 
   # CloudBeaver - Web SQL Client
   cloudbeaver:
@@ -246,11 +218,7 @@ services:
       - cloudbeaver_data:/opt/cloudbeaver/workspace
       # Mount initial configuration to workspace (auto-configure)
       - ./docker/cloudbeaver/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/data-sources.json
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
+    mem_limit: 2G
     restart: unless-stopped
 
   # Apache Superset - BI & Visualization
@@ -280,11 +248,7 @@ services:
     ports:
       - "49504:8088"
     entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
+    mem_limit: 4G
     restart: unless-stopped
 
 volumes:
