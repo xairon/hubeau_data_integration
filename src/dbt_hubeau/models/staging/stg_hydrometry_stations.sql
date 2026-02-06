@@ -2,7 +2,6 @@
   config(
     materialized = 'table',
     indexes = [
-      {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['code_departement']},
       {'columns': ['geometry'], 'type': 'gist'}

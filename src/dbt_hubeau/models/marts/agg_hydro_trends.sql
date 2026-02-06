@@ -4,7 +4,6 @@
     unique_key = ['code_station', 'saison', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_station', 'saison', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['classification_tendance']},
       {'columns': ['saison']},
       {'columns': ['code_departement']}

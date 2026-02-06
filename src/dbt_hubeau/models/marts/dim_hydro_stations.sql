@@ -4,7 +4,6 @@
     unique_key = ['code_station'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['code_departement']},
       {'columns': ['grandeur_hydro_principale']},
@@ -81,12 +80,12 @@ derniere_annee AS (
         fy.classification_resultat_annuel AS classification_resultat_dern_annee,
         fy.percentile_resultat_historique AS percentile_resultat_dern_annee
     FROM {{ ref('fct_yearly_hydro') }} fy
-    {% if is_incremental() %}
-    WHERE fy.code_station IN (SELECT code_station FROM recent_stations)
-    {% endif %}
     INNER JOIN primary_grandeur pg
         ON fy.code_station = pg.code_station
        AND fy.grandeur_hydro_elab = pg.grandeur_hydro_elab
+    {% if is_incremental() %}
+    WHERE fy.code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
     ORDER BY fy.code_station, fy.annee DESC
 ),
 

@@ -21,20 +21,21 @@ WITH sites AS (
 rejected AS (
     SELECT s.*
     FROM {{ source('staging', 'hydrometry_stations_raw') }} s
-    WHERE s.code_station IS NULL
-       OR s.longitude_station IS NULL
-       OR s.latitude_station IS NULL
-       OR s.code_site NOT IN (SELECT code_site FROM sites)
+    WHERE (   s.code_station IS NULL
+           OR s.longitude_station IS NULL
+           OR s.latitude_station IS NULL
+           OR NOT EXISTS (SELECT 1 FROM sites si WHERE si.code_site = s.code_site)
+          )
       {% if is_incremental() %}
-       AND s._dlt_id NOT IN (SELECT _dlt_id FROM {{ this }})
+      AND NOT EXISTS (SELECT 1 FROM {{ this }} t WHERE t._dlt_id = s._dlt_id)
       {% endif %}
 )
 
 SELECT
     *,
     CASE
-        WHEN code_site NOT IN (SELECT code_site FROM sites) THEN 'CODE_SITE_NOT_IN_SITES'
         WHEN code_station IS NULL THEN 'CODE_STATION_NULL'
+        WHEN NOT EXISTS (SELECT 1 FROM sites si WHERE si.code_site = rejected.code_site) THEN 'CODE_SITE_NOT_IN_SITES'
         WHEN longitude_station IS NULL OR latitude_station IS NULL THEN 'COORDS_NULL'
         ELSE 'OTHER'
     END AS rejection_reason

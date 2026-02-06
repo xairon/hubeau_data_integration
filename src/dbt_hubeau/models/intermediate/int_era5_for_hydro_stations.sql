@@ -3,7 +3,6 @@
   config(
     materialized = 'table',
     indexes = [
-      {'columns': ['latitude', 'longitude', 'era5_date'], 'unique': True},
       {'columns': ['latitude', 'longitude']},
       {'columns': ['era5_date'], 'type': 'brin'}
     ],
@@ -11,7 +10,7 @@
       "{{ add_primary_key(['latitude', 'longitude', 'era5_date']) }}",
       "{{ convert_to_hypertable('era5_date', '1 year') }}",
       "{{ add_foreign_key(['latitude', 'longitude'], 'int_era5_grid_points', ['era5_latitude', 'era5_longitude']) }}"
-    ] + (["{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='era5_date DESC', compress_after='365 days') }}"] if enable_compress else [])
+    ] + (["{{ enable_compression(segment_by=[], order_by='era5_date DESC', compress_after='365 days') }}"] if enable_compress else [])
   )
 }}
 
@@ -29,7 +28,7 @@ filtered_era5 AS (
     SELECT
         e.latitude::numeric AS latitude,
         e.longitude::numeric AS longitude,
-        (e.time::date)::date AS era5_date,
+        e.time::date AS era5_date,
         e.temperature_2m::numeric AS temperature_2m,
         e.total_precipitation::numeric AS total_precipitation,
         e.potential_evaporation::numeric AS potential_evaporation

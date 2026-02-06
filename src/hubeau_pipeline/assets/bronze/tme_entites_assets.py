@@ -291,7 +291,6 @@ def _read_local_tme_csv(context: AssetExecutionContext) -> Optional[pd.DataFrame
     env_dir = os.environ.get("BDLISA_CSV_DIR")
     if env_dir:
         extra_paths.append(Path(env_dir) / "TME.csv")
-    extra_paths.append(Path("D:/BDLISA_V3_NATIONAL-csv(1)/CSV/TME.csv"))
     for base in (Path(__file__).resolve().parents[4], Path.cwd()):
         extra_paths.append(base / "TME.csv")
 

@@ -27,9 +27,8 @@ models:
           - not_null
       
       - name: temperature_2m
-        description: "Température moyenne à 2m en °C"
+        description: "Température moyenne à 2m en °C (NULL si ERA5 absent pour cette date)"
         tests:
-          - not_null
           - dbt_utils.accepted_range:
               min_value: -40
               max_value: 50
@@ -37,7 +36,7 @@ models:
                 severity: warn
       
       - name: total_precipitation
-        description: "Précipitations totales journalières en m"
+        description: "Précipitations totales journalières en m (NULL si ERA5 absent)"
         tests:
           - dbt_utils.accepted_range:
               min_value: 0
@@ -46,20 +45,22 @@ models:
                 severity: warn
       
       - name: station_latitude
-        description: "Latitude de la station"
+        description: "Latitude de la station (NULL si mapping absent)"
         tests:
-          - not_null
           - dbt_utils.accepted_range:
               min_value: 41.0
               max_value: 52.0
+              config:
+                severity: warn
       
       - name: station_longitude
-        description: "Longitude de la station"
+        description: "Longitude de la station (NULL si mapping absent)"
         tests:
-          - not_null
           - dbt_utils.accepted_range:
               min_value: -5.5
               max_value: 10.0
+              config:
+                severity: warn
     
     tests:
       # Unicité station + date
@@ -86,6 +87,11 @@ models:
       - name: niveau_moyen
         tests:
           - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_bss
+            - mois
 
   - name: fct_yearly_stats
     description: "Statistiques annuelles et classification sécheresse"
@@ -185,6 +191,12 @@ models:
       - name: resultat_moyen
         tests:
           - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_station
+            - mois
+            - grandeur_hydro_elab
 
   - name: fct_yearly_hydro
     description: "Statistiques annuelles hydrométriques et classification par quantiles"

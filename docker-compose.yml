@@ -4,7 +4,6 @@
 
 services:
   # Dagster metadata database
-  # Dagster metadata database
   dagster_postgres:
     image: postgres:16-alpine
     container_name: brgm-dagster-postgres
@@ -18,6 +17,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
     restart: unless-stopped
 
   # Hub'Eau database (PostGIS + TimescaleDB)
@@ -40,6 +45,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 12G
     restart: unless-stopped
 
   # DLT Worker - Pipeline execution
@@ -93,6 +103,11 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
     restart: unless-stopped
 
   # Dagster Web UI
@@ -136,6 +151,11 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
     restart: unless-stopped
 
   # Dagster Daemon - Schedules & Sensors
@@ -174,6 +194,11 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
     restart: unless-stopped
 
   # Adminer - Database Management UI
@@ -185,12 +210,28 @@ services:
       - postgres
     ports:
       - "49501:8080" # Adminer UI
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
 
   # Redis - Cache for Superset
   redis:
     image: redis:7-alpine
     container_name: brgm-redis
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
 
   # CloudBeaver - Web SQL Client
   cloudbeaver:
@@ -205,6 +246,11 @@ services:
       - cloudbeaver_data:/opt/cloudbeaver/workspace
       # Mount initial configuration to workspace (auto-configure)
       - ./docker/cloudbeaver/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/data-sources.json
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
     restart: unless-stopped
 
   # Apache Superset - BI & Visualization
@@ -215,7 +261,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       SUPERSET_SECRET_KEY: "${SUPERSET_SECRET_KEY:-your-secret-key-change-in-production}"
       # Connect to the main postgres container, separate DB 'superset'
@@ -234,6 +280,11 @@ services:
     ports:
       - "49504:8088"
     entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
     restart: unless-stopped
 
 volumes:

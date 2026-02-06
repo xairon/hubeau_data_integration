@@ -17,7 +17,9 @@ CREATE EXTENSION IF NOT EXISTS postgis_topology;
 -- Create schemas if not exist
 CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;
+CREATE SCHEMA IF NOT EXISTS silver_rejects;
 CREATE SCHEMA IF NOT EXISTS gold;
+CREATE SCHEMA IF NOT EXISTS ops;
 
 -- Create Superset database (idempotent way)
 SELECT 'CREATE DATABASE superset'
@@ -27,7 +29,7 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'superset')\gexec
 DO $$
 BEGIN
     RAISE NOTICE 'Extensions enabled: timescaledb, postgis';
-    RAISE NOTICE 'Schemas created: bronze, silver, gold';
+    RAISE NOTICE 'Schemas created: bronze, silver, silver_rejects, gold, ops';
 END $$;
 
 -- ============================================================================

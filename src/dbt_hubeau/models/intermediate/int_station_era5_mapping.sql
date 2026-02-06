@@ -4,7 +4,6 @@
     unique_key = 'code_bss',
     incremental_strategy = 'append',
     indexes=[
-      {'columns': ['code_bss'], 'unique': True},
       {'columns': ['era5_latitude', 'era5_longitude']},
       {'columns': ['geom'], 'type': 'gist'}
     ],
@@ -31,7 +30,7 @@ WITH stations AS (
       AND x >= -5.5 AND x <= 10.0
       {% if is_incremental() and not recompute_all %}
       -- Ne traiter que les stations pas encore mappées
-      AND code_bss NOT IN (SELECT code_bss FROM {{ this }})
+      AND NOT EXISTS (SELECT 1 FROM {{ this }} t WHERE t.code_bss = stg_piezo_stations.code_bss)
       {% endif %}
 ),
 

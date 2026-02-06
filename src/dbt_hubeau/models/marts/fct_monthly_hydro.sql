@@ -4,7 +4,6 @@
     unique_key = ['code_station', 'mois', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_station', 'mois', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_station']},
       {'columns': ['code_site']},
       {'columns': ['mois'], 'type': 'brin'},
@@ -14,7 +13,7 @@
     post_hook = [
       "{{ add_primary_key(['code_station', 'mois', 'grandeur_hydro_elab']) }}",
       "{{ convert_to_hypertable('mois', '5 years') }}",
-      "{{ enable_compression(segment_by=['code_station', 'code_departement'], order_by='mois DESC', compress_after='730 days') }}",
+      "{{ enable_compression(segment_by=['code_departement'], order_by='mois DESC', compress_after='730 days') }}",
       "{{ add_foreign_key(['code_station'], 'stg_hydrometry_stations', ['code_station']) }}"
     ]
   )

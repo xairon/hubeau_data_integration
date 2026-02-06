@@ -4,7 +4,6 @@
     unique_key = ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_site', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['date_obs_elab'], 'type': 'brin'},
       {'columns': ['geometry'], 'type': 'gist'}
@@ -13,7 +12,7 @@
       "{{ add_primary_key(['code_site', 'date_obs_elab', 'grandeur_hydro_elab']) }}",
       "{{ convert_to_hypertable('date_obs_elab', '1 year') }}",
       "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}",
-      "{{ enable_compression(segment_by=['code_site', 'grandeur_hydro_elab'], order_by='date_obs_elab DESC', compress_after='90 days') }}"
+      "{{ enable_compression(segment_by=['grandeur_hydro_elab'], order_by='date_obs_elab DESC', compress_after='90 days') }}"
     ]
   )
 }}
@@ -42,7 +41,7 @@ source AS (
     INNER JOIN sites ON o.code_site = sites.code_site
     CROSS JOIN validation v
     WHERE v.site_count > 0  -- CRITICAL: Fail if no sites (prevents silent data loss)
-    WHERE o.date_obs_elab IS NOT NULL
+      AND o.date_obs_elab IS NOT NULL
       AND o.code_site IS NOT NULL
       AND o.grandeur_hydro_elab IS NOT NULL
       AND {{ cast_silver_numeric('o.resultat_obs_elab') }} IS NOT NULL

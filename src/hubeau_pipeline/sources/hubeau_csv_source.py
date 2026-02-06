@@ -49,12 +49,13 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
     MAX_RETRIES = 5
     BASE_DELAY = 2  # seconds
     MAX_DELAY = 300  # 5 minutes max delay
+    REQUEST_TIMEOUT = 900  # 15 minutes - Hub'Eau can be slow
 
     def request_with_retry(url, params=None):
         """Make request with exponential backoff + jitter retry for transient errors."""
         for attempt in range(MAX_RETRIES):
             try:
-                response = requests.get(url, params=params)  # No timeout - Hub'Eau can be slow
+                response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
                 return response
             except requests.exceptions.HTTPError as e:
@@ -83,7 +84,8 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
                     time_module.sleep(delay)
                     continue
                 raise
-        return None  # Should not reach here
+        # Should not reach here - all paths either return or raise
+        raise RuntimeError(f"request_with_retry exhausted {MAX_RETRIES} retries without returning or raising")
     
     # Build initial URL
     base_url = client.base_url + endpoint
@@ -104,8 +106,9 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
     
     page = 1
     total_yielded = 0
+    MAX_PAGES = 10000  # Safety limit against infinite pagination
 
-    while True:
+    while page <= MAX_PAGES:
         records = list(parse_csv_stream(response.text))
         page_count = len(records)
         
@@ -148,6 +151,9 @@ def fetch_all_pages(client: RESTClient, endpoint: str, params: Dict[str, Any] = 
             # No more pages
             break
     
+    if page > MAX_PAGES:
+        log(f"⚠️ Reached maximum pagination limit ({MAX_PAGES} pages). Results may be truncated.")
+
     if page > 1:
         log(f"  ↳ Fetched {total_yielded:,} records ({page} pages)")
 

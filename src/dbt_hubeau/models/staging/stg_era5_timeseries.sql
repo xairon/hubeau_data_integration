@@ -5,7 +5,6 @@
     unique_key = ['latitude', 'longitude', 'time'],
     incremental_strategy = 'delete+insert' if reprocess_from_ts is not none else 'append',
     indexes = [
-      {'columns': ['latitude', 'longitude', 'time'], 'unique': True},
       {'columns': ['time'], 'type': 'brin'},
       {'columns': ['geometry'], 'type': 'gist'},
       {'columns': ['source_file_id']}
@@ -13,7 +12,7 @@
     post_hook=[
       "{{ add_primary_key(['latitude', 'longitude', 'time']) }}",
       "{{ convert_to_hypertable('time', '1 month') }}",
-      "{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='time DESC', compress_after='90 days') }}"
+      "{{ enable_compression(segment_by=[], order_by='time DESC', compress_after='90 days') }}"
     ]
   )
 }}
@@ -48,11 +47,11 @@ deduplicated AS (
         {{ cast_silver_numeric('temperature_2m') }} AS temperature_2m,
         {{ cast_silver_numeric('total_precipitation') }} AS total_precipitation,
         {{ cast_silver_numeric('potential_evaporation') }} AS potential_evaporation,
-        {{ cast_silver_timestamp('time') }} AS time,
+        {{ cast_silver_timestamp('time') }} AT TIME ZONE 'UTC' AS time,
         source_file_id,
         created_at
     FROM source
-    ORDER BY {{ cast_silver_numeric('latitude') }}, {{ cast_silver_numeric('longitude') }}, time
+    ORDER BY {{ cast_silver_numeric('latitude') }}, {{ cast_silver_numeric('longitude') }}, time, created_at DESC NULLS LAST
 )
 
 SELECT 

@@ -4,7 +4,6 @@
     unique_key = ['code_bss', 'saison'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_bss', 'saison'], 'unique': True},
       {'columns': ['code_bss']},
       {'columns': ['classification_tendance']},
       {'columns': ['saison']},
@@ -78,6 +77,7 @@ SELECT
     -- Métriques de tendance
     ts.slope_m_par_an AS variation_annuelle_m,
     ts.r2 AS fiabilite_tendance,
+    ts.nb_points,
     
     -- Classification
     CASE 

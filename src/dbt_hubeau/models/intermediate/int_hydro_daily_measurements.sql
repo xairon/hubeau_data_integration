@@ -4,7 +4,6 @@
     unique_key = ['code_station', 'date_obs_elab', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_station', 'date_obs_elab', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['code_station']},
       {'columns': ['date_obs_elab'], 'type': 'brin'}

@@ -4,7 +4,6 @@
     unique_key = ['code_station', 'annee', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_station', 'annee', 'grandeur_hydro_elab'], 'unique': True},
       {'columns': ['code_station']},
       {'columns': ['code_site']},
       {'columns': ['annee'], 'type': 'brin'},
@@ -76,36 +75,64 @@ yearly_agg AS (
         
     FROM monthly
     GROUP BY code_station, code_site, grandeur_hydro_elab, EXTRACT(YEAR FROM mois)
+),
+
+-- Étape 1: Calcul des percentiles et LAG (une seule fois)
+yearly_with_percentiles AS (
+    SELECT
+        *,
+        PERCENT_RANK() OVER (
+            PARTITION BY code_station, grandeur_hydro_elab ORDER BY resultat_moyen_annuel
+        ) AS percentile_resultat_historique,
+        LAG(resultat_moyen_annuel) OVER (
+            PARTITION BY code_station, grandeur_hydro_elab ORDER BY annee
+        ) AS resultat_annee_prec,
+        LAG(precipitation_totale_annuelle) OVER (
+            PARTITION BY code_station, grandeur_hydro_elab ORDER BY annee
+        ) AS precipitation_annee_prec
+    FROM yearly_agg
 )
 
 SELECT
-    *,
-    
+    code_station,
+    code_site,
+    grandeur_hydro_elab,
+    annee,
+    code_departement,
+    nom_departement,
+    code_region,
+    libelle_region,
+    libelle_station,
+    libelle_site,
+    resultat_moyen_annuel,
+    resultat_min_annuel,
+    resultat_max_annuel,
+    amplitude_annuelle,
+    resultat_stddev_annuel,
+    temperature_moyenne_annuelle,
+    temperature_min_annuelle,
+    temperature_max_annuelle,
+    precipitation_totale_annuelle,
+    evaporation_moyenne_annuelle,
+    nb_jours_mesures_annuel,
+    nb_mois_mesures,
+    era5_latitude,
+    era5_longitude,
+
     -- Variation vs année précédente
-    resultat_moyen_annuel - LAG(resultat_moyen_annuel) OVER (
-        PARTITION BY code_station, grandeur_hydro_elab ORDER BY annee
-    ) AS variation_resultat_vs_annee_prec,
-    
-    precipitation_totale_annuelle - LAG(precipitation_totale_annuelle) OVER (
-        PARTITION BY code_station, grandeur_hydro_elab ORDER BY annee
-    ) AS variation_precipitation_vs_annee_prec,
-    
-    -- Percentile historique
-    PERCENT_RANK() OVER (
-        PARTITION BY code_station, grandeur_hydro_elab ORDER BY resultat_moyen_annuel
-    ) AS percentile_resultat_historique,
-    
+    resultat_moyen_annuel - resultat_annee_prec AS variation_resultat_vs_annee_prec,
+    precipitation_totale_annuelle - precipitation_annee_prec AS variation_precipitation_vs_annee_prec,
+
+    -- Percentile (calculé une seule fois dans la CTE)
+    percentile_resultat_historique,
+
     -- Classification simple par quantiles
-    CASE 
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_station, grandeur_hydro_elab ORDER BY resultat_moyen_annuel) < 0.2 
-        THEN 'TRES_BAS'
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_station, grandeur_hydro_elab ORDER BY resultat_moyen_annuel) < 0.4 
-        THEN 'BAS'
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_station, grandeur_hydro_elab ORDER BY resultat_moyen_annuel) < 0.6 
-        THEN 'NORMAL'
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_station, grandeur_hydro_elab ORDER BY resultat_moyen_annuel) < 0.8 
-        THEN 'HAUT'
+    CASE
+        WHEN percentile_resultat_historique < 0.2 THEN 'TRES_BAS'
+        WHEN percentile_resultat_historique < 0.4 THEN 'BAS'
+        WHEN percentile_resultat_historique < 0.6 THEN 'NORMAL'
+        WHEN percentile_resultat_historique < 0.8 THEN 'HAUT'
         ELSE 'TRES_HAUT'
     END AS classification_resultat_annuel
-    
-FROM yearly_agg
+
+FROM yearly_with_percentiles

@@ -6,34 +6,27 @@ Sensors:
 - freshness_alert_sensor: Alerts when source data is stale
 """
 
-import os
 from dagster import (
     asset_sensor,
     multi_asset_sensor,
-    MultiAssetSensorDefinition,
     MultiAssetSensorEvaluationContext,
     AssetKey,
     RunRequest,
     SkipReason,
     DefaultSensorStatus,
-    sensor,
-    SensorEvaluationContext,
 )
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 
 from .jobs import dbt_silver_gold_pipeline_job
+from .utils import env_true
 
 logger = logging.getLogger(__name__)
 
 
-def _env_true(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
-
-
 DEFAULT_SENSOR_STATUS = (
     DefaultSensorStatus.RUNNING
-    if _env_true("DAGSTER_ENABLE_SENSORS", "false")
+    if env_true("DAGSTER_ENABLE_SENSORS", "false")
     else DefaultSensorStatus.STOPPED
 )
 

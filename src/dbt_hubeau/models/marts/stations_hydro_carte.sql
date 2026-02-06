@@ -4,7 +4,6 @@
     unique_key = ['code_station'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['grandeur_hydro_principale']},
       {'columns': ['geom'], 'type': 'gist'}

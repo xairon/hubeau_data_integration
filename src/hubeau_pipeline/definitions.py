@@ -2,7 +2,6 @@
 Dagster Definitions - Entry point
 """
 
-import os
 from dagster import Definitions
 
 from .assets import all_assets
@@ -12,13 +11,10 @@ from .io.io_managers import noop_io_manager
 from .assets.dbt_assets import dbt_resource
 from .schedules import all_schedules
 from .sensors import all_sensors
+from .utils import env_true
 
 
-def _env_true(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
-
-
-ENABLE_SENSORS = _env_true("DAGSTER_ENABLE_SENSORS", "false")
+ENABLE_SENSORS = env_true("DAGSTER_ENABLE_SENSORS", "false")
 
 
 defs = Definitions(

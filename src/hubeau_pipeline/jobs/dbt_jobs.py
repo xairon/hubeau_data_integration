@@ -1,4 +1,4 @@
-from dagster import define_asset_job, AssetSelection, op, job, In, Nothing, graph
+from dagster import define_asset_job, AssetSelection, op, job, In, Out, Nothing
 from ..assets.dbt_assets import hubeau_dbt_assets
 from dagster_dbt import build_dbt_asset_selection, DbtCliResource
 
@@ -69,8 +69,6 @@ PIEZO_MODELS = [
     "agg_station_trends",
     "dim_piezo_stations",
     "stations_piezo_carte",
-    # Rejects
-    "stg_piezo_chroniques_rejected",
 ]
 
 # ==============================================================================
@@ -78,7 +76,7 @@ PIEZO_MODELS = [
 # ==============================================================================
 
 # Daily piezo models: staging -> intermediate -> daily mart only
-# Excludes monthly/yearly aggregates and dimensions to keep runtime short
+# Excludes monthly/yearly aggregates, trends and dimensions to keep runtime short
 PIEZO_DAILY_MODELS = [
     # Staging (Silver) - piezo specific
     "stg_piezo_stations",
@@ -88,15 +86,8 @@ PIEZO_DAILY_MODELS = [
     "int_daily_measurements",
     "int_station_era5_mapping",
     "int_era5_for_stations",
-    # Daily + gold marts (incremental)
+    # Daily mart (incremental) - only the fast-path models
     "hubeau_daily_chroniques",
-    "fct_monthly_chroniques",
-    "fct_yearly_stats",
-    "agg_station_trends",
-    "dim_piezo_stations",
-    "stations_piezo_carte",
-    # Rejects
-    "stg_piezo_chroniques_rejected",
 ]
 
 dbt_piezo_pipeline_daily_job = define_asset_job(
@@ -162,7 +153,8 @@ HYDRO_MODELS = [
 # HYDROMETRY DAILY PIPELINE (Streaming-optimized)
 # ==============================================================================
 
-# Daily hydro models: staging -> intermediate -> daily mart + gold (incremental)
+# Daily hydro models: staging -> intermediate -> daily mart only
+# Excludes monthly/yearly aggregates, trends and dimensions to keep runtime short
 HYDRO_DAILY_MODELS = [
     # Staging (Silver) - hydro specific
     "stg_hydrometry_sites",
@@ -172,16 +164,8 @@ HYDRO_DAILY_MODELS = [
     "int_hydro_daily_measurements",
     "int_hydro_station_era5_mapping",
     "int_era5_for_hydro_stations",
-    # Daily + gold marts (incremental)
+    # Daily mart (incremental) - only the fast-path models
     "hydro_daily_chroniques",
-    "fct_monthly_hydro",
-    "fct_yearly_hydro",
-    "agg_hydro_trends",
-    "dim_hydro_stations",
-    "stations_hydro_carte",
-    # Rejects
-    "stg_hydrometry_obs_elab_rejected",
-    "stg_hydrometry_stations_rejected",
 ]
 
 dbt_hydro_pipeline_daily_job = define_asset_job(
@@ -247,6 +231,7 @@ dbt_shared_dimensions_job = define_asset_job(
 
 @op(
     required_resource_keys={"dbt"},
+    out=Out(str),
     description="Run dbt test to validate data quality",
 )
 def run_dbt_tests(context):
@@ -257,17 +242,21 @@ def run_dbt_tests(context):
     dbt: DbtCliResource = context.resources.dbt
     
     context.log.info("🧪 Starting dbt test...")
-    
-    # Run dbt test command
-    test_result = dbt.cli(["test"], context=context).wait()
-    
-    context.log.info(f"✅ dbt test completed")
-    
+
+    try:
+        dbt.cli(["test"], raise_on_error=True, context=context).wait()
+    except Exception as e:
+        context.log.error(f"❌ dbt test failed: {e}")
+        raise
+
+    context.log.info("✅ dbt test completed successfully")
+
     return "dbt test completed"
 
 
 @op(
     required_resource_keys={"dbt"},
+    out=Out(str),
     description="Check source data freshness",
 )
 def run_dbt_source_freshness(context):
@@ -278,13 +267,27 @@ def run_dbt_source_freshness(context):
     dbt: DbtCliResource = context.resources.dbt
     
     context.log.info("📅 Checking source freshness...")
-    
-    # Run dbt source freshness command
-    freshness_result = dbt.cli(["source", "freshness"], context=context).wait()
-    
+
+    try:
+        dbt.cli(["source", "freshness"], raise_on_error=True, context=context).wait()
+    except Exception as e:
+        context.log.error(f"❌ Source freshness check failed: {e}")
+        raise
+
     context.log.info("✅ Source freshness check completed")
-    
+
     return "freshness check completed"
+
+
+@op(
+    ins={"freshness_result": In(str)},
+    required_resource_keys={"dbt"},
+    out=Out(str),
+    description="Run dbt test after freshness check",
+)
+def run_dbt_tests_after_freshness(context, freshness_result):
+    """Run dbt tests sequentially after freshness check completes."""
+    return run_dbt_tests(context)
 
 
 @job(
@@ -306,13 +309,13 @@ def dbt_freshness_job():
 
 
 @job(
-    description="Run both dbt tests and freshness checks",
+    description="Run both dbt tests and freshness checks (sequential: freshness first, then tests)",
     tags={"dagster/concurrency_key": "dbt_pipeline"},
 )
 def dbt_quality_job():
-    """Combined job: freshness check then tests."""
-    tests = run_dbt_tests()
-    run_dbt_source_freshness()
+    """Combined job: freshness check THEN tests (sequential via data dependency)."""
+    freshness_result = run_dbt_source_freshness()
+    run_dbt_tests_after_freshness(freshness_result)
 
 
 # ==============================================================================

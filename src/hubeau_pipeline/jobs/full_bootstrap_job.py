@@ -26,25 +26,29 @@ from dagster import (
     Out,
     Nothing,
     OpExecutionContext,
-    Config,
-    RunConfig,
 )
 import psycopg2
 import yaml
+from contextlib import contextmanager
 
 
 # Configuration
 START_YEAR = 1990
-CURRENT_YEAR = datetime.now().year
 DELAY_BETWEEN_PARTITIONS = 5  # seconds between API calls
+
+
+def _get_current_year() -> int:
+    """Return current year at runtime (not import time)."""
+    return datetime.now().year
 
 
 # ==============================================================================
 # HELPER: Get DB connection
 # ==============================================================================
 
+@contextmanager
 def get_db_connection():
-    return psycopg2.connect(
+    conn = psycopg2.connect(
         host=os.getenv('PG_HOST', 'postgres'),
         port=os.getenv('PG_PORT', '5432'),
         database=os.getenv('PG_DB', 'postgres'),
@@ -52,35 +56,33 @@ def get_db_connection():
         password=os.getenv('PG_PASSWORD'),
         sslmode=os.getenv('PG_SSLMODE', 'prefer')
     )
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-def acquire_bootstrap_lock(conn, context) -> None:
+def try_acquire_bootstrap_lock(conn, context) -> bool:
     """
-    Acquire an exclusive advisory lock for bootstrap job to prevent concurrent runs.
-    Uses pg_advisory_lock with a hash of 'hubeau_bootstrap' string.
-    This lock is automatically released when the connection closes.
+    Try to acquire an exclusive advisory lock for bootstrap job.
+    Uses pg_try_advisory_lock (non-blocking) to detect concurrent runs.
+    Returns True if lock acquired, False if already held by another session.
+    Note: Lock is released when the connection closes.
     """
     LOCK_ID = 123456789  # Arbitrary unique lock ID for bootstrap
     with conn.cursor() as cur:
-        context.log.info("🔒 Acquiring bootstrap advisory lock...")
-        # Try to acquire lock (blocks until available)
-        cur.execute("SELECT pg_advisory_lock(%s)", (LOCK_ID,))
+        context.log.info("🔒 Checking bootstrap advisory lock...")
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (LOCK_ID,))
+        acquired = cur.fetchone()[0]
+    conn.commit()
+    if acquired:
         context.log.info("✅ Bootstrap lock acquired")
-    conn.commit()
+    else:
+        context.log.warning("⚠️ Bootstrap lock already held by another session")
+    return acquired
 
 
-def release_bootstrap_lock(conn, context) -> None:
-    """Release the bootstrap advisory lock."""
-    LOCK_ID = 123456789
-    with conn.cursor() as cur:
-        context.log.info("🔓 Releasing bootstrap advisory lock...")
-        cur.execute("SELECT pg_advisory_unlock(%s)", (LOCK_ID,))
-        context.log.info("✅ Bootstrap lock released")
-    conn.commit()
-
-
-def _env_true(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
+from hubeau_pipeline.utils import env_true as _env_true
 
 
 def _selected_partitions() -> set[str] | None:
@@ -186,16 +188,16 @@ def bootstrap_start(context: OpExecutionContext) -> Nothing:
     context.log.info("🚀 FULL BOOTSTRAP JOB STARTED")
     context.log.info("🚀 ═══════════════════════════════════════════════════════════")
 
-    # Acquire advisory lock to prevent concurrent bootstrap runs
-    conn = get_db_connection()
-    try:
-        acquire_bootstrap_lock(conn, context)
-        # Store connection in run context so it can be released later
-        # NOTE: Connection will be held for entire job duration
-    finally:
-        # Keep connection open (lock is released when connection closes)
-        pass
-    context.log.info(f"📅 Period: {START_YEAR} → {CURRENT_YEAR}")
+    # Check for concurrent bootstrap via advisory lock.
+    # Lock is released when connection closes, so this is a best-effort check.
+    # Primary concurrency protection is Dagster's max_concurrent_runs tag.
+    with get_db_connection() as conn:
+        if not try_acquire_bootstrap_lock(conn, context):
+            raise RuntimeError(
+                "Another bootstrap job is already running. "
+                "Wait for it to finish or kill the other session."
+            )
+    context.log.info(f"📅 Period: {START_YEAR} → {_get_current_year()}")
     context.log.info(f"⏱️  Started at: {datetime.now().isoformat()}")
     context.log.info("⚠️  This job will take MANY HOURS to complete!")
     context.log.info("⚠️  Do NOT run other data jobs while this is running!")
@@ -308,7 +310,7 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
 
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
     context.log.info("📊 STEP 2/5: Loading ALL chroniques (SEQUENTIAL, via DLT)...")
-    context.log.info(f"📊 Period: {START_YEAR} → {CURRENT_YEAR}")
+    context.log.info(f"📊 Period: {START_YEAR} → {_get_current_year()}")
     context.log.info("📊 ═══════════════════════════════════════════════════════════")
     
     # Credentials from standard env vars
@@ -365,7 +367,7 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
         with open(api["chroniques_config"]) as f:
             chroniques_config = yaml.safe_load(f)
         
-        for year in range(START_YEAR, CURRENT_YEAR + 1):
+        for year in range(START_YEAR, _get_current_year() + 1):
             context.log.info(f"  📅 {api['name']} - Year {year}...")
             job_name = "chroniques"
             partition_key = f"{api['name']}:{year}"
@@ -414,12 +416,13 @@ def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
     
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
     context.log.info("🌤️  STEP 3/5: Loading ALL ERA5 data (SEQUENTIAL, 2-year chunks)...")
-    context.log.info(f"🌤️  Period: {START_YEAR} → {CURRENT_YEAR}")
+    context.log.info(f"🌤️  Period: {START_YEAR} → {_get_current_year()}")
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
     
+    current_year = _get_current_year()
     year = START_YEAR
-    while year <= CURRENT_YEAR:
-        chunk_end = min(year + 1, CURRENT_YEAR)  # 2-year chunk
+    while year <= current_year:
+        chunk_end = min(year + 1, current_year)  # 2-year chunk
         
         start_date = datetime(year, 1, 1)
         end_date = datetime(chunk_end, 12, 31)
@@ -473,8 +476,9 @@ def run_dbt_full(context: OpExecutionContext) -> Nothing:
     with get_db_connection() as conn:
         _mark_partition_start(conn, job_name, partition_key)
     try:
+        dbt_project_dir = os.getenv("DBT_PROJECT_DIR", "/app/src/dbt_hubeau")
         result = subprocess.run(
-            ["dbt", "run", "--project-dir", "/app/src/dbt_hubeau", "--profiles-dir", "/app/src/dbt_hubeau"],
+            ["dbt", "run", "--project-dir", dbt_project_dir, "--profiles-dir", dbt_project_dir],
             capture_output=True,
             text=True,
             timeout=3600  # 1 hour timeout

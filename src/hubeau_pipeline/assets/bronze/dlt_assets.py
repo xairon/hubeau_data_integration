@@ -10,13 +10,14 @@ DOMAINS:
 """
 
 import os
+import time
 import yaml
 import dlt
 import psycopg2
 from psycopg2 import sql
 from dlt.destinations import postgres
-from dagster import AssetExecutionContext, StaticPartitionsDefinition, Output, MetadataValue, AssetIn
-from dagster_dlt import DagsterDltResource, dlt_assets, DagsterDltTranslator
+from dagster import AssetExecutionContext, StaticPartitionsDefinition, Output, MetadataValue
+from dagster_dlt import DagsterDltResource, dlt_assets
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -26,15 +27,24 @@ from hubeau_pipeline.sources.hubeau_csv_source import (
     hubeau_chroniques_daily,
 )
 from hubeau_pipeline.resources import PostgreSQLResource
+from hubeau_pipeline.utils import extract_dlt_row_count
 
 
 # ============================================================================
 # PARTITIONS
 # ============================================================================
 
-CURRENT_YEAR = datetime.now().year
 OLDEST_YEAR = 1967
-YEAR_PARTITIONS = [str(year) for year in range(OLDEST_YEAR, CURRENT_YEAR + 1)]
+
+
+def _current_year() -> int:
+    """Return current year at runtime (not import time) to handle year rollover in long-running daemons."""
+    return datetime.now().year
+
+
+# Partitions are computed at import time but cover a wide enough range.
+# Adding +1 buffer year so a daemon started in December still works in January.
+YEAR_PARTITIONS = [str(year) for year in range(OLDEST_YEAR, datetime.now().year + 2)]
 MODE_PARTITIONS = StaticPartitionsDefinition(YEAR_PARTITIONS)
 
 
@@ -98,7 +108,7 @@ def create_referentiel_source(
         return _resource
     return _source
 
-@dlt.source(name="hubeau_piezometry_stations")
+
 def piezometry_stations_source():
     """DLT Source for Piezometry Stations (FULL load with replace)."""
     return create_referentiel_source(
@@ -114,7 +124,7 @@ def piezometry_stations_source():
 def _clean_partition_data(table_name: str, schema: str, year: str, date_column: str, logger=None) -> int:
     """
     Nettoie les données existantes pour une partition (année) avant rechargement.
-    Uses advisory lock to prevent concurrent cleanup of same partition.
+    Uses transaction-level advisory lock to prevent concurrent cleanup of same partition.
 
     Args:
         table_name: Nom de la table (ex: "piezometry_chroniques_raw")
@@ -127,6 +137,7 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
         Nombre de lignes supprimées
     """
     log = logger.info if logger else print
+    conn = None
 
     try:
         host = os.environ.get("PG_HOST", "postgres")
@@ -143,16 +154,17 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
         )
 
         with conn:
-            # Acquire advisory lock for this specific partition
-            # Lock ID = hash of table_name + year to avoid conflicts between partitions
+            # Acquire transaction-level advisory lock for this specific partition.
+            # pg_advisory_xact_lock is released automatically on COMMIT or ROLLBACK,
+            # so it's safe even if an exception occurs mid-transaction.
             lock_string = f"{schema}.{table_name}:{year}"
             lock_id = abs(hash(lock_string)) % (2**31)  # 32-bit integer
 
             with conn.cursor() as cur:
                 log(f"🔒 Acquiring lock for partition {lock_string}...")
-                cur.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+                cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_id,))
                 log(f"✅ Lock acquired for partition {lock_string}")
-            with conn.cursor() as cur:
+
                 # Vérifier si la table existe
                 cur.execute("""
                     SELECT EXISTS (
@@ -169,8 +181,6 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                     return 0
                 
                 # Compter les lignes existantes pour cette année
-                # Note: date_column peut être VARCHAR dans bronze
-                # On utilise LIKE pour filtrer par année (plus robuste que EXTRACT sur VARCHAR)
                 cur.execute(
                     sql.SQL("""
                         SELECT COUNT(*)
@@ -193,8 +203,6 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                     return 0
                 
                 # Supprimer les données de cette année
-                # Note: date_column peut être VARCHAR dans bronze
-                # On utilise LIKE pour filtrer par année (plus robuste que EXTRACT sur VARCHAR)
                 log(f"🧹 Suppression de {existing_count:,} lignes existantes pour l'année {year}...")
                 cur.execute(
                     sql.SQL("""
@@ -212,9 +220,7 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                 
                 deleted_count = cur.rowcount
                 conn.commit()
-
-                # Release advisory lock
-                cur.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+                # pg_advisory_xact_lock released automatically on commit
                 log(f"🔓 Lock released for partition {lock_string}")
 
                 log(f"✅ {deleted_count:,} lignes supprimées pour l'année {year}")
@@ -226,12 +232,13 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
             logger.error(error_msg)
         else:
             print(error_msg, flush=True)
-        # FAIL HARD: cleanup errors indicate data corruption risk
-        # Better to fail explicitly than proceed with corrupted state
         raise RuntimeError(
             f"Partition cleanup failed for {schema}.{table_name} year {year}. "
             f"Cannot proceed with load to avoid data corruption. Error: {e}"
         ) from e
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _fetch_distinct_column_values(table_name: str, column_name: str, logger=None) -> List[str]:
@@ -253,14 +260,21 @@ def _fetch_distinct_column_values(table_name: str, column_name: str, logger=None
             user=user,
             password=os.environ.get("PG_PASSWORD"),
         )
-        with conn:
+        try:
             with conn.cursor() as cur:
                 schema = os.environ.get("DLT_BRONZE_DATASET", "bronze")
-                query = f'SELECT DISTINCT "{column_name}" FROM "{schema}"."{table_name}" WHERE "{column_name}" IS NOT NULL'
+                query = sql.SQL('SELECT DISTINCT {} FROM {}.{} WHERE {} IS NOT NULL').format(
+                    sql.Identifier(column_name),
+                    sql.Identifier(schema),
+                    sql.Identifier(table_name),
+                    sql.Identifier(column_name)
+                )
                 cur.execute(query)
                 results = [str(row[0]) for row in cur.fetchall()]
                 log(f"✅ {len(results):,} valeurs récupérées pour {table_name}.{column_name}")
                 return results
+        finally:
+            conn.close()
     except Exception as e:
         error_msg = f"❌ Erreur lors de la récupération depuis PG: {e}"
         if logger:
@@ -329,7 +343,6 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
     return _resource
 
 
-@dlt.source(name="hubeau_hydrometry_sites")
 def hydrometry_sites_source():
     """DLT Source for Hydrometry Sites (FULL load with replace)."""
     return create_referentiel_source(
@@ -339,7 +352,6 @@ def hydrometry_sites_source():
     )()
 
 
-@dlt.source(name="hubeau_hydrometry_stations")
 def hydrometry_stations_source():
     """DLT Source for Hydrometry Stations (FULL load with replace)."""
     return create_referentiel_source(
@@ -368,27 +380,28 @@ def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
         log = logger.info if logger else print
         
         log("🔄 Démarrage du générateur de ressource DLT (hydrometry obs_elab)...")
-        
+
+        # IMPORTANT: API uses code_site (from sites), not code_station (from stations)
         station_codes = _fetch_distinct_column_values(
-            "hydrometry_stations_raw",
-            "code_station",
+            "hydrometry_sites_raw",
+            "code_site",
             logger=logger
         )
         
         if not station_codes:
-            warning_msg = "⚠️ Aucun code de station hydrométrique trouvé! Le pipeline ne produira aucune donnée."
+            warning_msg = "⚠️ Aucun code de site hydrométrique trouvé! Le pipeline ne produira aucune donnée."
             if logger:
                 logger.warning(warning_msg)
             else:
                 print(warning_msg, flush=True)
             return
 
-        log(f"📊 {len(station_codes):,} stations à traiter pour l'année {year}")
+        log(f"📊 {len(station_codes):,} sites à traiter pour l'année {year}")
         
         # Calculate batch info for logging
         batch_size = config.get("extraction", {}).get("station_slicing", {}).get("batch_size", 50)
         total_batches = (len(station_codes) + batch_size - 1) // batch_size
-        log(f"📦 Les stations seront traitées en {total_batches} lots de {batch_size} stations")
+        log(f"📦 Les sites seront traités en {total_batches} lots de {batch_size} sites")
 
         yield from hubeau_chroniques_year(
             config, 
@@ -447,7 +460,7 @@ def hydrometry_stations_raw(context: AssetExecutionContext, dlt: DagsterDltResou
 # For now, we use regular @asset pattern for partitioned data until dagster-dlt
 # supports StaticPartitionsDefinition natively.
 
-from dagster import asset, Output, MetadataValue, AssetIn
+from dagster import asset
 
 
 
@@ -491,36 +504,14 @@ def piezometry_chroniques_raw(context: AssetExecutionContext) -> Output[Dict[str
     context.log.info("✅ Ressource DLT créée")
     
     context.log.info("🚀 Démarrage de l'exécution du pipeline DLT...")
-    import time
     start_time = time.time()
     load_info = pipeline.run(resource)
     elapsed_time = time.time() - start_time
     
     context.log.info(f"⏱️ Pipeline terminé en {elapsed_time:.1f} secondes")
-    
-    # DEBUG: Log full load info
     context.log.info(f"📋 DLT Load Info:\n{load_info}")
     
-    # Metrics extraction
-    rows = 0
-    try:
-        packages = getattr(load_info, "load_packages", []) or []
-        for pkg in packages:
-            # Check if jobs is a dict or list
-            jobs = getattr(pkg, "jobs", [])
-            if isinstance(jobs, dict):
-                # Handle case where jobs might be grouped by status (older DLT or internal repr)
-                all_jobs = []
-                for job_list in jobs.values():
-                    if isinstance(job_list, list):
-                        all_jobs.extend(job_list)
-                jobs = all_jobs
-
-            for job in jobs:
-                rows += getattr(job, "metrics", {}).get("items", 0)
-    except Exception as e:
-        context.log.error(f"⚠️ Failed to extract metrics from load_info: {e}")
-    
+    rows = extract_dlt_row_count(load_info, logger=context.log)
     context.log.info(f"✅ Chargement terminé: {rows:,} lignes chargées pour l'année {year}")
     
     return Output(
@@ -543,12 +534,10 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
     Hydrometry observations - Partitioned by year.
     Uses 'Lazy Loading' pattern to avoid DLT config serialization issues.
     """
-    import time
     
     year = context.partition_key
     context.log.info(f"📅 Traitement de la partition: {year}")
     
-    # Nettoyer les données existantes pour cette année avant rechargement
     deleted_count = _clean_partition_data(
         table_name="hydrometry_obs_elab_raw",
         schema="bronze",
@@ -560,15 +549,11 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
     if deleted_count > 0:
         context.log.info(f"🧹 Nettoyage terminé: {deleted_count:,} lignes supprimées pour l'année {year}")
     
-    # Create pipeline
     context.log.info("🔧 Création du pipeline DLT...")
     pipeline = _create_pipeline(f"hubeau_hydrometry_obs_elab_{year}")
-    context.log.info("✅ Pipeline DLT créé")
     
-    # Create resource with lazy loading
     context.log.info("🏭 Création de la ressource DLT (chargement paresseux des stations)...")
     resource = create_hydrometry_obs_elab_resource(year, dagster_context=context)
-    context.log.info("✅ Ressource DLT créée")
     
     context.log.info("🚀 Démarrage de l'exécution du pipeline DLT...")
     start_time = time.time()
@@ -576,27 +561,9 @@ def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, 
     elapsed_time = time.time() - start_time
     
     context.log.info(f"⏱️ Pipeline terminé en {elapsed_time:.1f} secondes")
-    
-    # DEBUG: Log full load info
     context.log.info(f"📋 DLT Load Info:\n{load_info}")
     
-    # Metrics extraction
-    rows = 0
-    try:
-        packages = getattr(load_info, "load_packages", []) or []
-        for pkg in packages:
-            jobs = getattr(pkg, "jobs", [])
-            if isinstance(jobs, dict):
-                all_jobs = []
-                for job_list in jobs.values():
-                    if isinstance(job_list, list):
-                        all_jobs.extend(job_list)
-                jobs = all_jobs
-            for job in jobs:
-                rows += getattr(job, "metrics", {}).get("items", 0)
-    except Exception as e:
-        context.log.error(f"⚠️ Failed to extract metrics from load_info: {e}")
-    
+    rows = extract_dlt_row_count(load_info, logger=context.log)
     context.log.info(f"✅ Chargement terminé: {rows:,} lignes chargées pour l'année {year}")
     
     return Output(
@@ -674,8 +641,8 @@ def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=Non
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
         
         station_codes = _fetch_distinct_column_values(
-            "hydrometry_stations_raw",
-            "code_station",
+            "hydrometry_sites_raw",
+            "code_site",
             logger=logger
         )
         
@@ -705,8 +672,6 @@ def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Di
     Piezometry chroniques - Daily incremental load (last 7 days).
     Used by scheduled daily pipeline.
     """
-    import time
-    
     context.log.info("📅 [DAILY] Chargement incrémental piézométrie")
     
     pipeline = _create_pipeline("hubeau_piezometry_chroniques_daily")
@@ -718,22 +683,7 @@ def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Di
     
     context.log.info(f"📋 DLT Load Info:\n{load_info}")
     
-    rows = 0
-    try:
-        packages = getattr(load_info, "load_packages", []) or []
-        for pkg in packages:
-            jobs = getattr(pkg, "jobs", [])
-            if isinstance(jobs, dict):
-                all_jobs = []
-                for job_list in jobs.values():
-                    if isinstance(job_list, list):
-                        all_jobs.extend(job_list)
-                jobs = all_jobs
-            for job in jobs:
-                rows += getattr(job, "metrics", {}).get("items", 0)
-    except Exception as e:
-        context.log.error(f"⚠️ Failed to extract metrics: {e}")
-    
+    rows = extract_dlt_row_count(load_info, logger=context.log)
     context.log.info(f"✅ [DAILY] Terminé: {rows:,} lignes chargées en {elapsed_time:.1f}s")
     
     return Output(
@@ -756,8 +706,6 @@ def hydrometry_obs_daily_raw(context: AssetExecutionContext) -> Output[Dict[str,
     Hydrometry observations - Daily incremental load (last 7 days).
     Used by scheduled daily pipeline.
     """
-    import time
-    
     context.log.info("📅 [DAILY] Chargement incrémental hydrométrie")
     
     pipeline = _create_pipeline("hubeau_hydrometry_obs_daily")
@@ -769,22 +717,7 @@ def hydrometry_obs_daily_raw(context: AssetExecutionContext) -> Output[Dict[str,
     
     context.log.info(f"📋 DLT Load Info:\n{load_info}")
     
-    rows = 0
-    try:
-        packages = getattr(load_info, "load_packages", []) or []
-        for pkg in packages:
-            jobs = getattr(pkg, "jobs", [])
-            if isinstance(jobs, dict):
-                all_jobs = []
-                for job_list in jobs.values():
-                    if isinstance(job_list, list):
-                        all_jobs.extend(job_list)
-                jobs = all_jobs
-            for job in jobs:
-                rows += getattr(job, "metrics", {}).get("items", 0)
-    except Exception as e:
-        context.log.error(f"⚠️ Failed to extract metrics: {e}")
-    
+    rows = extract_dlt_row_count(load_info, logger=context.log)
     context.log.info(f"✅ [DAILY] Terminé: {rows:,} lignes chargées en {elapsed_time:.1f}s")
     
     return Output(

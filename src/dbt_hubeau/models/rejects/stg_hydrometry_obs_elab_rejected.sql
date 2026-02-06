@@ -21,22 +21,23 @@ WITH sites AS (
 rejected AS (
     SELECT o.*
     FROM {{ source('staging', 'hydrometry_obs_elab_raw') }} o
-    WHERE o.date_obs_elab IS NULL
-       OR o.code_site IS NULL
-       OR o.grandeur_hydro_elab IS NULL
-       OR {{ cast_silver_numeric('o.resultat_obs_elab') }} IS NULL
-       OR o.code_site NOT IN (SELECT code_site FROM sites)
+    WHERE (   o.date_obs_elab IS NULL
+           OR o.code_site IS NULL
+           OR o.grandeur_hydro_elab IS NULL
+           OR {{ cast_silver_numeric('o.resultat_obs_elab') }} IS NULL
+           OR NOT EXISTS (SELECT 1 FROM sites si WHERE si.code_site = o.code_site)
+          )
       {% if is_incremental() %}
-       AND o._dlt_id NOT IN (SELECT _dlt_id FROM {{ this }})
+      AND NOT EXISTS (SELECT 1 FROM {{ this }} t WHERE t._dlt_id = o._dlt_id)
       {% endif %}
 )
 
 SELECT
     *,
     CASE
-        WHEN code_site NOT IN (SELECT code_site FROM sites) THEN 'CODE_SITE_NOT_IN_SITES'
-        WHEN date_obs_elab IS NULL THEN 'DATE_OBS_ELAB_NULL'
         WHEN code_site IS NULL THEN 'CODE_SITE_NULL'
+        WHEN NOT EXISTS (SELECT 1 FROM sites si WHERE si.code_site = rejected.code_site) THEN 'CODE_SITE_NOT_IN_SITES'
+        WHEN date_obs_elab IS NULL THEN 'DATE_OBS_ELAB_NULL'
         WHEN grandeur_hydro_elab IS NULL THEN 'GRANDEUR_HYDRO_NULL'
         WHEN {{ cast_silver_numeric('resultat_obs_elab') }} IS NULL THEN 'RESULTAT_OBS_NULL'
         ELSE 'OTHER'

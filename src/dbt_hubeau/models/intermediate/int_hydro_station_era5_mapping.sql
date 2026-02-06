@@ -4,7 +4,6 @@
     unique_key = 'code_station',
     incremental_strategy = 'append',
     indexes=[
-      {'columns': ['code_station'], 'unique': True},
       {'columns': ['code_site']},
       {'columns': ['era5_latitude', 'era5_longitude']},
       {'columns': ['geom'], 'type': 'gist'}
@@ -33,7 +32,7 @@ WITH stations AS (
       AND s.latitude_station >= 41.0 AND s.latitude_station <= 52.0
       AND s.longitude_station >= -5.5 AND s.longitude_station <= 10.0
       {% if is_incremental() and not recompute_all %}
-      AND s.code_station NOT IN (SELECT code_station FROM {{ this }})
+      AND NOT EXISTS (SELECT 1 FROM {{ this }} t WHERE t.code_station = s.code_station)
       {% endif %}
 ),
 

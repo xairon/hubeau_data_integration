@@ -4,7 +4,6 @@
     unique_key = ['code_bss'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_bss'], 'unique': True},
       {'columns': ['code_eh']},
       {'columns': ['niveau_alerte']},
       {'columns': ['geom'], 'type': 'gist'}

@@ -13,8 +13,9 @@ extraction:
     date_debut: date_debut_obs_elab  # Start date parameter name
     date_fin: date_fin_obs_elab      # End date parameter name
   station_slicing:
+    enabled: true
     station_param: code_site  # CRITICAL: Hub'Eau API uses code_site, not code_entite
-    batch_size: 20
+    batch_size: 50  # Increased from 20 to match piezometry performance
 performance:
   parallelism: 1
   batch_size: 5000

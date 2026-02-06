@@ -4,7 +4,6 @@
     unique_key = ['code_bss', 'date_mesure'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_bss', 'date_mesure'], 'unique': True},
       {'columns': ['code_bss']},
       {'columns': ['date_mesure'], 'type': 'brin'}
     ],

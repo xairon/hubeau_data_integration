@@ -15,7 +15,7 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install uv (ultra-fast Python package installer)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.6.2 /uv /bin/uv
 
 # Copy project files needed for installation
 COPY pyproject.toml README.md /app/

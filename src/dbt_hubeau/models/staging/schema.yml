@@ -53,6 +53,9 @@ models:
       - name: code_site
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_hydrometry_sites')
+              field: code_site
       - name: geometry
         description: "Point géographique PostGIS"
         tests:
@@ -64,6 +67,9 @@ models:
       - name: code_site
         tests:
           - not_null
+          - relationships:
+              to: ref('stg_hydrometry_sites')
+              field: code_site
       - name: date_obs_elab
         tests:
           - not_null

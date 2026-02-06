@@ -2,7 +2,6 @@
   config(
     materialized = 'table',
     indexes = [
-      {'columns': ['date'], 'unique': True},
       {'columns': ['year']},
       {'columns': ['month']},
       {'columns': ['week']}
@@ -28,9 +27,12 @@ WITH date_bounds AS (
 
 dates AS (
     SELECT
-        generate_series(min_date, max_date, interval '1 day')::date AS date
+        generate_series(
+            COALESCE(min_date, '2000-01-01'::date),
+            COALESCE(max_date, CURRENT_DATE),
+            interval '1 day'
+        )::date AS date
     FROM date_bounds
-    WHERE min_date IS NOT NULL AND max_date IS NOT NULL
 )
 
 SELECT

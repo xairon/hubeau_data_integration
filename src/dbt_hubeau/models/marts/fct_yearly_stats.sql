@@ -4,7 +4,6 @@
     unique_key = ['code_bss', 'annee'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_bss', 'annee'], 'unique': True},
       {'columns': ['code_bss']},
       {'columns': ['annee'], 'type': 'brin'},
       {'columns': ['code_departement']}
@@ -64,8 +63,8 @@ yearly_agg AS (
         SUM(precipitation_totale) AS precipitation_totale_annuelle,
         AVG(evaporation_moyenne) AS evaporation_moyenne_annuelle,
         
-        -- Bilan hydrique simplifié (P - ETP)
-        SUM(precipitation_totale) - SUM(evaporation_moyenne * 30) AS bilan_hydrique_annuel,
+        -- Bilan hydrique simplifié (P - ETP), pondéré par le nombre réel de jours mesurés par mois
+        SUM(precipitation_totale) - SUM(evaporation_moyenne * nb_jours_mesures) AS bilan_hydrique_annuel,
         
         -- Comptage
         SUM(nb_jours_mesures) AS nb_jours_mesures_annuel,
@@ -77,56 +76,80 @@ yearly_agg AS (
         
     FROM monthly
     GROUP BY code_bss, EXTRACT(YEAR FROM mois)
+),
+
+-- Étape 1: Calcul des percentiles (une seule fois)
+yearly_with_percentiles AS (
+    SELECT
+        *,
+        PERCENT_RANK() OVER (
+            PARTITION BY code_bss ORDER BY niveau_moyen_annuel
+        ) AS percentile_niveau_historique,
+        PERCENT_RANK() OVER (
+            PARTITION BY code_bss ORDER BY precipitation_totale_annuelle
+        ) AS percentile_precipitation_historique,
+        LAG(niveau_moyen_annuel) OVER (
+            PARTITION BY code_bss ORDER BY annee
+        ) AS niveau_annee_prec,
+        LAG(precipitation_totale_annuelle) OVER (
+            PARTITION BY code_bss ORDER BY annee
+        ) AS precipitation_annee_prec
+    FROM yearly_agg
 )
 
 SELECT
-    *,
-    
+    code_bss,
+    annee,
+    code_departement,
+    nom_departement,
+    code_eh,
+    libelle_eh,
+    niveau_moyen_annuel,
+    niveau_min_annuel,
+    niveau_max_annuel,
+    amplitude_annuelle,
+    niveau_stddev_annuel,
+    profondeur_moyenne_annuelle,
+    temperature_moyenne_annuelle,
+    temperature_min_annuelle,
+    temperature_max_annuelle,
+    precipitation_totale_annuelle,
+    evaporation_moyenne_annuelle,
+    bilan_hydrique_annuel,
+    nb_jours_mesures_annuel,
+    nb_mois_mesures,
+    era5_latitude,
+    era5_longitude,
+
     -- Variation vs année précédente
-    niveau_moyen_annuel - LAG(niveau_moyen_annuel) OVER (
-        PARTITION BY code_bss ORDER BY annee
-    ) AS variation_niveau_vs_annee_prec,
-    
-    precipitation_totale_annuelle - LAG(precipitation_totale_annuelle) OVER (
-        PARTITION BY code_bss ORDER BY annee
-    ) AS variation_precipitation_vs_annee_prec,
-    
+    niveau_moyen_annuel - niveau_annee_prec AS variation_niveau_vs_annee_prec,
+    precipitation_totale_annuelle - precipitation_annee_prec AS variation_precipitation_vs_annee_prec,
+
     -- Pourcentage de variation
-    CASE 
-        WHEN LAG(niveau_moyen_annuel) OVER (PARTITION BY code_bss ORDER BY annee) IS NOT NULL
-             AND LAG(niveau_moyen_annuel) OVER (PARTITION BY code_bss ORDER BY annee) != 0
-        THEN (niveau_moyen_annuel - LAG(niveau_moyen_annuel) OVER (PARTITION BY code_bss ORDER BY annee)) 
-             / ABS(LAG(niveau_moyen_annuel) OVER (PARTITION BY code_bss ORDER BY annee)) * 100
+    CASE
+        WHEN niveau_annee_prec IS NOT NULL AND niveau_annee_prec != 0
+        THEN (niveau_moyen_annuel - niveau_annee_prec) / ABS(niveau_annee_prec) * 100
         ELSE NULL
     END AS variation_niveau_pct,
-    
-    -- Percentile historique (où se situe cette année par rapport à l'historique)
-    PERCENT_RANK() OVER (
-        PARTITION BY code_bss ORDER BY niveau_moyen_annuel
-    ) AS percentile_niveau_historique,
-    
-    PERCENT_RANK() OVER (
-        PARTITION BY code_bss ORDER BY precipitation_totale_annuelle
-    ) AS percentile_precipitation_historique,
-    
+
+    -- Percentiles (calculés une seule fois dans la CTE)
+    percentile_niveau_historique,
+    percentile_precipitation_historique,
+
     -- Classification de l'année (sécheresse/normal/humide)
-    CASE 
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_bss ORDER BY niveau_moyen_annuel) < 0.2 
-        THEN 'TRES_BAS'
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_bss ORDER BY niveau_moyen_annuel) < 0.4 
-        THEN 'BAS'
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_bss ORDER BY niveau_moyen_annuel) < 0.6 
-        THEN 'NORMAL'
-        WHEN PERCENT_RANK() OVER (PARTITION BY code_bss ORDER BY niveau_moyen_annuel) < 0.8 
-        THEN 'HAUT'
+    CASE
+        WHEN percentile_niveau_historique < 0.2 THEN 'TRES_BAS'
+        WHEN percentile_niveau_historique < 0.4 THEN 'BAS'
+        WHEN percentile_niveau_historique < 0.6 THEN 'NORMAL'
+        WHEN percentile_niveau_historique < 0.8 THEN 'HAUT'
         ELSE 'TRES_HAUT'
     END AS classification_niveau_annuel,
-    
+
     -- Moyenne mobile 5 ans
     AVG(niveau_moyen_annuel) OVER (
-        PARTITION BY code_bss 
-        ORDER BY annee 
+        PARTITION BY code_bss
+        ORDER BY annee
         ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
     ) AS niveau_moy_mobile_5ans
-    
-FROM yearly_agg
+
+FROM yearly_with_percentiles

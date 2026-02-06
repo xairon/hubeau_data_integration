@@ -29,17 +29,18 @@ from dagster import asset, AssetExecutionContext, StaticPartitionsDefinition, Ou
 # PARTITIONS - ERA5 (chunks de 1 an)
 # ============================================================================
 
-CURRENT_YEAR = datetime.now().year
 ERA5_START_YEAR = 1950  # ERA5-Land commence en 1950
 # Taille d'un chunk ERA5 en années (1 = partitions annuelles)
 ERA5_YEARS_PER_CHUNK = 1
 
 # Créer les partitions par chunks d'ERA5_YEARS_PER_CHUNK années
 # Ex pour 1 an: ["1950_1950", "1951_1951", ..., "2025_2025"]
+# +1 buffer year to handle year rollover in long-running daemons
+_current_year = datetime.now().year
 ERA5_PARTITIONS = []
 year = ERA5_START_YEAR
-while year <= CURRENT_YEAR:
-    chunk_end = min(year + ERA5_YEARS_PER_CHUNK - 1, CURRENT_YEAR)
+while year <= _current_year + 1:
+    chunk_end = min(year + ERA5_YEARS_PER_CHUNK - 1, _current_year + 1)
     partition_key = f"{year}_{chunk_end}"
     ERA5_PARTITIONS.append(partition_key)
     year += ERA5_YEARS_PER_CHUNK
@@ -176,6 +177,7 @@ def process_era5_range_to_timeseries(
     tmp_path = None
     actual_nc_path = None
     conn = None
+    ds = None
     
     try:
         # 1. Connexion DB Check
@@ -287,6 +289,17 @@ def process_era5_range_to_timeseries(
         context.log.info(f"📊 Opening NetCDF: {actual_nc_path}")
         ds = xr.open_dataset(actual_nc_path, engine='h5netcdf')
 
+        # Validate dataset is not empty or corrupted
+        context.log.info(f"  📊 Dataset dimensions: {dict(ds.dims)}, variables: {list(ds.data_vars)}")
+        required_vars = {'t2m', 'tp', 'pev'}
+        available_vars = set(ds.data_vars)
+        missing_vars = required_vars - available_vars
+        if missing_vars:
+            raise ValueError(f"ERA5 NetCDF missing required variables: {missing_vars}. Available: {available_vars}")
+        time_dim_check = 'valid_time' if 'valid_time' in ds.dims else 'time'
+        if ds.dims.get(time_dim_check, 0) == 0:
+            raise ValueError("ERA5 NetCDF has 0 time steps - corrupted or empty download")
+
         # Filter exact dates
         time_dim = 'valid_time' if 'valid_time' in ds.dims else 'time'
         ds = ds.sel({time_dim: slice(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))})
@@ -329,6 +342,8 @@ def process_era5_range_to_timeseries(
         return rows_inserted
 
     finally:
+        if ds is not None:
+            ds.close()
         if conn:
             conn.close()
         if tmp_path and os.path.exists(tmp_path):

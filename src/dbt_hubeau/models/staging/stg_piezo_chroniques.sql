@@ -4,7 +4,6 @@
     unique_key = ['code_bss', 'date_mesure'],
     incremental_strategy = 'delete+insert',
     indexes = [
-      {'columns': ['code_bss', 'date_mesure'], 'unique': True},
       {'columns': ['code_bss']},
       {'columns': ['date_mesure'], 'type': 'brin'}
     ],
@@ -12,7 +11,7 @@
       "{{ add_primary_key(['code_bss', 'date_mesure']) }}",
       "{{ convert_to_hypertable('date_mesure', '1 year') }}",
       "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}",
-      "{{ enable_compression(segment_by=['code_bss'], order_by='date_mesure DESC', compress_after='90 days') }}"
+      "{{ enable_compression(segment_by=[], order_by='date_mesure DESC', compress_after='90 days') }}"
     ]
   )
 }}
@@ -70,4 +69,4 @@ SELECT d.*
 FROM deduplicated d
 INNER JOIN stations s ON d.code_bss = s.code_bss
 CROSS JOIN validation v
-WHERE v.station_count > 0  -- CRITICAL: Fail if no stations (prevents silent data loss)
+WHERE v.station_count > 0  -- Guard: returns 0 rows if stations table is empty (safe for incremental delete+insert)

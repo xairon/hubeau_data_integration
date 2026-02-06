@@ -2,7 +2,6 @@
   config(
     materialized = 'table',
     indexes = [
-      {'columns': ['era5_latitude', 'era5_longitude'], 'unique': True},
       {'columns': ['geom'], 'type': 'gist'}
     ],
     post_hook=["{{ add_primary_key(['era5_latitude', 'era5_longitude']) }}"]

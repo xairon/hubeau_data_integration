@@ -1,12 +1,12 @@
 """
 Dagster Schedules - Automated Daily/Weekly/Monthly Data Integration
 
-Schedule Timeline (UTC):
+Schedule Timeline (UTC) - generous time gaps between stages:
 - 3h00: ERA5 Smart Update (Bronze)
 - 4h00: Hub'Eau Bronze (piezo + hydro in parallel)
-- 5h30: dbt Shared Staging (ERA5 timeseries + grid points)
-- 6h00: dbt Domain Pipelines (piezo + hydro in PARALLEL)
-- 7h00: dbt Shared Dimensions (dim_date, dim_geography)
+- 5h00: dbt Shared Staging (ERA5 timeseries + grid points) [1h buffer]
+- 6h30: dbt Domain Pipelines (piezo + hydro in PARALLEL) [1h30 buffer]
+- 8h00: dbt Shared Dimensions (dim_date, dim_geography) [1h30 buffer]
 
 Monthly:
 - 1er du mois 2h00: BDLISA + Sandre reference data
@@ -15,7 +15,6 @@ Weekly:
 - Dimanche 5h00: dbt documentation generation
 """
 
-import os
 from dagster import (
     ScheduleDefinition,
     DefaultScheduleStatus,
@@ -38,15 +37,12 @@ from .jobs import (
     reference_data_bronze_job,
     dbt_docs_job,
 )
-
-
-def _env_true(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
+from .utils import env_true
 
 
 DEFAULT_SCHEDULE_STATUS = (
     DefaultScheduleStatus.RUNNING
-    if _env_true("DAGSTER_ENABLE_SCHEDULES", "false")
+    if env_true("DAGSTER_ENABLE_SCHEDULES", "false")
     else DefaultScheduleStatus.STOPPED
 )
 
@@ -74,36 +70,39 @@ daily_hydrometry_schedule = ScheduleDefinition(
 # DAILY SCHEDULES - dbt Pipelines (4-stage execution)
 # ==============================================================================
 
-# Stage 1: Shared staging (ERA5 data) - runs at 5h30 UTC
+# Stage 1: Shared staging (ERA5 data) - runs at 5h00 UTC
 # Must complete before domain pipelines can start
+# WARNING: Time-based scheduling assumes previous stage completed within the gap.
+# If Bronze (4h00) takes >1h, this stage may process stale data.
+# Consider switching to sensor-based triggering for production reliability.
 daily_dbt_shared_staging_schedule = ScheduleDefinition(
     job=dbt_shared_staging_job,
-    cron_schedule="30 5 * * *",  # 5h30 UTC (after Bronze, before domain pipelines)
+    cron_schedule="0 5 * * *",  # 5h00 UTC (1h buffer after Bronze)
     default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: dbt shared staging (ERA5 timeseries + grid points)",
 )
 
-# Stage 2a: Piezo pipeline runs at 6h00 UTC (after shared staging)
+# Stage 2a: Piezo pipeline runs at 6h30 UTC (after shared staging)
 daily_dbt_piezo_schedule = ScheduleDefinition(
     job=dbt_piezo_pipeline_daily_job,
-    cron_schedule="0 6 * * *",  # 6h00 UTC
+    cron_schedule="30 6 * * *",  # 6h30 UTC (1h30 buffer after stage 1)
     default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: dbt Piezometry pipeline (streaming-optimized)",
 )
 
-# Stage 2b: Hydro pipeline runs at 6h00 UTC (after shared staging)
+# Stage 2b: Hydro pipeline runs at 6h30 UTC (after shared staging)
 # Runs IN PARALLEL with piezo pipeline (different concurrency keys)
 daily_dbt_hydro_schedule = ScheduleDefinition(
     job=dbt_hydro_pipeline_daily_job,
-    cron_schedule="0 6 * * *",  # 6h00 UTC
+    cron_schedule="30 6 * * *",  # 6h30 UTC (1h30 buffer after stage 1)
     default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: dbt Hydrometry pipeline (streaming-optimized)",
 )
 
-# Stage 3: Shared dimensions run at 7h00 UTC (after both domain pipelines complete)
+# Stage 3: Shared dimensions run at 8h00 UTC (after both domain pipelines complete)
 daily_dbt_dimensions_schedule = ScheduleDefinition(
     job=dbt_shared_dimensions_job,
-    cron_schedule="0 7 * * *",  # 7h00 UTC (after domain pipelines)
+    cron_schedule="0 8 * * *",  # 8h00 UTC (1h30 buffer after domain pipelines)
     default_status=DEFAULT_SCHEDULE_STATUS,
     description="Daily: dbt shared dimensions (dim_date, dim_geography)",
 )
