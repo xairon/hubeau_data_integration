@@ -32,6 +32,12 @@ ALTER TABLE {{ relation }} ADD CONSTRAINT {{ constraint_name }} PRIMARY KEY ({{ 
   {% set ref_cols_joined = ref_cols_sql | join(', ') %}
   {% set relation = this %}
   {% set fk_name = relation.identifier ~ '_' ~ ref_rel.identifier ~ '_fkey' %}
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{{ relation.schema }}' AND table_name = '{{ relation.identifier }}__dbt_backup') THEN
+    EXECUTE 'ALTER TABLE "{{ relation.schema }}"."{{ relation.identifier }}__dbt_backup" DROP CONSTRAINT IF EXISTS "{{ fk_name }}" CASCADE';
+  END IF;
+END $$;
 ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ fk_name }};
 ALTER TABLE {{ relation }} ADD CONSTRAINT {{ fk_name }} FOREIGN KEY ({{ cols_sql }}) REFERENCES {{ ref_rel }} ({{ ref_cols_joined }});
 {% endmacro %}
