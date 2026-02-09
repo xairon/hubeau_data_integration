@@ -19,7 +19,7 @@ BEGIN
     EXECUTE 'ALTER TABLE "{{ relation.schema }}"."{{ relation.identifier }}__dbt_backup" DROP CONSTRAINT IF EXISTS "{{ constraint_name }}" CASCADE';
   END IF;
 END $$;
-ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ constraint_name }};
+ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ constraint_name }} CASCADE;
 ALTER TABLE {{ relation }} ADD CONSTRAINT {{ constraint_name }} PRIMARY KEY ({{ cols_sql }});
 {% endmacro %}
 
@@ -38,6 +38,6 @@ BEGIN
     EXECUTE 'ALTER TABLE "{{ relation.schema }}"."{{ relation.identifier }}__dbt_backup" DROP CONSTRAINT IF EXISTS "{{ fk_name }}" CASCADE';
   END IF;
 END $$;
-ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ fk_name }};
+ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ fk_name }} CASCADE;
 ALTER TABLE {{ relation }} ADD CONSTRAINT {{ fk_name }} FOREIGN KEY ({{ cols_sql }}) REFERENCES {{ ref_rel }} ({{ ref_cols_joined }});
 {% endmacro %}
