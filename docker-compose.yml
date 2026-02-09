@@ -87,6 +87,8 @@ services:
       - ./scripts:/app/scripts
       - ./dagster_home:/app/dagster_home
     command: [ "dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline.definitions" ]
+    ports:
+      - "49505:8080"   # dbt docs serve (lancer manuellement: docker exec -it brgm-dlt-worker dbt docs serve --port 8080)
     expose:
       - "4000"
     healthcheck:

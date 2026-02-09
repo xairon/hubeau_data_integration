@@ -3,6 +3,9 @@
   Utilisation: post_hook = ["{{ add_primary_key(['col1','col2']) }}", "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"]
   Idempotent: au 2e run dbt renomme la table en __dbt_backup → on drop la contrainte sur la backup d'abord (libère l'index),
   puis on drop/add sur la table courante.
+  CASCADE sur le DROP backup: TimescaleDB propage les FK/PK aux chunks internes (_hyper_*_chunk).
+  Sans CASCADE, le DROP échoue car des dizaines de contraintes enfants dépendent de la PK/FK.
+  Les FK sont recréées par les post_hook des tables enfants lors de leur prochain build.
 -#}
 
 {% macro add_primary_key(columns) %}
@@ -13,7 +16,7 @@
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{{ relation.schema }}' AND table_name = '{{ relation.identifier }}__dbt_backup') THEN
-    EXECUTE 'ALTER TABLE "{{ relation.schema }}"."{{ relation.identifier }}__dbt_backup" DROP CONSTRAINT IF EXISTS "{{ constraint_name }}"';
+    EXECUTE 'ALTER TABLE "{{ relation.schema }}"."{{ relation.identifier }}__dbt_backup" DROP CONSTRAINT IF EXISTS "{{ constraint_name }}" CASCADE';
   END IF;
 END $$;
 ALTER TABLE {{ relation }} DROP CONSTRAINT IF EXISTS {{ constraint_name }};
