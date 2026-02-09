@@ -91,7 +91,7 @@ final AS (
         map.era5_distance_m::numeric AS era5_distance_m
 
     FROM measurements m
-    LEFT JOIN mapping map ON m.code_station = map.code_station
+    INNER JOIN mapping map ON m.code_station = map.code_station
     LEFT JOIN era5_filtered e
         ON map.era5_latitude = e.latitude
         AND map.era5_longitude = e.longitude

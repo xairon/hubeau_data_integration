@@ -85,7 +85,7 @@ final AS (
         map.era5_longitude::numeric AS era5_longitude
 
     FROM measurements m
-    LEFT JOIN mapping map ON m.code_bss = map.code_bss
+    INNER JOIN mapping map ON m.code_bss = map.code_bss
     LEFT JOIN era5_filtered e
         ON map.era5_latitude = e.latitude
         AND map.era5_longitude = e.longitude

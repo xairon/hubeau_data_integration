@@ -47,5 +47,5 @@ SELECT
     code_region,
     MAX(nom_region) AS nom_region
 FROM combined
-WHERE code_commune IS NOT NULL OR code_departement IS NOT NULL OR code_region IS NOT NULL
+WHERE code_departement IS NOT NULL
 GROUP BY code_commune, code_departement, code_region
