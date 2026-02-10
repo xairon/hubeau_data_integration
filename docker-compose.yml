@@ -260,6 +260,7 @@ services:
     restart: unless-stopped
 
   # cAdvisor - Docker container metrics exporter
+  # Note: Docker rootless → le socket est dans $XDG_RUNTIME_DIR, pas /var/run
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: brgm-cadvisor
@@ -268,9 +269,9 @@ services:
       - "--store_container_labels=true"
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
       - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
+      # Docker rootless: socket dans le runtime dir de l'utilisateur
+      - ${XDG_RUNTIME_DIR:?Set XDG_RUNTIME_DIR}/docker.sock:/var/run/docker.sock:ro
     expose:
       - "8080"
     mem_limit: 512M
