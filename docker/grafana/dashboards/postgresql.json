@@ -8,15 +8,15 @@
     {
       "title": "Active Connections",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "thresholds": {
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 90 }
+              { "color": "yellow", "value": 20 },
+              { "color": "red", "value": 80 }
             ]
           }
         }
@@ -28,20 +28,32 @@
       ]
     },
     {
-      "title": "Total Connections",
+      "title": "Idle Connections",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 80 }
+            ]
+          }
+        }
+      },
       "targets": [
         {
-          "expr": "sum(pg_stat_activity_count{datname=\"postgres\"})"
+          "expr": "sum(pg_stat_activity_count{datname=\"postgres\", state=~\"idle.*\"})"
         }
       ]
     },
     {
       "title": "Cache Hit Ratio",
+      "description": "Pourcentage de lectures servies depuis le cache RAM (shared_buffers). Cible: >99%.",
       "type": "gauge",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -51,7 +63,8 @@
           "thresholds": {
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 0.9 },
+              { "color": "orange", "value": 0.9 },
+              { "color": "yellow", "value": 0.95 },
               { "color": "green", "value": 0.99 }
             ]
           }
@@ -66,7 +79,7 @@
     {
       "title": "Database Size",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": { "unit": "bytes" }
@@ -78,96 +91,10 @@
       ]
     },
     {
-      "title": "Transactions per Second",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": { "fillOpacity": 20 }
-        }
-      },
-      "targets": [
-        {
-          "expr": "rate(pg_stat_database_xact_commit{datname=\"postgres\"}[1m])",
-          "legendFormat": "commits/s"
-        },
-        {
-          "expr": "rate(pg_stat_database_xact_rollback{datname=\"postgres\"}[1m])",
-          "legendFormat": "rollbacks/s"
-        }
-      ]
-    },
-    {
-      "title": "Rows Operations per Second",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": { "fillOpacity": 20 }
-        }
-      },
-      "targets": [
-        {
-          "expr": "rate(pg_stat_database_tup_fetched{datname=\"postgres\"}[1m])",
-          "legendFormat": "fetched/s"
-        },
-        {
-          "expr": "rate(pg_stat_database_tup_inserted{datname=\"postgres\"}[1m])",
-          "legendFormat": "inserted/s"
-        },
-        {
-          "expr": "rate(pg_stat_database_tup_updated{datname=\"postgres\"}[1m])",
-          "legendFormat": "updated/s"
-        },
-        {
-          "expr": "rate(pg_stat_database_tup_deleted{datname=\"postgres\"}[1m])",
-          "legendFormat": "deleted/s"
-        }
-      ]
-    },
-    {
-      "title": "Locks",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "custom": { "fillOpacity": 20 }
-        }
-      },
-      "targets": [
-        {
-          "expr": "pg_locks_count{datname=\"postgres\"}",
-          "legendFormat": "{{mode}}"
-        }
-      ]
-    },
-    {
-      "title": "Temp Bytes Written (heavy queries indicator)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Bps",
-          "custom": { "fillOpacity": 20 }
-        }
-      },
-      "targets": [
-        {
-          "expr": "rate(pg_stat_database_temp_bytes{datname=\"postgres\"}[5m])",
-          "legendFormat": "temp bytes written/s"
-        }
-      ]
-    },
-    {
-      "title": "Deadlocks (cumulative)",
+      "title": "Deadlocks",
+      "description": "Nombre total de deadlocks depuis le dernier restart. Devrait rester à 0.",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 20 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -186,9 +113,193 @@
       ]
     },
     {
-      "title": "Buffers - Checkpoint vs Background",
+      "title": "Conflicts",
+      "description": "Conflits de requêtes (ex: recovery conflicts). Devrait rester à 0.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_database_conflicts{datname=\"postgres\"}"
+        }
+      ]
+    },
+    {
+      "title": "Transactions per Second",
+      "description": "Commits vs rollbacks. Un ratio élevé de rollbacks indique des erreurs fréquentes.",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 20 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 20 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "rollbacks/s" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"postgres\"}[5m])",
+          "legendFormat": "commits/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"postgres\"}[5m])",
+          "legendFormat": "rollbacks/s"
+        }
+      ]
+    },
+    {
+      "title": "Rows Operations per Second",
+      "description": "Fetched = lectures SELECT, inserted/updated/deleted = écritures. Aide à comprendre le profil de charge.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_tup_fetched{datname=\"postgres\"}[5m])",
+          "legendFormat": "fetched/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_inserted{datname=\"postgres\"}[5m])",
+          "legendFormat": "inserted/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_updated{datname=\"postgres\"}[5m])",
+          "legendFormat": "updated/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_deleted{datname=\"postgres\"}[5m])",
+          "legendFormat": "deleted/s"
+        }
+      ]
+    },
+    {
+      "title": "Cache Hit Ratio (over time)",
+      "description": "Évolution du cache hit ratio. Les chutes correspondent aux jobs DLT/dbt qui scannent beaucoup de données.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_blks_hit{datname=\"postgres\"}[5m]) / (rate(pg_stat_database_blks_hit{datname=\"postgres\"}[5m]) + rate(pg_stat_database_blks_read{datname=\"postgres\"}[5m]))",
+          "legendFormat": "hit ratio (5m)"
+        }
+      ]
+    },
+    {
+      "title": "Disk Reads vs Cache Hits",
+      "description": "Blocks lus depuis le disque vs servis depuis le cache. Les pics de disk reads = requêtes lourdes.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 20 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "disk reads" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cache hits" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_blks_read{datname=\"postgres\"}[5m])",
+          "legendFormat": "disk reads"
+        },
+        {
+          "expr": "rate(pg_stat_database_blks_hit{datname=\"postgres\"}[5m])",
+          "legendFormat": "cache hits"
+        }
+      ]
+    },
+    {
+      "title": "Connections by State",
+      "description": "Active = exécute une requête, idle = en attente, idle in transaction = transaction ouverte sans activité (à surveiller).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 30, "stacking": { "mode": "normal" } }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "idle in transaction" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_activity_count{datname=\"postgres\", state=\"active\"}",
+          "legendFormat": "active"
+        },
+        {
+          "expr": "pg_stat_activity_count{datname=\"postgres\", state=\"idle\"}",
+          "legendFormat": "idle"
+        },
+        {
+          "expr": "pg_stat_activity_count{datname=\"postgres\", state=\"idle in transaction\"}",
+          "legendFormat": "idle in transaction"
+        }
+      ]
+    },
+    {
+      "title": "Locks by Mode",
+      "description": "AccessShareLock = SELECT normal. RowExclusiveLock = INSERT/UPDATE/DELETE. Les ExclusiveLock bloquent les autres.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -197,16 +308,121 @@
       },
       "targets": [
         {
+          "expr": "pg_locks_count{datname=\"postgres\"}",
+          "legendFormat": "{{mode}}"
+        }
+      ]
+    },
+    {
+      "title": "Temp Bytes Written",
+      "description": "Écritures sur disque pour les tris/hash qui dépassent work_mem. Pics = requêtes lourdes (JOINs, ORDER BY sur gros volumes).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "fillOpacity": 20 },
+          "color": { "fixedColor": "orange", "mode": "fixed" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_temp_bytes{datname=\"postgres\"}[5m])",
+          "legendFormat": "temp bytes/s"
+        }
+      ]
+    },
+    {
+      "title": "Buffers Written (by source)",
+      "description": "Checkpoint = normal. Backend (direct) = MAUVAIS si élevé, signifie que le bgwriter ne suit pas. Augmenter shared_buffers.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "backend (direct writes)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
           "expr": "rate(pg_stat_bgwriter_buffers_checkpoint[5m])",
           "legendFormat": "checkpoint"
         },
         {
           "expr": "rate(pg_stat_bgwriter_buffers_backend[5m])",
-          "legendFormat": "backend (bad if high)"
+          "legendFormat": "backend (direct writes)"
         },
         {
           "expr": "rate(pg_stat_bgwriter_buffers_clean[5m])",
           "legendFormat": "background writer"
+        },
+        {
+          "expr": "rate(pg_stat_bgwriter_buffers_alloc[5m])",
+          "legendFormat": "allocated"
+        }
+      ]
+    },
+    {
+      "title": "Seq Scans vs Index Scans (total)",
+      "description": "Sequential scans lisent toute la table. Index scans sont ciblés. Trop de seq scans = index manquants ou mal utilisés.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 20 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "sequential scans" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "index scans" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_user_tables_seq_scan[5m]))",
+          "legendFormat": "sequential scans"
+        },
+        {
+          "expr": "sum(rate(pg_stat_user_tables_idx_scan[5m]))",
+          "legendFormat": "index scans"
+        }
+      ]
+    },
+    {
+      "title": "Dead Tuples (vacuum needed)",
+      "description": "Dead tuples = lignes supprimées/modifiées en attente de VACUUM. Trop = tables bloated, performances dégradées.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "topk(10, pg_stat_user_tables_n_dead_tup)",
+          "legendFormat": "{{schemaname}}.{{relname}}"
         }
       ]
     }
@@ -216,5 +432,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "PostgreSQL - Hub'Eau",
   "uid": "hubeau-postgresql",
-  "version": 1
+  "version": 2
 }

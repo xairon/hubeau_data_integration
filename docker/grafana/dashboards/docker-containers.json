@@ -6,9 +6,102 @@
   "links": [],
   "panels": [
     {
+      "title": "Total Stack CPU (cores)",
+      "description": "CPU total consommé par tous les conteneurs de la stack.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "red", "value": 60 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info)"
+        }
+      ]
+    },
+    {
+      "title": "Total Stack Memory",
+      "description": "RAM totale consommée par tous les conteneurs.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 34359738368 },
+              { "color": "red", "value": 51539607552 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info)"
+        }
+      ]
+    },
+    {
+      "title": "Containers Running",
+      "description": "Nombre de conteneurs monitorés.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "count(container_info)"
+        }
+      ]
+    },
+    {
+      "title": "Top CPU Consumer",
+      "description": "Conteneur qui consomme le plus de CPU en ce moment.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "textMode": "name"
+      },
+      "targets": [
+        {
+          "expr": "topk(1, label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info)",
+          "legendFormat": "{{name}} ({{value}} cores)"
+        }
+      ]
+    },
+    {
       "title": "CPU Usage per Container (cores)",
+      "description": "Nombre de coeurs CPU utilisés par conteneur. 1.0 = un coeur complet.",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -29,8 +122,9 @@
     },
     {
       "title": "Memory Usage per Container",
+      "description": "RAM consommée par conteneur (RSS + cache). Le plus gros consommateur est généralement PostgreSQL.",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -47,8 +141,9 @@
     },
     {
       "title": "Memory Usage vs Limit (%)",
+      "description": "Pourcentage de la limite mémoire (mem_limit dans docker-compose). >90% = risque d'OOM kill.",
       "type": "gauge",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -73,8 +168,9 @@
     },
     {
       "title": "Network I/O per Container",
+      "description": "Trafic réseau reçu (rx) et transmis (tx). Utile pour voir les jobs DLT qui téléchargent depuis les APIs.",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -95,8 +191,9 @@
     },
     {
       "title": "Disk I/O per Container",
+      "description": "Lectures/écritures disque par conteneur. Les pics d'écriture correspondent aux jobs DLT/dbt.",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -114,6 +211,36 @@
           "legendFormat": "{{name}} (write)"
         }
       ]
+    },
+    {
+      "title": "Memory Usage Ranking",
+      "description": "Classement des conteneurs par consommation mémoire. Permet d'identifier rapidement les gros consommateurs.",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2147483648 },
+              { "color": "red", "value": 8589934592 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info)",
+          "legendFormat": "{{name}}"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,
@@ -121,5 +248,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "Docker Containers - Hub'Eau",
   "uid": "hubeau-docker",
-  "version": 7
+  "version": 8
 }
