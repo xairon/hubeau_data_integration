@@ -6,20 +6,24 @@
   "links": [],
   "panels": [
     {
-      "title": "CPU Usage per Container",
+      "title": "CPU Usage per Container (cores)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "custom": { "fillOpacity": 20 }
+          "unit": "none",
+          "decimals": 2,
+          "custom": { "fillOpacity": 20, "axisSoftMin": 0 }
         }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" }
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}}"
+          "expr": "(label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}}"
         }
       ]
     },
@@ -36,8 +40,8 @@
       },
       "targets": [
         {
-          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}}"
+          "expr": "(label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}}"
         }
       ]
     },
@@ -62,8 +66,8 @@
       },
       "targets": [
         {
-          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"} / container_spec_memory_limit_bytes{id=~\".*docker-.*\\\\.scope\"} < 1, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}}"
+          "expr": "(label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"} / container_spec_memory_limit_bytes{id=~\".*docker-.*\\\\.scope\"} < 1, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"} / container_spec_memory_limit_bytes{id=~\".*docker-.*\\\\.scope\"} < 1, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}}"
         }
       ]
     },
@@ -80,12 +84,12 @@
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (rx)"
+          "expr": "(label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}} (rx)"
         },
         {
-          "expr": "label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (tx)"
+          "expr": "(label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}} (tx)"
         }
       ]
     },
@@ -102,12 +106,12 @@
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (read)"
+          "expr": "(label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}} (read)"
         },
         {
-          "expr": "label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (write)"
+          "expr": "(label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info) or ignoring(name) label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{name}}{{container_id}} (write)"
         }
       ]
     }
@@ -117,5 +121,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "Docker Containers - Hub'Eau",
   "uid": "hubeau-docker",
-  "version": 5
+  "version": 6
 }
