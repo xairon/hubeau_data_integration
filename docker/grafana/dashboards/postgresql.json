@@ -1,0 +1,220 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "title": "Active Connections",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_activity_count{datname=\"postgres\", state=\"active\"}"
+        }
+      ]
+    },
+    {
+      "title": "Total Connections",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(pg_stat_activity_count{datname=\"postgres\"})"
+        }
+      ]
+    },
+    {
+      "title": "Cache Hit Ratio",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.9 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_database_blks_hit{datname=\"postgres\"} / (pg_stat_database_blks_hit{datname=\"postgres\"} + pg_stat_database_blks_read{datname=\"postgres\"})"
+        }
+      ]
+    },
+    {
+      "title": "Database Size",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" }
+      },
+      "targets": [
+        {
+          "expr": "pg_database_size_bytes{datname=\"postgres\"}"
+        }
+      ]
+    },
+    {
+      "title": "Transactions per Second",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"postgres\"}[1m])",
+          "legendFormat": "commits/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"postgres\"}[1m])",
+          "legendFormat": "rollbacks/s"
+        }
+      ]
+    },
+    {
+      "title": "Rows Operations per Second",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_tup_fetched{datname=\"postgres\"}[1m])",
+          "legendFormat": "fetched/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_inserted{datname=\"postgres\"}[1m])",
+          "legendFormat": "inserted/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_updated{datname=\"postgres\"}[1m])",
+          "legendFormat": "updated/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_tup_deleted{datname=\"postgres\"}[1m])",
+          "legendFormat": "deleted/s"
+        }
+      ]
+    },
+    {
+      "title": "Locks",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_locks_count{datname=\"postgres\"}",
+          "legendFormat": "{{mode}}"
+        }
+      ]
+    },
+    {
+      "title": "Temp Bytes Written (heavy queries indicator)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_database_temp_bytes{datname=\"postgres\"}[5m])",
+          "legendFormat": "temp bytes written/s"
+        }
+      ]
+    },
+    {
+      "title": "Deadlocks (cumulative)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_database_deadlocks{datname=\"postgres\"}"
+        }
+      ]
+    },
+    {
+      "title": "Buffers - Checkpoint vs Background",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(pg_stat_bgwriter_buffers_checkpoint[5m])",
+          "legendFormat": "checkpoint"
+        },
+        {
+          "expr": "rate(pg_stat_bgwriter_buffers_backend[5m])",
+          "legendFormat": "backend (bad if high)"
+        },
+        {
+          "expr": "rate(pg_stat_bgwriter_buffers_clean[5m])",
+          "legendFormat": "background writer"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "PostgreSQL - Hub'Eau",
+  "uid": "hubeau-postgresql",
+  "version": 1
+}
