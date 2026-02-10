@@ -1,18 +1,18 @@
 {
   "annotations": { "list": [] },
-  "description": "Docker rootless: les containers sont identifiés par hash court (12 chars). Lancer 'docker ps' pour voir la correspondance hash → nom.",
+  "description": "Docker rootless: containers identifiés par hash court. Lancer 'docker ps' pour la correspondance.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "links": [],
   "panels": [
     {
-      "title": "Container ID → Name (run: docker ps --format 'table {{.ID}}\\t{{.Names}}')",
+      "title": "Correspondance Hash → Nom",
       "type": "text",
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "**Docker rootless** : cAdvisor ne peut pas résoudre les noms. Les légendes montrent les 12 premiers caractères du hash Docker.\n\nPour voir la correspondance : `docker ps --format 'table {{.ID}}\\t{{.Names}}'`"
+        "content": "**Docker rootless** : les légendes montrent les 12 premiers chars du hash Docker. Pour la correspondance :\n```\ndocker ps --format 'table {{.ID}}\\t{{.Names}}'\n```"
       }
     },
     {
@@ -28,8 +28,8 @@
       },
       "targets": [
         {
-          "expr": "rate(container_cpu_usage_seconds_total{container_id!=\"\"}[1m])",
-          "legendFormat": "{{container_id}}"
+          "expr": "label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}}"
         }
       ]
     },
@@ -46,8 +46,8 @@
       },
       "targets": [
         {
-          "expr": "container_memory_usage_bytes{container_id!=\"\"}",
-          "legendFormat": "{{container_id}}"
+          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}}"
         }
       ]
     },
@@ -72,8 +72,8 @@
       },
       "targets": [
         {
-          "expr": "container_memory_usage_bytes{container_id!=\"\"} / container_spec_memory_limit_bytes{container_id!=\"\"} > 0",
-          "legendFormat": "{{container_id}}"
+          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"} / container_spec_memory_limit_bytes{id=~\".*docker-.*\\\\.scope\"} > 0, \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}}"
         }
       ]
     },
@@ -90,12 +90,12 @@
       },
       "targets": [
         {
-          "expr": "rate(container_network_receive_bytes_total{container_id!=\"\"}[1m])",
-          "legendFormat": "{{container_id}} (rx)"
+          "expr": "label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}} (rx)"
         },
         {
-          "expr": "rate(container_network_transmit_bytes_total{container_id!=\"\"}[1m])",
-          "legendFormat": "{{container_id}} (tx)"
+          "expr": "label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}} (tx)"
         }
       ]
     },
@@ -112,12 +112,12 @@
       },
       "targets": [
         {
-          "expr": "rate(container_fs_reads_bytes_total{container_id!=\"\"}[1m])",
-          "legendFormat": "{{container_id}} (read)"
+          "expr": "label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}} (read)"
         },
         {
-          "expr": "rate(container_fs_writes_bytes_total{container_id!=\"\"}[1m])",
-          "legendFormat": "{{container_id}} (write)"
+          "expr": "label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
+          "legendFormat": "{{cid}} (write)"
         }
       ]
     }
@@ -127,5 +127,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "Docker Containers - Hub'Eau",
   "uid": "hubeau-docker",
-  "version": 2
+  "version": 3
 }

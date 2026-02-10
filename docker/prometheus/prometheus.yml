@@ -17,15 +17,7 @@ scrape_configs:
       - targets: ["postgres_exporter:9187"]
 
   # Docker container metrics via cAdvisor (rootless Docker - cgroup mode)
+  # Container name resolution done via label_replace() in Grafana queries
   - job_name: "cadvisor"
     static_configs:
       - targets: ["cadvisor:8080"]
-    metric_relabel_configs:
-      # Rootless Docker: cAdvisor ne peut pas résoudre les noms de containers.
-      # Les métriques ont un label id=/user.slice/.../docker-<hash>.scope
-      # On extrait les 12 premiers caractères du hash comme container_id.
-      # Utiliser "docker ps" pour voir la correspondance hash → nom.
-      - source_labels: [id]
-        regex: '.*/docker-([a-f0-9]{12})[a-f0-9]*\.scope'
-        target_label: container_id
-        replacement: '${1}'
