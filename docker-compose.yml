@@ -223,6 +223,70 @@ services:
     mem_limit: 2G
     restart: unless-stopped
 
+  # ============================================================================
+  # Monitoring Stack (Prometheus + Grafana + cAdvisor + postgres_exporter)
+  # ============================================================================
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: brgm-prometheus
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "49508:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    mem_limit: 1G
+    restart: unless-stopped
+
+  # Grafana - Dashboards & Visualization
+  # Login: admin / admin (change on first login)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: brgm-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "49507:3000"
+    mem_limit: 512M
+    restart: unless-stopped
+
+  # cAdvisor - Docker container metrics exporter
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: brgm-cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    expose:
+      - "8080"
+    mem_limit: 512M
+    restart: unless-stopped
+
+  # PostgreSQL Exporter - PG metrics for Prometheus
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: brgm-postgres-exporter
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${PG_USER:-postgres}:${PG_PASSWORD:-REDACTED}@postgres:5432/${PG_DB:-postgres}?sslmode=disable"
+    expose:
+      - "9187"
+    mem_limit: 256M
+    restart: unless-stopped
+
   # Netdata - Monitoring (containers + PostgreSQL)
   # Dashboard: http://localhost:49506
   netdata:
@@ -243,6 +307,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # PostgreSQL collector config
       - ./docker/netdata/go.d/postgres.conf:/etc/netdata/go.d/postgres.conf:ro
+      # Health alerts overrides (disable noisy per-chunk TimescaleDB alerts)
+      - ./docker/netdata/health.d/postgres.conf:/etc/netdata/health.d/postgres.conf:ro
     cap_add:
       - SYS_PTRACE
     security_opt:
