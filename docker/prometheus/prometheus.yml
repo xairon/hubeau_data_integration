@@ -1,23 +1,23 @@
 ## Prometheus Configuration
-## Scrapes metrics from postgres_exporter and cAdvisor
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
 scrape_configs:
-  # Prometheus self-monitoring
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
 
-  # PostgreSQL metrics via postgres_exporter
   - job_name: "postgresql"
     static_configs:
       - targets: ["postgres_exporter:9187"]
 
-  # Docker container metrics via cAdvisor (rootless Docker - cgroup mode)
-  # Container name resolution done via label_replace() in Grafana queries
   - job_name: "cadvisor"
     static_configs:
       - targets: ["cadvisor:8080"]
+
+  # Docker container ID → name mapping (rootless Docker workaround)
+  - job_name: "docker_names"
+    static_configs:
+      - targets: ["docker_names:9200"]

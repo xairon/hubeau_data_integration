@@ -1,61 +1,14 @@
 {
   "annotations": { "list": [] },
-  "description": "Docker rootless: containers identifiés par hash court (12 chars).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "links": [],
   "panels": [
     {
-      "title": "Correspondance Hash → Nom",
-      "type": "text",
-      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
-      "options": {
-        "mode": "markdown",
-        "content": "**Docker rootless** : cAdvisor ne peut pas résoudre les noms. Lancer `docker ps --format 'table {{.ID}}\\t{{.Names}}\\t{{.Status}}'` pour la correspondance. Les hash sont stables tant que les containers ne sont pas recréés."
-      }
-    },
-    {
-      "title": "Memory per Container (identify by size)",
-      "type": "table",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 3 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes"
-        },
-        "overrides": [
-          {
-            "matcher": { "id": "byName", "options": "cid" },
-            "properties": [{ "id": "custom.width", "value": 150 }, { "id": "unit", "value": "string" }]
-          }
-        ]
-      },
-      "options": {
-        "sortBy": [{ "displayName": "Value", "desc": true }]
-      },
-      "targets": [
-        {
-          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}}",
-          "instant": true,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": { "Time": true, "id": true, "instance": true, "job": true, "__name__": true },
-            "renameByName": { "cid": "Container ID", "Value": "Memory Usage" }
-          }
-        }
-      ]
-    },
-    {
       "title": "CPU Usage per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -65,15 +18,15 @@
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}}"
+          "expr": "label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}}"
         }
       ]
     },
     {
       "title": "Memory Usage per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -83,16 +36,15 @@
       },
       "targets": [
         {
-          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}}"
+          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}}"
         }
       ]
     },
     {
       "title": "Memory Usage vs Limit (%)",
-      "description": "Uniquement les containers avec un memory limit défini (< 50 GiB)",
       "type": "gauge",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -110,15 +62,15 @@
       },
       "targets": [
         {
-          "expr": "label_replace(\n  container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"}\n  / on(id) container_spec_memory_limit_bytes{id=~\".*docker-.*\\\\.scope\"} < 1\n, \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}}"
+          "expr": "label_replace(container_memory_usage_bytes{id=~\".*docker-.*\\\\.scope\"} / container_spec_memory_limit_bytes{id=~\".*docker-.*\\\\.scope\"} < 1, \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}}"
         }
       ]
     },
     {
       "title": "Network I/O per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -128,19 +80,19 @@
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}} (rx)"
+          "expr": "label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}} (rx)"
         },
         {
-          "expr": "label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}} (tx)"
+          "expr": "label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}} (tx)"
         }
       ]
     },
     {
       "title": "Disk I/O per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -150,12 +102,12 @@
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}} (read)"
+          "expr": "label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}} (read)"
         },
         {
-          "expr": "label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"cid\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\")",
-          "legendFormat": "{{cid}} (write)"
+          "expr": "label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}} (write)"
         }
       ]
     }
@@ -165,5 +117,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "Docker Containers - Hub'Eau",
   "uid": "hubeau-docker",
-  "version": 4
+  "version": 5
 }

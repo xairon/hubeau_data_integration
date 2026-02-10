@@ -259,10 +259,21 @@ services:
     mem_limit: 512M
     restart: unless-stopped
 
+  # Docker Names Exporter - Maps container hash IDs to names
+  # Queries Docker API via Unix socket (works with rootless Docker)
+  docker_names:
+    image: python:3-alpine
+    container_name: brgm-docker-names
+    volumes:
+      - ./docker/monitoring/docker_names_exporter.py:/app/exporter.py:ro
+      - ${XDG_RUNTIME_DIR:?Set XDG_RUNTIME_DIR}/docker.sock:/var/run/docker.sock:ro
+    command: ["python", "/app/exporter.py"]
+    expose:
+      - "9200"
+    mem_limit: 64M
+    restart: unless-stopped
+
   # cAdvisor - Container metrics via cgroups
-  # Note: Docker rootless → cAdvisor fonctionne en mode cgroup uniquement (pas de noms de containers).
-  # Les containers sont identifiés par un hash court (12 chars) dans Grafana.
-  # Lancer "docker ps" pour voir la correspondance hash → nom.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: brgm-cadvisor
