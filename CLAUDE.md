@@ -354,3 +354,4 @@ docker exec brgm-dlt-worker dbt run --full-refresh --select your_model_name
 | PostgreSQL | localhost:49502 | Direct database access |
 | CloudBeaver | http://localhost:49503 | Advanced SQL client |
 | Superset | http://localhost:49504 | Business Intelligence dashboards |
+| Netdata | http://localhost:49506 | Monitoring (containers + PostgreSQL) |

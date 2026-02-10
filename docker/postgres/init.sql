@@ -14,6 +14,13 @@ ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transact
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS postgis_topology;
 
+-- Enable pg_stat_statements (query performance monitoring)
+-- NOTE: shared_preload_libraries nécessite un redémarrage de PostgreSQL après la première création.
+-- Exécuter: docker compose restart postgres
+ALTER SYSTEM SET shared_preload_libraries = 'timescaledb,pg_stat_statements';
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+ALTER SYSTEM SET pg_stat_statements.track = 'all';
+
 -- Create schemas if not exist
 CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;

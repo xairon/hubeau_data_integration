@@ -223,6 +223,33 @@ services:
     mem_limit: 2G
     restart: unless-stopped
 
+  # Netdata - Monitoring (containers + PostgreSQL)
+  # Dashboard: http://localhost:49506
+  netdata:
+    image: netdata/netdata:stable
+    container_name: brgm-netdata
+    hostname: brgm-netdata
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "49506:19999"
+    volumes:
+      # Host metrics (Docker Desktop Linux VM)
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      # Docker container metrics
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # PostgreSQL collector config
+      - ./docker/netdata/go.d/postgres.conf:/etc/netdata/go.d/postgres.conf:ro
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    mem_limit: 512M
+    restart: unless-stopped
+
   # Apache Superset - BI & Visualization
   superset:
     image: apache/superset:4.0.0
