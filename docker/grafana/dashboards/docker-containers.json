@@ -1,14 +1,24 @@
 {
   "annotations": { "list": [] },
+  "description": "Docker rootless: les containers sont identifiés par hash court (12 chars). Lancer 'docker ps' pour voir la correspondance hash → nom.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "links": [],
   "panels": [
     {
+      "title": "Container ID → Name (run: docker ps --format 'table {{.ID}}\\t{{.Names}}')",
+      "type": "text",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Docker rootless** : cAdvisor ne peut pas résoudre les noms. Les légendes montrent les 12 premiers caractères du hash Docker.\n\nPour voir la correspondance : `docker ps --format 'table {{.ID}}\\t{{.Names}}'`"
+      }
+    },
+    {
       "title": "CPU Usage per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -18,15 +28,15 @@
       },
       "targets": [
         {
-          "expr": "rate(container_cpu_usage_seconds_total{name=~\"brgm-.+\"}[1m])",
-          "legendFormat": "{{name}}"
+          "expr": "rate(container_cpu_usage_seconds_total{container_id!=\"\"}[1m])",
+          "legendFormat": "{{container_id}}"
         }
       ]
     },
     {
       "title": "Memory Usage per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -36,15 +46,15 @@
       },
       "targets": [
         {
-          "expr": "container_memory_usage_bytes{name=~\"brgm-.+\"}",
-          "legendFormat": "{{name}}"
+          "expr": "container_memory_usage_bytes{container_id!=\"\"}",
+          "legendFormat": "{{container_id}}"
         }
       ]
     },
     {
-      "title": "Memory Usage vs Limit",
+      "title": "Memory Usage vs Limit (%)",
       "type": "gauge",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -62,15 +72,15 @@
       },
       "targets": [
         {
-          "expr": "container_memory_usage_bytes{name=~\"brgm-.+\"} / container_spec_memory_limit_bytes{name=~\"brgm-.+\"}",
-          "legendFormat": "{{name}}"
+          "expr": "container_memory_usage_bytes{container_id!=\"\"} / container_spec_memory_limit_bytes{container_id!=\"\"} > 0",
+          "legendFormat": "{{container_id}}"
         }
       ]
     },
     {
       "title": "Network I/O per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -80,19 +90,19 @@
       },
       "targets": [
         {
-          "expr": "rate(container_network_receive_bytes_total{name=~\"brgm-.+\"}[1m])",
-          "legendFormat": "{{name}} (rx)"
+          "expr": "rate(container_network_receive_bytes_total{container_id!=\"\"}[1m])",
+          "legendFormat": "{{container_id}} (rx)"
         },
         {
-          "expr": "rate(container_network_transmit_bytes_total{name=~\"brgm-.+\"}[1m])",
-          "legendFormat": "{{name}} (tx)"
+          "expr": "rate(container_network_transmit_bytes_total{container_id!=\"\"}[1m])",
+          "legendFormat": "{{container_id}} (tx)"
         }
       ]
     },
     {
       "title": "Disk I/O per Container",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
@@ -102,12 +112,12 @@
       },
       "targets": [
         {
-          "expr": "rate(container_fs_reads_bytes_total{name=~\"brgm-.+\"}[1m])",
-          "legendFormat": "{{name}} (read)"
+          "expr": "rate(container_fs_reads_bytes_total{container_id!=\"\"}[1m])",
+          "legendFormat": "{{container_id}} (read)"
         },
         {
-          "expr": "rate(container_fs_writes_bytes_total{name=~\"brgm-.+\"}[1m])",
-          "legendFormat": "{{name}} (write)"
+          "expr": "rate(container_fs_writes_bytes_total{container_id!=\"\"}[1m])",
+          "legendFormat": "{{container_id}} (write)"
         }
       ]
     }
@@ -117,5 +127,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "Docker Containers - Hub'Eau",
   "uid": "hubeau-docker",
-  "version": 1
+  "version": 2
 }

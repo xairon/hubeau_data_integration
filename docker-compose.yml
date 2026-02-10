@@ -259,19 +259,16 @@ services:
     mem_limit: 512M
     restart: unless-stopped
 
-  # cAdvisor - Docker container metrics exporter
-  # Note: Docker rootless → le socket est dans $XDG_RUNTIME_DIR, pas /var/run
+  # cAdvisor - Container metrics via cgroups
+  # Note: Docker rootless → cAdvisor fonctionne en mode cgroup uniquement (pas de noms de containers).
+  # Les containers sont identifiés par un hash court (12 chars) dans Grafana.
+  # Lancer "docker ps" pour voir la correspondance hash → nom.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: brgm-cadvisor
-    command:
-      - "--docker_only=true"
-      - "--store_container_labels=true"
     volumes:
       - /:/rootfs:ro
       - /sys:/sys:ro
-      # Docker rootless: socket dans le runtime dir de l'utilisateur
-      - ${XDG_RUNTIME_DIR:?Set XDG_RUNTIME_DIR}/docker.sock:/var/run/docker.sock:ro
     expose:
       - "8080"
     mem_limit: 512M
