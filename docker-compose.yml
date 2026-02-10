@@ -44,6 +44,19 @@ services:
     mem_limit: 12G
     restart: unless-stopped
 
+  # PostgreSQL Performance Tuning (via Patroni REST API)
+  # Runs once after postgres is healthy - settings persist across restarts
+  postgres_tuning:
+    image: python:3-alpine
+    container_name: brgm-postgres-tuning
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./docker/postgres/apply-tuning.py:/app/apply-tuning.py:ro
+    command: ["python", "/app/apply-tuning.py"]
+    restart: "no"
+
   # DLT Worker - Pipeline execution
   dlt_worker:
     build:
