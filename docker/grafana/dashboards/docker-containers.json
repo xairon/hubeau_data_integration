@@ -93,7 +93,7 @@
       "targets": [
         {
           "expr": "topk(1, label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info)",
-          "legendFormat": "{{name}} ({{value}} cores)"
+          "legendFormat": "{{name}}"
         }
       ]
     },
@@ -167,54 +167,35 @@
       ]
     },
     {
-      "title": "Network I/O per Container",
-      "description": "Trafic réseau reçu (rx) et transmis (tx). Utile pour voir les jobs DLT qui téléchargent depuis les APIs.",
+      "title": "CPU Usage Stacked (cores)",
+      "description": "Vue empilée pour voir la répartition CPU entre conteneurs. La hauteur totale = CPU total de la stack.",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "unit": "Bps",
-          "custom": { "fillOpacity": 10 }
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "fillOpacity": 80,
+            "stacking": { "mode": "normal" },
+            "axisSoftMin": 0
+          }
         }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" }
       },
       "targets": [
         {
-          "expr": "label_replace(rate(container_network_receive_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (rx)"
-        },
-        {
-          "expr": "label_replace(rate(container_network_transmit_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (tx)"
-        }
-      ]
-    },
-    {
-      "title": "Disk I/O per Container",
-      "description": "Lectures/écritures disque par conteneur. Les pics d'écriture correspondent aux jobs DLT/dbt.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Bps",
-          "custom": { "fillOpacity": 10 }
-        }
-      },
-      "targets": [
-        {
-          "expr": "label_replace(rate(container_fs_reads_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (read)"
-        },
-        {
-          "expr": "label_replace(rate(container_fs_writes_bytes_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
-          "legendFormat": "{{name}} (write)"
+          "expr": "label_replace(rate(container_cpu_usage_seconds_total{id=~\".*docker-.*\\\\.scope\"}[1m]), \"container_id\", \"$1\", \"id\", \".*docker-([a-f0-9]{12}).*\") * on(container_id) group_left(name) container_info",
+          "legendFormat": "{{name}}"
         }
       ]
     },
     {
       "title": "Memory Usage Ranking",
-      "description": "Classement des conteneurs par consommation mémoire. Permet d'identifier rapidement les gros consommateurs.",
+      "description": "Classement des conteneurs par consommation mémoire.",
       "type": "bargauge",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -248,5 +229,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "title": "Docker Containers - Hub'Eau",
   "uid": "hubeau-docker",
-  "version": 8
+  "version": 9
 }

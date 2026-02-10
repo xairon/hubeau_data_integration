@@ -354,19 +354,19 @@
       },
       "targets": [
         {
-          "expr": "rate(pg_stat_bgwriter_buffers_checkpoint[5m])",
+          "expr": "rate(pg_stat_bgwriter_buffers_checkpoint_total[5m])",
           "legendFormat": "checkpoint"
         },
         {
-          "expr": "rate(pg_stat_bgwriter_buffers_backend[5m])",
+          "expr": "rate(pg_stat_bgwriter_buffers_backend_total[5m])",
           "legendFormat": "backend (direct writes)"
         },
         {
-          "expr": "rate(pg_stat_bgwriter_buffers_clean[5m])",
+          "expr": "rate(pg_stat_bgwriter_buffers_clean_total[5m])",
           "legendFormat": "background writer"
         },
         {
-          "expr": "rate(pg_stat_bgwriter_buffers_alloc[5m])",
+          "expr": "rate(pg_stat_bgwriter_buffers_alloc_total[5m])",
           "legendFormat": "allocated"
         }
       ]
