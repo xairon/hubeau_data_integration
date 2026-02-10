@@ -263,6 +263,9 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: brgm-cadvisor
+    command:
+      - "--docker_only=true"
+      - "--store_container_labels=true"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -285,35 +288,6 @@ services:
     expose:
       - "9187"
     mem_limit: 256M
-    restart: unless-stopped
-
-  # Netdata - Monitoring (containers + PostgreSQL)
-  # Dashboard: http://localhost:49506
-  netdata:
-    image: netdata/netdata:stable
-    container_name: brgm-netdata
-    hostname: brgm-netdata
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "49506:19999"
-    volumes:
-      # Host metrics (Docker Desktop Linux VM)
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /etc/os-release:/host/etc/os-release:ro
-      # Docker container metrics
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      # PostgreSQL collector config
-      - ./docker/netdata/go.d/postgres.conf:/etc/netdata/go.d/postgres.conf:ro
-      # Health alerts overrides (disable noisy per-chunk TimescaleDB alerts)
-      - ./docker/netdata/health.d/postgres.conf:/etc/netdata/health.d/postgres.conf:ro
-    cap_add:
-      - SYS_PTRACE
-    security_opt:
-      - apparmor:unconfined
-    mem_limit: 512M
     restart: unless-stopped
 
   # Apache Superset - BI & Visualization
