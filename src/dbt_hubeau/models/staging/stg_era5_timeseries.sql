@@ -2,15 +2,16 @@
 {{
   config(
     materialized = 'incremental',
-    unique_key = ['latitude', 'longitude', 'time'],
-    incremental_strategy = 'delete+insert',
+    incremental_strategy = 'append',
     indexes = [
       {'columns': ['time'], 'type': 'brin'},
       {'columns': ['geometry'], 'type': 'gist'},
       {'columns': ['source_file_id']}
     ],
     post_hook=[
-      "{{ add_primary_key(['latitude', 'longitude', 'time']) }}"
+      "{{ add_primary_key(['latitude', 'longitude', 'time']) }}",
+      "{{ convert_to_hypertable('time', '1 month') }}",
+      "{{ enable_compression(segment_by=[], order_by='time DESC', compress_after='90 days') }}"
     ]
   )
 }}
