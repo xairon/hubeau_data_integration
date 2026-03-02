@@ -10,9 +10,7 @@
     ],
     post_hook=[
       "{{ add_primary_key(['code_site', 'date_obs_elab', 'grandeur_hydro_elab']) }}",
-      "{{ convert_to_hypertable('date_obs_elab', '1 year') }}",
-      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}",
-      "{{ enable_compression(segment_by=['grandeur_hydro_elab'], order_by='date_obs_elab DESC', compress_after='90 days') }}"
+      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}"
     ]
   )
 }}
@@ -75,7 +73,7 @@ deduplicated AS (
         {{ cast_silver_numeric('longitude') }} AS longitude,
         {{ cast_silver_numeric('latitude') }} AS latitude
     FROM source
-    ORDER BY code_site, {{ cast_silver_date('date_obs_elab') }}, grandeur_hydro_elab, resultat_obs_elab DESC NULLS LAST
+    ORDER BY code_site, {{ cast_silver_date('date_obs_elab') }}, grandeur_hydro_elab, {{ cast_silver_numeric('resultat_obs_elab') }} DESC NULLS LAST
 ),
 
 with_geometry AS (

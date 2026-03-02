@@ -3,6 +3,9 @@
     materialized = 'incremental',
     unique_key = ['code_station', 'date', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
+    incremental_predicates = [
+      "DBT_INTERNAL_DEST.date >= CURRENT_DATE - INTERVAL '30 days'"
+    ],
     indexes = [
       {'columns': ['code_station']},
       {'columns': ['code_site']},
@@ -13,8 +16,7 @@
     post_hook = [
       "{{ add_primary_key(['code_station', 'date', 'grandeur_hydro_elab']) }}",
       "{{ convert_to_hypertable('date', '1 year') }}",
-      "{{ enable_compression(segment_by=['code_departement'], order_by='date DESC', compress_after='365 days') }}",
-      "{{ add_foreign_key(['code_station'], 'int_hydro_station_era5_mapping', ['code_station']) }}"
+      "{{ enable_compression(segment_by=['code_station'], order_by='date DESC', compress_after='365 days') }}"
     ]
   )
 }}
@@ -91,7 +93,7 @@ final AS (
         map.era5_distance_m::numeric AS era5_distance_m
 
     FROM measurements m
-    INNER JOIN mapping map ON m.code_station = map.code_station
+    LEFT JOIN mapping map ON m.code_station = map.code_station
     LEFT JOIN era5_filtered e
         ON map.era5_latitude = e.latitude
         AND map.era5_longitude = e.longitude

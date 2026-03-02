@@ -9,9 +9,7 @@
     ],
     post_hook=[
       "{{ add_primary_key(['code_bss', 'date_mesure']) }}",
-      "{{ convert_to_hypertable('date_mesure', '1 year') }}",
-      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}",
-      "{{ enable_compression(segment_by=[], order_by='date_mesure DESC', compress_after='90 days') }}"
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}
@@ -29,9 +27,9 @@ WITH source AS (
     SELECT * FROM {{ source('staging', 'piezometry_chroniques_raw') }}
     WHERE date_mesure IS NOT NULL
       AND code_bss IS NOT NULL
-      -- Filtrage des valeurs nulles en silver : ne garder que les lignes avec mesures utiles
-      AND {{ cast_silver_numeric('niveau_nappe_eau') }} IS NOT NULL
-      AND {{ cast_silver_numeric('profondeur_nappe') }} IS NOT NULL
+      -- Filtrage des valeurs nulles en silver : garder les lignes avec au moins une mesure utile
+      AND ({{ cast_silver_numeric('niveau_nappe_eau') }} IS NOT NULL
+           OR {{ cast_silver_numeric('profondeur_nappe') }} IS NOT NULL)
       {% if is_incremental() %}
       {% if reprocess_from_date is not none %}
       AND {{ cast_silver_date('date_mesure') }} >= '{{ reprocess_from_date }}'::date
@@ -52,7 +50,7 @@ deduplicated AS (
         {{ cast_silver_numeric('profondeur_nappe') }} AS profondeur_nappe,
         {{ cast_silver_text('code_bss') }} AS code_bss
     FROM source
-    ORDER BY code_bss, {{ cast_silver_date('date_mesure') }}, niveau_nappe_eau DESC NULLS LAST
+    ORDER BY code_bss, {{ cast_silver_date('date_mesure') }}, {{ cast_silver_numeric('niveau_nappe_eau') }} DESC NULLS LAST
 ),
 
 -- Ne garder que les chroniques dont la station existe (respect de la FK code_bss -> stg_piezo_stations)

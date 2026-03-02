@@ -3,6 +3,9 @@
     materialized = 'incremental',
     unique_key = ['code_station', 'mois', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
+    incremental_predicates = [
+      "DBT_INTERNAL_DEST.mois >= CURRENT_DATE - INTERVAL '30 months'"
+    ],
     indexes = [
       {'columns': ['code_station']},
       {'columns': ['code_site']},
@@ -12,7 +15,7 @@
     ],
     post_hook = [
       "{{ add_primary_key(['code_station', 'mois', 'grandeur_hydro_elab']) }}",
-      "{{ convert_to_hypertable('mois', '5 years') }}",
+      "{{ convert_to_hypertable('mois', '1 year') }}",
       "{{ enable_compression(segment_by=['code_departement'], order_by='mois DESC', compress_after='730 days') }}",
       "{{ add_foreign_key(['code_station'], 'stg_hydrometry_stations', ['code_station']) }}"
     ]
@@ -23,7 +26,7 @@
 -- Source: hydro_daily_chroniques (fact table quotidienne)
 -- INCREMENTAL: recalcul partiel sur une fenêtre mensuelle pour le streaming daily.
 
-{% set months_lookback = var('streaming_monthly_lookback_months', 18) %}
+{% set months_lookback = var('streaming_monthly_lookback_months', 25) %}
 
 WITH daily AS (
     SELECT * FROM {{ ref('hydro_daily_chroniques') }}

@@ -3,6 +3,9 @@
     materialized = 'incremental',
     unique_key = ['code_bss', 'mois'],
     incremental_strategy = 'delete+insert',
+    incremental_predicates = [
+      "DBT_INTERNAL_DEST.mois >= CURRENT_DATE - INTERVAL '30 months'"
+    ],
     indexes = [
       {'columns': ['code_bss']},
       {'columns': ['mois'], 'type': 'brin'},
@@ -10,7 +13,7 @@
     ],
     post_hook = [
       "{{ add_primary_key(['code_bss', 'mois']) }}",
-      "{{ convert_to_hypertable('mois', '5 years') }}",
+      "{{ convert_to_hypertable('mois', '1 year') }}",
       "{{ enable_compression(segment_by=['code_departement'], order_by='mois DESC', compress_after='730 days') }}",
       "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
@@ -22,7 +25,7 @@
 -- Calcule stats mensuelles + moyennes mobiles pour analyse tendancielle
 -- INCREMENTAL: recalcul partiel sur une fenêtre mensuelle pour le streaming daily.
 
-{% set months_lookback = var('streaming_monthly_lookback_months', 18) %}
+{% set months_lookback = var('streaming_monthly_lookback_months', 25) %}
 
 WITH daily AS (
     SELECT * FROM {{ ref('hubeau_daily_chroniques') }}
