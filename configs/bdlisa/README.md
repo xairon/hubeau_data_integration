@@ -3,7 +3,7 @@
 Configuration pour l'ingestion du référentiel TME (Tableau Multi-Échelles).
 
 - **bdlisa_entites.yml** : Configuration pour le téléchargement du fichier TME depuis le ZIP national ou URL custom.
-- Voir [docs/BDLISA_INTEGRATION.md](../../docs/BDLISA_INTEGRATION.md) pour l'intégration dans le pipeline.
+- Voir le [Guide d'onboarding](../../docs/ONBOARDING.md) pour l'intégration dans le pipeline.
 
 ## Source des données
 

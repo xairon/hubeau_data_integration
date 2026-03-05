@@ -93,7 +93,7 @@ models:
       bronze.bdlisa_entites_raw) + jointures aux nomenclatures Sandre `ref_*_eh`.
       Avec le layer 0 du GeoPackage BDLISA V3 Métropole, seuls `code_eh` et `libelle_eh`
       sont renseignés ; niveau/etat/nature/milieu/theme/origine et leurs libellés restent
-      souvent NULL. Voir docs/BDLISA_INTEGRATION.md et scripts/inspect_bdlisa_gpkg.py.
+      souvent NULL. Voir docs/ONBOARDING.md et scripts/inspect_bdlisa_gpkg.py.
     columns:
       - name: code_eh
         description: "Code entité hydrogéologique (source bdlisa_entites)"

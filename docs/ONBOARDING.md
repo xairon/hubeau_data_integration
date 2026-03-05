@@ -979,7 +979,10 @@ docker exec brgm-dlt-worker dbt test --select model_name --store-failures
 - **Grafana** : http://localhost:49507 (admin/admin)
 - **Superset** : http://localhost:49504
 - **CLAUDE.md** : Guide de développement détaillé (conventions, commandes avancées)
-- **docs/ARCHITECTURE.md** : Architecture technique détaillée
+- **docs/CONFIGURATION.md** : Variables d'environnement et paramétrage
 - **docs/SCHEMA_BDD.md** : Schéma complet des tables
-- **docs/runbook.md** : Procédures d'exploitation
+- **docs/OPERATIONS.md** : Runbook, dépannage, sauvegarde et restauration
 - **docs/MONITORING.md** : Configuration du monitoring
+- **docs/SUPERSET.md** : Configuration BI et dashboards
+- **docs/ERA5.md** : Architecture d'ingestion des données climatiques
+- **docs/TIMESCALEDB.md** : Hypertables, compression, indexation
