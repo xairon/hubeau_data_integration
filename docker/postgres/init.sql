@@ -14,7 +14,9 @@ ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transact
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS postgis_topology;
 
--- Enable pg_stat_statements (query performance monitoring)
+-- pg_stat_statements: déjà préchargé par timescaledb-ha via shared_preload_libraries
+-- NE PAS faire ALTER SYSTEM SET shared_preload_libraries ici
+-- (l'image timescaledb-ha gère ce paramètre via son entrypoint)
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- ============================================================================
@@ -24,46 +26,44 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 -- Les paramètres "user/sighup" s'appliquent au reload: SELECT pg_reload_conf();
 -- ============================================================================
 
--- Shared preload libraries (context: postmaster → restart requis)
-ALTER SYSTEM SET shared_preload_libraries = 'timescaledb,pg_stat_statements';
-ALTER SYSTEM SET pg_stat_statements.track = 'all';
-
--- === MÉMOIRE ===
--- work_mem: mémoire par opération (tri, hash join, GROUP BY, CTE)
--- CRITIQUE: le défaut timescaledb-ha est ~328KB, causant des spills disque massifs
--- 128MB permet aux requêtes dbt complexes de travailler en RAM
--- Formule: safe tant que max_connections × work_mem × 3 < RAM container
--- 100 × 128MB × 3 = 37.5GB > 12GB, mais en pratique <10 requêtes actives simultanées
-ALTER SYSTEM SET work_mem = '128MB';
+-- === MÉMOIRE === (host: 502GB RAM partagé — baseline faible, burst max)
+-- shared_buffers: seule RAM permanente → modéré (4GB)
+-- Le reste du cache = OS page cache Linux, libéré automatiquement sous pression mémoire
+ALTER SYSTEM SET shared_buffers = '4GB';
+-- effective_cache_size: hint planner (zéro allocation réelle) → agressif
+ALTER SYSTEM SET effective_cache_size = '128GB';
+-- work_mem: alloué/libéré par opération de tri/join → agressif
+ALTER SYSTEM SET work_mem = '512MB';
+-- maintenance_work_mem: alloué pendant VACUUM/INDEX, libéré après
+ALTER SYSTEM SET maintenance_work_mem = '2GB';
+-- hash_mem_multiplier: hash joins 2× work_mem (1GB), libéré après
+ALTER SYSTEM SET hash_mem_multiplier = 2.0;
+-- huge_pages off: mémoire pinnée non récupérable → mauvais pour host partagé
+ALTER SYSTEM SET huge_pages = 'off';
+-- temp_buffers: sessions temporaires, libéré à la déconnexion
+ALTER SYSTEM SET temp_buffers = '256MB';
 
 -- === I/O SSD ===
--- random_page_cost: coût relatif lecture aléatoire vs séquentielle (défaut: 4.0 = HDD)
--- 1.1 pour SSD: le planner choisira plus souvent les index scans
 ALTER SYSTEM SET random_page_cost = 1.1;
--- effective_io_concurrency: opérations I/O parallèles (défaut: 1 = HDD)
 ALTER SYSTEM SET effective_io_concurrency = 200;
 ALTER SYSTEM SET maintenance_io_concurrency = 200;
 
--- === PARALLÉLISME ===
--- Exploiter les multiples cores pour les requêtes analytiques dbt
-ALTER SYSTEM SET max_worker_processes = 24;
-ALTER SYSTEM SET max_parallel_workers = 16;
-ALTER SYSTEM SET max_parallel_workers_per_gather = 4;
-ALTER SYSTEM SET max_parallel_maintenance_workers = 4;
+-- === PARALLÉLISME === (host: 96 CPUs — workers éphémères, spawned par requête)
+ALTER SYSTEM SET max_worker_processes = 64;
+ALTER SYSTEM SET max_parallel_workers = 48;
+ALTER SYSTEM SET max_parallel_workers_per_gather = 8;
+ALTER SYSTEM SET max_parallel_maintenance_workers = 8;
 
 -- === WAL & CHECKPOINTS ===
 -- Optimisé pour les écritures lourdes DLT (bulk ingestion)
--- max_wal_size élevé = moins de checkpoints pendant les chargements
-ALTER SYSTEM SET max_wal_size = '8GB';
-ALTER SYSTEM SET min_wal_size = '2GB';
+ALTER SYSTEM SET max_wal_size = '16GB';
+ALTER SYSTEM SET min_wal_size = '4GB';
 ALTER SYSTEM SET wal_buffers = '64MB';
 ALTER SYSTEM SET wal_compression = 'on';
 ALTER SYSTEM SET checkpoint_timeout = '15min';
 
 -- === QUERY PLANNER ===
--- Plus d'échantillons ANALYZE = meilleurs plans sur tables volumineuses
 ALTER SYSTEM SET default_statistics_target = 500;
--- JIT: overhead inutile sur les requêtes dbt de durée moyenne
 ALTER SYSTEM SET jit = 'off';
 
 -- Create schemas if not exist

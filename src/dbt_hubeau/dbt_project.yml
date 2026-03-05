@@ -23,7 +23,7 @@ vars:
   # Fenêtre courte pour le streaming quotidien (fact daily).
   streaming_lookback_days: 7
   # Fenêtre mensuelle (mois) pour recalcul partiel des agrégats mensuels en daily.
-  streaming_monthly_lookback_months: 18
+  streaming_monthly_lookback_months: 25
 
 # Hooks exécutés au début de chaque run dbt (idempotents, safe si tables n'existent pas encore)
 on-run-start:

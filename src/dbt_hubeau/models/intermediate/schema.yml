@@ -70,13 +70,16 @@ models:
               config:
                 severity: warn
       - name: total_precipitation
-        description: "Précipitations totales en m"
+        description: "Précipitations totales en mm"
         tests:
           - dbt_utils.accepted_range:
               min_value: 0
-              max_value: 0.5  # 500mm/jour max (extrême)
+              max_value: 500
               config:
                 severity: warn
+                where: "total_precipitation IS NOT NULL"
+    # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).
+    # Test dbt_utils retiré: OOM sur ~40M lignes ERA5.
 
   - name: int_era5_grid_points
     description: "Points de grille ERA5 uniques utilisés"
@@ -154,3 +157,22 @@ models:
         description: "Date ERA5 (time casté en date)"
         tests:
           - not_null
+      - name: temperature_2m
+        description: "Température à 2m en °C"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -40
+              max_value: 50
+              config:
+                severity: warn
+      - name: total_precipitation
+        description: "Précipitations totales en mm"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 500
+              config:
+                severity: warn
+                where: "total_precipitation IS NOT NULL"
+    # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).
+    # Test dbt_utils retiré: OOM sur ~40M lignes ERA5.

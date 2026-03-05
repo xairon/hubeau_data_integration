@@ -2,7 +2,7 @@
   config(
     materialized = 'incremental',
     unique_key = 'code_bss',
-    incremental_strategy = 'append',
+    incremental_strategy = 'delete+insert',
     indexes=[
       {'columns': ['era5_latitude', 'era5_longitude']},
       {'columns': ['geom'], 'type': 'gist'}
@@ -26,7 +26,7 @@ WITH stations AS (
     SELECT * FROM {{ ref('stg_piezo_stations') }}
     WHERE geometry IS NOT NULL
       -- Filtre pour la France métropolitaine (Hexagone) uniquement
-      AND y >= 41.0 AND y <= 51.5 
+      AND y >= 41.0 AND y <= 52.0
       AND x >= -5.5 AND x <= 10.0
       {% if is_incremental() and not recompute_all %}
       -- Ne traiter que les stations pas encore mappées

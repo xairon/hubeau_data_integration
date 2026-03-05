@@ -2,16 +2,16 @@
   config(
     materialized = 'incremental',
     unique_key = ['code_station', 'date', 'grandeur_hydro_elab'],
-    incremental_strategy = 'delete+insert',
-    incremental_predicates = [
-      "DBT_INTERNAL_DEST.date >= CURRENT_DATE - INTERVAL '30 days'"
-    ],
+    incremental_strategy = 'append',
     indexes = [
       {'columns': ['code_station']},
       {'columns': ['code_site']},
       {'columns': ['date'], 'type': 'brin'},
       {'columns': ['grandeur_hydro_elab']},
       {'columns': ['code_departement']}
+    ],
+    pre_hook = [
+      "{{ hypertable_delete('date', '30 days') }}"
     ],
     post_hook = [
       "{{ add_primary_key(['code_station', 'date', 'grandeur_hydro_elab']) }}",
@@ -23,24 +23,13 @@
 
 -- Table finale : Hydrométrie + ERA5 (sans artefact DLT, types explicites)
 -- Filtrage des valeurs nulles : fait en silver (stg_hydrometry_obs_elab, stg_era5_timeseries)
--- INCREMENTAL: ne traite que la fenêtre (lookback) pour le streaming nocturne.
+-- INCREMENTAL: pre-hook DELETE + append (pas de DELETE...USING qui scanne tous les chunks).
+-- La fenêtre de re-calcul est synchronisée avec le pre-hook hypertable_delete.
 
-{% set lookback_days = var('streaming_lookback_days', 7) %}
-
-{% if is_incremental() %}
-WITH date_bounds AS (
-    SELECT
-        (SELECT COALESCE(MAX(date), '1900-01-01'::date) - INTERVAL '{{ lookback_days }} days' FROM {{ this }}) AS start_date,
-        (SELECT MAX(date_obs_elab) FROM {{ ref('int_hydro_daily_measurements') }}) AS end_date
-),
-{% else %}
-WITH
-{% endif %}
-measurements AS (
+WITH measurements AS (
     SELECT * FROM {{ ref('int_hydro_daily_measurements') }}
     {% if is_incremental() %}
-    WHERE date_obs_elab >= (SELECT start_date FROM date_bounds)
-      AND date_obs_elab <= (SELECT end_date FROM date_bounds)
+    WHERE date_obs_elab >= CURRENT_DATE - INTERVAL '30 days'
     {% endif %}
 ),
 
@@ -51,8 +40,7 @@ mapping AS (
 era5_filtered AS (
     SELECT * FROM {{ ref('int_era5_for_hydro_stations') }}
     {% if is_incremental() %}
-    WHERE era5_date >= (SELECT start_date FROM date_bounds)
-      AND era5_date <= (SELECT end_date FROM date_bounds)
+    WHERE era5_date >= CURRENT_DATE - INTERVAL '30 days'
     {% endif %}
 ),
 

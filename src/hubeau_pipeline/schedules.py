@@ -1,17 +1,14 @@
 """
-Dagster Schedules - Automated Daily/Weekly/Monthly Data Integration
+Dagster Schedules - Data Ingestion + Maintenance
 
-Schedule Timeline (UTC) - generous time gaps between stages:
+Schedules handle INGESTION only (Bronze layer). The dbt transformation chain
+is triggered by SENSORS (event-driven) after Bronze materializes:
+  Bronze done → sensor → shared staging → sensor → domain pipelines → sensor → dimensions
+
+Schedule Timeline (UTC):
 - 3h00: ERA5 Smart Update (Bronze)
-- 4h00: Hub'Eau Bronze (piezo + hydro in parallel)
-- 5h00: dbt Shared Staging (ERA5 timeseries + grid points) [1h buffer]
-- 6h30: dbt Domain Pipelines (piezo + hydro in PARALLEL) [1h30 buffer]
-- 8h00: dbt Shared Dimensions (dim_date, dim_geography) [1h30 buffer]
-
-Monthly:
-- 1er du mois 2h00: BDLISA + Sandre reference data
-
-Weekly:
+- 4h00: Hub'Eau Bronze (piezo + hydro in parallel) → triggers sensor chain
+- 1er du mois 2h00: Reference data (BDLISA + Sandre)
 - Dimanche 5h00: dbt documentation generation
 """
 
@@ -27,12 +24,6 @@ from datetime import datetime
 from .jobs import (
     daily_piezometry_bronze_job,
     daily_hydrometry_bronze_job,
-    dbt_shared_staging_job,
-    dbt_piezo_pipeline_job,
-    dbt_piezo_pipeline_daily_job,
-    dbt_hydro_pipeline_job,
-    dbt_hydro_pipeline_daily_job,
-    dbt_shared_dimensions_job,
     era5_weekly_job,
     reference_data_bronze_job,
     dbt_docs_job,
@@ -48,64 +39,41 @@ DEFAULT_SCHEDULE_STATUS = (
 
 
 # ==============================================================================
-# DAILY SCHEDULES - Hub'Eau Bronze
+# DAILY SCHEDULES - Hub'Eau Bronze Ingestion
 # ==============================================================================
+# After these complete, sensors automatically trigger the dbt chain:
+# shared_staging → piezo + hydro (parallel) → dimensions
 
 daily_piezometry_schedule = ScheduleDefinition(
     job=daily_piezometry_bronze_job,
     cron_schedule="0 4 * * *",  # 4h00 UTC every day
     default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: Piezometry chroniques (last 7 days)",
+    description="Daily: Piezometry chroniques (last 7 days) → triggers dbt sensor chain",
 )
 
 daily_hydrometry_schedule = ScheduleDefinition(
     job=daily_hydrometry_bronze_job,
     cron_schedule="0 4 * * *",  # 4h00 UTC every day
     default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: Hydrometry observations (last 7 days)",
+    description="Daily: Hydrometry observations (last 7 days) → triggers dbt sensor chain",
 )
 
 
 # ==============================================================================
-# DAILY SCHEDULES - dbt Pipelines (4-stage execution)
+# DAILY SCHEDULE - ERA5 Smart Update
 # ==============================================================================
 
-# Stage 1: Shared staging (ERA5 data) - runs at 5h00 UTC
-# Must complete before domain pipelines can start
-# WARNING: Time-based scheduling assumes previous stage completed within the gap.
-# If Bronze (4h00) takes >1h, this stage may process stale data.
-# Consider switching to sensor-based triggering for production reliability.
-daily_dbt_shared_staging_schedule = ScheduleDefinition(
-    job=dbt_shared_staging_job,
-    cron_schedule="0 5 * * *",  # 5h00 UTC (1h buffer after Bronze)
+@schedule(
+    job=era5_weekly_job,
+    cron_schedule="0 3 * * *",  # Daily 3h00 UTC
     default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: dbt shared staging (ERA5 timeseries + grid points)",
+    description="Daily: ERA5 Smart Update (Target Timeseries)",
 )
-
-# Stage 2a: Piezo pipeline runs at 6h30 UTC (after shared staging)
-daily_dbt_piezo_schedule = ScheduleDefinition(
-    job=dbt_piezo_pipeline_daily_job,
-    cron_schedule="30 6 * * *",  # 6h30 UTC (1h30 buffer after stage 1)
-    default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: dbt Piezometry pipeline (streaming-optimized)",
-)
-
-# Stage 2b: Hydro pipeline runs at 6h30 UTC (after shared staging)
-# Runs IN PARALLEL with piezo pipeline (different concurrency keys)
-daily_dbt_hydro_schedule = ScheduleDefinition(
-    job=dbt_hydro_pipeline_daily_job,
-    cron_schedule="30 6 * * *",  # 6h30 UTC (1h30 buffer after stage 1)
-    default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: dbt Hydrometry pipeline (streaming-optimized)",
-)
-
-# Stage 3: Shared dimensions run at 8h00 UTC (after both domain pipelines complete)
-daily_dbt_dimensions_schedule = ScheduleDefinition(
-    job=dbt_shared_dimensions_job,
-    cron_schedule="0 8 * * *",  # 8h00 UTC (1h30 buffer after domain pipelines)
-    default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: dbt shared dimensions (dim_date, dim_geography)",
-)
+def daily_era5_schedule(context: ScheduleEvaluationContext):
+    """ERA5 incremental update. Calculates missing period automatically."""
+    return RunRequest(
+        run_key=f"era5_daily_{datetime.now().strftime('%Y%m%d')}",
+    )
 
 
 # ==============================================================================
@@ -119,26 +87,6 @@ monthly_reference_data_schedule = ScheduleDefinition(
     description="Monthly: BDLISA + Sandre nomenclatures (ref_*_eh)",
 )
 
-# ==============================================================================
-# DAILY SCHEDULE - ERA5 Smart Update
-# ==============================================================================
-
-@schedule(
-    job=era5_weekly_job,
-    cron_schedule="0 3 * * *",  # Daily 3h00 UTC
-    default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Daily: ERA5 Smart Update (Target Timeseries)",
-)
-def daily_era5_schedule(context: ScheduleEvaluationContext):
-    """
-    ERA5 Daily schedule.
-    Lance le job de mise à jour incrémentale.
-    L'asset 'era5_weekly_update' calcule lui-même la période manquante (Smart Update).
-    """
-    return RunRequest(
-        run_key=f"era5_daily_{datetime.now().strftime('%Y%m%d')}",
-    )
-
 
 # ==============================================================================
 # WEEKLY SCHEDULE - dbt Documentation Generation
@@ -146,7 +94,7 @@ def daily_era5_schedule(context: ScheduleEvaluationContext):
 
 weekly_dbt_docs_schedule = ScheduleDefinition(
     job=dbt_docs_job,
-    cron_schedule="0 5 * * 0",  # Dimanche 5h00 UTC (hebdomadaire)
+    cron_schedule="0 5 * * 0",  # Dimanche 5h00 UTC
     default_status=DEFAULT_SCHEDULE_STATUS,
     description="Weekly: Generate dbt documentation (catalog.json + manifest.json)",
 )
@@ -157,18 +105,11 @@ weekly_dbt_docs_schedule = ScheduleDefinition(
 # ==============================================================================
 
 all_schedules = [
-    # Bronze layer (data ingestion)
+    # Bronze ingestion (triggers sensor chain for dbt)
     daily_piezometry_schedule,
     daily_hydrometry_schedule,
     daily_era5_schedule,
-    # dbt Stage 1: shared staging (ERA5)
-    daily_dbt_shared_staging_schedule,
-    # dbt Stage 2: domain pipelines (parallel)
-    daily_dbt_piezo_schedule,
-    daily_dbt_hydro_schedule,
-    # dbt Stage 3: shared dimensions
-    daily_dbt_dimensions_schedule,
-    # Documentation & reference data
+    # Maintenance
     weekly_dbt_docs_schedule,
     monthly_reference_data_schedule,
 ]

@@ -51,7 +51,7 @@ deduplicated AS (
             ]
         ) }}
     FROM source
-    ORDER BY code_bss, date_maj DESC NULLS LAST
+    ORDER BY code_bss, {{ cast_silver_timestamp('date_maj') }} DESC NULLS LAST
 )
 
 SELECT 

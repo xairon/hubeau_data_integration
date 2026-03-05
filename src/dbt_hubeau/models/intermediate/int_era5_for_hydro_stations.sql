@@ -4,7 +4,7 @@
     unique_key = ['latitude', 'longitude', 'era5_date'],
     incremental_strategy = 'delete+insert',
     incremental_predicates = [
-      "DBT_INTERNAL_DEST.era5_date >= CURRENT_DATE - INTERVAL '30 days'"
+      time_range_delete_predicate('era5_date', '30 days')
     ],
     indexes = [
       {'columns': ['latitude', 'longitude']},
@@ -12,9 +12,7 @@
     ],
     post_hook = [
       "{{ add_primary_key(['latitude', 'longitude', 'era5_date']) }}",
-      "{{ convert_to_hypertable('era5_date', '1 year') }}",
-      "{{ add_foreign_key(['latitude', 'longitude'], 'int_era5_grid_points', ['era5_latitude', 'era5_longitude']) }}",
-      "{{ enable_compression(segment_by=['latitude', 'longitude'], order_by='era5_date DESC', compress_after='365 days') }}"
+      "{{ add_foreign_key(['latitude', 'longitude'], 'int_era5_grid_points', ['era5_latitude', 'era5_longitude']) }}"
     ]
   )
 }}

@@ -104,7 +104,7 @@ def _csv_dir() -> Path:
     env_dir = os.environ.get("BDLISA_CSV_DIR")
     if env_dir:
         return Path(env_dir)
-    return Path("D:/BDLISA_V3_NATIONAL-csv(1)/CSV")
+    return Path("/app/data/bdlisa/CSV")
 
 
 @asset(description="Table généalogie BDLISA (CSV national)", group_name="bronze")

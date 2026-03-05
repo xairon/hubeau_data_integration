@@ -20,5 +20,5 @@ NULLIF(NULLIF(TRIM({{ column_name }}::text), ''), 'NULL')::timestamp
 {% endmacro %}
 
 {% macro cast_silver_text(column_name) %}
-NULLIF(TRIM({{ column_name }}::text), '')::text
+NULLIF(NULLIF(TRIM({{ column_name }}::text), ''), 'NULL')::text
 {% endmacro %}

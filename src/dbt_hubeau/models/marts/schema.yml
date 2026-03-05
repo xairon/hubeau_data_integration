@@ -36,13 +36,14 @@ models:
                 severity: warn
       
       - name: total_precipitation
-        description: "Précipitations totales journalières en m (NULL si ERA5 absent)"
+        description: "Précipitations totales journalières en mm (NULL si ERA5 absent)"
         tests:
           - dbt_utils.accepted_range:
               min_value: 0
-              max_value: 0.5
+              max_value: 500
               config:
                 severity: warn
+                where: "total_precipitation IS NOT NULL"
       
       - name: station_latitude
         description: "Latitude de la station (NULL si mapping absent)"
@@ -71,9 +72,10 @@ models:
       
       # Nombre minimum de lignes (sanity check)
       - dbt_utils.expression_is_true:
-          expression: "1=1"  # Placeholder - le test compile toujours
+          expression: "niveau_nappe_eau IS NOT NULL"
           config:
             severity: warn
+            where: "date >= CURRENT_DATE - INTERVAL '30 days'"
 
   - name: fct_monthly_chroniques
     description: "Agrégations mensuelles des mesures piézométriques et météo"
@@ -106,6 +108,11 @@ models:
         tests:
           - accepted_values:
               values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_bss
+            - annee
 
   - name: dim_piezo_stations
     description: "Dimension Stations enrichie avec statistiques globales et tendances"
@@ -122,6 +129,10 @@ models:
         tests:
           - accepted_values:
               values: ['NORMAL', 'VIGILANCE', 'ALERTE']
+      - name: qualite_tendance
+        tests:
+          - accepted_values:
+              values: ['NON_CALCULEE', 'FIABLE', 'INDICATIVE', 'FAIBLE']
 
   - name: stations_piezo_carte
     description: |
@@ -156,6 +167,11 @@ models:
         tests:
           - accepted_values:
               values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_bss
+            - saison
 
   - name: hydro_daily_chroniques
     description: "Table finale hydrométrie combinant observations et météo ERA5"
@@ -169,12 +185,65 @@ models:
       - name: grandeur_hydro_elab
         tests:
           - not_null
+
+      - name: resultat_obs_elab
+        description: "Valeur journalière agrégée (débit en l/s pour QmnJ)"
+        tests:
+          - not_null
+
+      - name: temperature_2m
+        description: "Température moyenne à 2m en °C (NULL si ERA5 absent)"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -40
+              max_value: 50
+              config:
+                severity: warn
+                where: "temperature_2m IS NOT NULL"
+
+      - name: total_precipitation
+        description: "Précipitations totales journalières en mm (NULL si ERA5 absent)"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 500
+              config:
+                severity: warn
+                where: "total_precipitation IS NOT NULL"
+
+      - name: station_latitude
+        description: "Latitude de la station (NULL si mapping absent)"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 41.0
+              max_value: 52.0
+              config:
+                severity: warn
+                where: "station_latitude IS NOT NULL"
+
+      - name: station_longitude
+        description: "Longitude de la station (NULL si mapping absent)"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -5.5
+              max_value: 10.0
+              config:
+                severity: warn
+                where: "station_longitude IS NOT NULL"
+
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
             - code_station
             - date
             - grandeur_hydro_elab
+
+      # Sanity check: données récentes non vides
+      - dbt_utils.expression_is_true:
+          expression: "resultat_obs_elab IS NOT NULL"
+          config:
+            severity: warn
+            where: "date >= CURRENT_DATE - INTERVAL '30 days'"
 
   - name: fct_monthly_hydro
     description: "Agrégations mensuelles des mesures hydrométriques et météo"
@@ -214,11 +283,20 @@ models:
         tests:
           - accepted_values:
               values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_station
+            - annee
+            - grandeur_hydro_elab
 
   - name: agg_hydro_trends
     description: "Tendances saisonnières hydrométriques par station"
     columns:
       - name: code_station
+        tests:
+          - not_null
+      - name: grandeur_hydro_elab
         tests:
           - not_null
       - name: saison
@@ -229,6 +307,12 @@ models:
         tests:
           - accepted_values:
               values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_station
+            - saison
+            - grandeur_hydro_elab
 
   - name: dim_hydro_stations
     description: "Dimension Stations hydrométriques enrichie avec statistiques"
@@ -271,4 +355,9 @@ models:
         description: "Code de la région"
       - name: nom_region
         description: "Nom de la région"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_commune
+            - code_departement
 

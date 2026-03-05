@@ -128,13 +128,10 @@ def era5_france_meteo(config: Dict[str, Any], dagster_context=None) -> Iterator[
         )
 
     # Initialize CDS client (cdsapi)
-    # Note: verify=False may be needed if certificate issues occur
-    # (Copernicus sometimes has self-signed cert issues)
     client = cdsapi.Client(
         url=config['credentials']['cds_api_url'],
         key=cds_api_key,
         quiet=False,  # Logs de progression
-        verify=False  # Disable SSL verification (workaround for cert issues)
     )
 
     log_info(f"✅ CDS Client initialized with URL: {config['credentials']['cds_api_url']}")

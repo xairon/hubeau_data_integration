@@ -1,0 +1,206 @@
+/* Adminer Dark Mode - Catppuccin Mocha - Full coverage */
+
+/* Global reset - force dark on everything */
+*, *::before, *::after {
+    border-color: #313244 !important;
+}
+
+html, body {
+    background: #1e1e2e !important;
+    color: #cdd6f4 !important;
+}
+
+/* All block elements */
+div, p, span, label, li, ul, ol, dl, dt, dd, h1, h2, h3, h4, h5, h6,
+article, aside, header, footer, nav, section, main, details, summary {
+    background-color: transparent !important;
+    color: #cdd6f4 !important;
+}
+
+/* Links */
+a { color: #89b4fa !important; }
+a:visited { color: #b4befe !important; }
+a:hover { color: #cba6f7 !important; }
+
+/* Top breadcrumb bar */
+#breadcrumb {
+    background: #181825 !important;
+    border-bottom: 1px solid #45475a !important;
+    padding: 5px 10px !important;
+}
+
+/* Content area */
+#content {
+    background: #1e1e2e !important;
+}
+
+/* Menu / Sidebar */
+#menu {
+    background: #181825 !important;
+    border-right: 1px solid #313244 !important;
+}
+
+#menu h1 {
+    background: #181825 !important;
+    color: #89b4fa !important;
+}
+
+#menu a { color: #cdd6f4 !important; }
+#menu a:hover { color: #89b4fa !important; background: #313244 !important; }
+
+/* Tables - full dark */
+table {
+    background: #1e1e2e !important;
+    border-color: #313244 !important;
+    border-collapse: collapse !important;
+}
+
+thead td, thead th {
+    background: #313244 !important;
+    color: #cdd6f4 !important;
+}
+
+td, th {
+    background: transparent !important;
+    color: #cdd6f4 !important;
+    border-color: #313244 !important;
+}
+
+tbody tr:nth-child(odd) td { background: #1e1e2e !important; }
+tbody tr:nth-child(even) td { background: #181825 !important; }
+tbody tr:hover td { background: #313244 !important; }
+
+/* Adminer-specific numbered column */
+.odd td { background: #1e1e2e !important; }
+.even td { background: #181825 !important; }
+.odd, .even { background: transparent !important; }
+
+/* Forms */
+input, select, textarea, button {
+    background: #313244 !important;
+    color: #cdd6f4 !important;
+    border: 1px solid #45475a !important;
+}
+
+input:focus, select:focus, textarea:focus {
+    border-color: #89b4fa !important;
+    outline: none !important;
+    box-shadow: 0 0 0 1px #89b4fa !important;
+}
+
+input[type="submit"], button[type="submit"] {
+    background: #89b4fa !important;
+    color: #1e1e2e !important;
+    border: none !important;
+    cursor: pointer !important;
+    font-weight: bold !important;
+}
+
+input[type="submit"]:hover, button[type="submit"]:hover {
+    background: #b4befe !important;
+}
+
+input[type="checkbox"], input[type="radio"] {
+    accent-color: #89b4fa !important;
+}
+
+input[type="image"] {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Fieldset / Legend */
+fieldset {
+    background: #181825 !important;
+    border: 1px solid #45475a !important;
+    border-radius: 4px !important;
+}
+
+legend {
+    color: #89b4fa !important;
+    background: #181825 !important;
+    padding: 0 8px !important;
+}
+
+/* Login page */
+form > fieldset {
+    background: #181825 !important;
+}
+
+/* Code / SQL */
+code, pre, .sqlarea, textarea.sqlarea {
+    background: #11111b !important;
+    color: #a6e3a1 !important;
+    font-family: monospace !important;
+}
+
+/* Messages */
+.message {
+    background: #1e3a2e !important;
+    color: #a6e3a1 !important;
+    border: 1px solid #a6e3a1 !important;
+}
+
+.error, .message.error {
+    background: #3a1e2e !important;
+    color: #f38ba8 !important;
+    border: 1px solid #f38ba8 !important;
+}
+
+/* Help / Tooltip */
+.js .column, .column {
+    background: #181825 !important;
+}
+
+/* Links bar (p.links) */
+p.links, p.links a {
+    background: transparent !important;
+}
+
+/* "select" page - data table actions */
+.checkable {
+    background: transparent !important;
+}
+
+/* Pagination */
+.pages {
+    background: transparent !important;
+}
+
+.pages a, .pages input {
+    background: #313244 !important;
+    color: #cdd6f4 !important;
+}
+
+.pages .page {
+    background: #89b4fa !important;
+    color: #1e1e2e !important;
+}
+
+/* Loading indicator */
+#ajaxstatus {
+    background: #313244 !important;
+    color: #cdd6f4 !important;
+}
+
+/* Title bar */
+.logout {
+    background: transparent !important;
+}
+
+/* Dragging */
+.ui-sortable-helper {
+    background: #313244 !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #1e1e2e; }
+::-webkit-scrollbar-thumb { background: #45475a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #585b70; }
+
+/* Selection */
+::selection {
+    background: #45475a !important;
+    color: #cdd6f4 !important;
+}

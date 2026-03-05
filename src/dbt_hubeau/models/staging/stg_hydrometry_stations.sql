@@ -52,7 +52,7 @@ deduplicated AS (
         {{ cast_silver_text('uri_cours_eau') }} AS uri_cours_eau,
         {{ cast_silver_text('libelle_departement') }} AS libelle_departement
     FROM source
-    ORDER BY code_station, date_maj_station DESC NULLS LAST
+    ORDER BY code_station, {{ cast_silver_timestamp('date_maj_station') }} DESC NULLS LAST
 )
 
 SELECT 

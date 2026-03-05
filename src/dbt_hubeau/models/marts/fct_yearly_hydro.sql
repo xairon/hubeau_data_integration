@@ -6,13 +6,12 @@
     indexes = [
       {'columns': ['code_station']},
       {'columns': ['code_site']},
-      {'columns': ['annee'], 'type': 'brin'},
+      {'columns': ['annee']},
       {'columns': ['grandeur_hydro_elab']},
       {'columns': ['code_departement']}
     ],
     post_hook = [
       "{{ add_primary_key(['code_station', 'annee', 'grandeur_hydro_elab']) }}",
-      "{{ convert_to_hypertable('annee', '10') }}",
       "{{ add_foreign_key(['code_station'], 'stg_hydrometry_stations', ['code_station']) }}"
     ]
   )

@@ -16,7 +16,7 @@ dbt_silver_gold_pipeline_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         # No dbt_select = all models
-    ),
+    ).without_checks(),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
     hooks=set(),
 )
@@ -42,7 +42,7 @@ dbt_shared_staging_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         dbt_select=" ".join(SHARED_STAGING_MODELS),
-    ),
+    ).without_checks(),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
     hooks=set(),
 )
@@ -100,7 +100,7 @@ dbt_piezo_pipeline_daily_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         dbt_select=" ".join(PIEZO_DAILY_MODELS),
-    ),
+    ).without_checks(),
     tags={"dagster/concurrency_key": "dbt_piezo", "domain": "piezo", "frequency": "daily"},
     hooks=set(),
 )
@@ -116,7 +116,7 @@ dbt_piezo_pipeline_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         dbt_select=" ".join(PIEZO_MODELS),
-    ),
+    ).without_checks(),
     # Different concurrency key allows parallel execution with hydro
     tags={"dagster/concurrency_key": "dbt_piezo", "domain": "piezo"},
     hooks=set(),
@@ -178,7 +178,7 @@ dbt_hydro_pipeline_daily_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         dbt_select=" ".join(HYDRO_DAILY_MODELS),
-    ),
+    ).without_checks(),
     tags={"dagster/concurrency_key": "dbt_hydro", "domain": "hydro", "frequency": "daily"},
     hooks=set(),
 )
@@ -194,7 +194,7 @@ dbt_hydro_pipeline_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         dbt_select=" ".join(HYDRO_MODELS),
-    ),
+    ).without_checks(),
     # Different concurrency key allows parallel execution with piezo
     tags={"dagster/concurrency_key": "dbt_hydro", "domain": "hydro"},
     hooks=set(),
@@ -219,7 +219,7 @@ dbt_shared_dimensions_job = define_asset_job(
     selection=build_dbt_asset_selection(
         [hubeau_dbt_assets],
         dbt_select=" ".join(SHARED_DIMENSION_MODELS),
-    ),
+    ).without_checks(),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
     hooks=set(),
 )

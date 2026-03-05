@@ -6,7 +6,7 @@
 # Ou redémarrer le conteneur Superset (l'init ré-importe au démarrage).
 databases:
   - database_name: Hubeau Data Warehouse
-    sqlalchemy_uri: postgresql://postgres:REDACTED@postgres:5432/postgres
+    sqlalchemy_uri: postgresql://postgres:${PG_PASSWORD:-REDACTED}@postgres:5432/postgres
     tables:
       # --- Bronze (tables existantes) ---
       - table_name: tme_entites_hydrogeo

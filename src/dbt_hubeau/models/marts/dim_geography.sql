@@ -44,8 +44,8 @@ SELECT
     MAX(nom_commune) AS nom_commune,
     code_departement,
     MAX(nom_departement) AS nom_departement,
-    code_region,
+    MAX(code_region) AS code_region,
     MAX(nom_region) AS nom_region
 FROM combined
 WHERE code_departement IS NOT NULL
-GROUP BY code_commune, code_departement, code_region
+GROUP BY code_commune, code_departement

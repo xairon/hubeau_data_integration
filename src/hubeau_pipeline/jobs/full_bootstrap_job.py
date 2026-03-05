@@ -28,6 +28,7 @@ from dagster import (
     OpExecutionContext,
 )
 import psycopg2
+from psycopg2 import sql as psql
 import yaml
 from contextlib import contextmanager
 
@@ -354,11 +355,12 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
         station_codes = []
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(f'''
-                    SELECT DISTINCT "{api["station_code_field"]}" 
-                    FROM bronze."{api["stations_table"]}" 
-                    WHERE "{api["station_code_field"]}" IS NOT NULL
-                ''')
+                cur.execute(psql.SQL(
+                    'SELECT DISTINCT {col} FROM bronze.{tbl} WHERE {col} IS NOT NULL'
+                ).format(
+                    col=psql.Identifier(api["station_code_field"]),
+                    tbl=psql.Identifier(api["stations_table"]),
+                ))
                 station_codes = [row[0] for row in cur.fetchall()]
         
         context.log.info(f"  📍 Found {len(station_codes):,} stations in database")

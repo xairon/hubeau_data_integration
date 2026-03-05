@@ -18,7 +18,7 @@ services:
       timeout: 3s
       retries: 20
       start_period: 30s
-    mem_limit: 2G
+    mem_limit: 1G
     restart: unless-stopped
 
   # Hub'Eau database (PostGIS + TimescaleDB)
@@ -31,7 +31,7 @@ services:
       POSTGRES_DB: ${PG_DB:-postgres}
       POSTGRES_USER: ${PG_USER:-postgres}
     volumes:
-      - postgres_data:/home/postgresql/pgdata
+      - postgres_data:/home/postgres/pgdata
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "49502:5432" # PostgreSQL - fixed port
@@ -41,7 +41,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    mem_limit: 12G
+    shm_size: 5g  # requis pour shared_buffers=4GB (défaut Docker=64MB → crash)
+    mem_limit: 48G  # plafond burst (baseline ~4GB idle, pic ~20GB pendant dbt)
     restart: unless-stopped
 
   # PostgreSQL Performance Tuning (via Patroni REST API)
@@ -52,6 +53,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${PG_USER:-postgres}
+      PGPASSWORD: ${PG_PASSWORD:-REDACTED}
+      PGDATABASE: ${PG_DB:-postgres}
     volumes:
       - ./docker/postgres/apply-tuning.py:/app/apply-tuning.py:ro
     command: ["python", "/app/apply-tuning.py"]
@@ -91,8 +98,13 @@ services:
       DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD:-REDACTED}
       DESTINATION__POSTGRES__CREDENTIALS__HOST: ${PG_HOST:-postgres}
       DESTINATION__POSTGRES__CREDENTIALS__PORT: ${PG_PORT:-5432}
+      # ERA5 Copernicus CDS API key
+      COPERNICUS_API_KEY: ${COPERNICUS_API_KEY:-}
       # Force dbt parse on load to ensure manifest is fresh (fixes KeyError on tests)
       DAGSTER_DBT_PARSE_PROJECT_ON_LOAD: "1"
+      # Scheduling: sensors drive dbt chain, schedules drive Bronze ingestion
+      DAGSTER_ENABLE_SCHEDULES: ${DAGSTER_ENABLE_SCHEDULES:-true}
+      DAGSTER_ENABLE_SENSORS: ${DAGSTER_ENABLE_SENSORS:-true}
     volumes:
       # Hot reload: mount source code
       - ./src:/app/src
@@ -110,7 +122,7 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
-    mem_limit: 8G
+    mem_limit: 8G  # dbt 12 threads + streaming runs ~4G peak
     restart: unless-stopped
 
   # Dagster Web UI
@@ -182,13 +194,15 @@ services:
       PG_USER: ${PG_USER:-postgres}
       PG_PASSWORD: ${PG_PASSWORD:-REDACTED}
       HUBEAU_SCHEMA_DIR: /app/scripts/schema
+      DAGSTER_ENABLE_SCHEDULES: ${DAGSTER_ENABLE_SCHEDULES:-true}
+      DAGSTER_ENABLE_SENSORS: ${DAGSTER_ENABLE_SENSORS:-true}
     volumes:
       - ./dagster_home:/app/dagster_home
       - ./configs:/app/configs:ro
       - ./scripts:/app/scripts:ro
     command: [ "dagster-daemon", "run" ]
     healthcheck:
-      test: [ "CMD-SHELL", "dagster-daemon health-check || exit 1" ]
+      test: [ "CMD-SHELL", "dagster-daemon liveness-check || exit 1" ]
       interval: 30s
       timeout: 10s
       start_period: 60s
@@ -198,14 +212,16 @@ services:
 
   # Adminer - Database Management UI
   adminer:
-    image: adminer:latest
+    image: adminer:4.8.1
     container_name: brgm-adminer
     restart: unless-stopped
     depends_on:
       - postgres
     ports:
       - "49501:8080" # Adminer UI
-    mem_limit: 512M
+    volumes:
+      - ./docker/adminer/adminer.css:/var/www/html/adminer.css:ro
+    mem_limit: 256M
 
   # Redis - Cache for Superset
   redis:
@@ -218,7 +234,7 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
-    mem_limit: 512M
+    mem_limit: 256M
 
   # CloudBeaver - Web SQL Client
   cloudbeaver:
@@ -233,7 +249,7 @@ services:
       - cloudbeaver_data:/opt/cloudbeaver/workspace
       # Mount initial configuration to workspace (auto-configure)
       - ./docker/cloudbeaver/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/data-sources.json
-    mem_limit: 2G
+    mem_limit: 1G  # CloudBeaver idles at ~273 MB
     restart: unless-stopped
 
   # ============================================================================
@@ -251,7 +267,7 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
-    mem_limit: 1G
+    mem_limit: 2G
     restart: unless-stopped
 
   # Grafana - Dashboards & Visualization
@@ -293,6 +309,8 @@ services:
     volumes:
       - /:/rootfs:ro
       - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /var/run:/var/run:ro
     expose:
       - "8080"
     mem_limit: 512M
@@ -339,7 +357,7 @@ services:
     ports:
       - "49504:8088"
     entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
-    mem_limit: 4G
+    mem_limit: 1G  # Superset idles at ~115 MB, 4G was excessive
     restart: unless-stopped
 
 volumes:

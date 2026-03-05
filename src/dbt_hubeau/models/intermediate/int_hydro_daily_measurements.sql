@@ -4,7 +4,7 @@
     unique_key = ['code_station', 'date_obs_elab', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     incremental_predicates = [
-      "DBT_INTERNAL_DEST.date_obs_elab >= CURRENT_DATE - INTERVAL '30 days'"
+      time_range_delete_predicate('date_obs_elab', '30 days')
     ],
     indexes = [
       {'columns': ['code_site']},
@@ -13,10 +13,8 @@
     ],
     post_hook = [
       "{{ add_primary_key(['code_station', 'date_obs_elab', 'grandeur_hydro_elab']) }}",
-      "{{ convert_to_hypertable('date_obs_elab', '1 year') }}",
       "{{ add_foreign_key(['code_station'], 'stg_hydrometry_stations', ['code_station']) }}",
-      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}",
-      "{{ enable_compression(segment_by=['code_station', 'grandeur_hydro_elab'], order_by='date_obs_elab DESC', compress_after='365 days') }}"
+      "{{ add_foreign_key(['code_site'], 'stg_hydrometry_sites', ['code_site']) }}"
     ]
   )
 }}

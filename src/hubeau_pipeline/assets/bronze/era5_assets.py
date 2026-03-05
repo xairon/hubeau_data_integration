@@ -117,7 +117,9 @@ def _create_timeseries_table(conn):
                 """)
         except Exception as e:
             # Non-blocking: standard Postgres fallback
-            pass
+            logging.getLogger(__name__).warning(
+                "TimescaleDB setup skipped (non-blocking): %s", e
+            )
 
         conn.commit()
 
@@ -155,11 +157,11 @@ def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) 
                 """,
                 values
             )
-            conn.commit()
             rows_inserted += len(batch)
             if rows_inserted % 100000 == 0 or rows_inserted == total_rows:
                 context.log.info(f"  💾 {rows_inserted:,}/{total_rows:,} rows inserted ({rows_inserted/total_rows*100:.1f}%)")
 
+    conn.commit()
     context.log.info(f"✅ All {rows_inserted:,} rows committed to database")
     return rows_inserted
 
@@ -204,7 +206,10 @@ def process_era5_range_to_timeseries(
         with open(config_path) as f:
             config = yaml.safe_load(f)
 
-        cds_api_key = config['credentials'].get('cds_api_key') or os.getenv('COPERNICUS_API_KEY')
+        cds_api_key = config['credentials'].get('cds_api_key')
+        if not cds_api_key:
+            cds_api_key_env = config['credentials'].get('cds_api_key_env', 'COPERNICUS_API_KEY')
+            cds_api_key = os.getenv(cds_api_key_env)
         
         if not cds_api_key:
             raise ValueError(
@@ -212,7 +217,7 @@ def process_era5_range_to_timeseries(
                 "or configure 'cds_api_key' in configs/era5/era5_france_meteo.yml."
             )
 
-        client = cdsapi.Client(url=config['credentials']['cds_api_url'], key=cds_api_key, verify=False)
+        client = cdsapi.Client(url=config['credentials']['cds_api_url'], key=cds_api_key)
         
         # Build request - FIXED: proper enumeration of years and months
         # Generate all years in range

@@ -4,6 +4,7 @@ Source DLT pour Hub'Eau API - Bronze Layer
 import dlt
 import csv
 import logging
+import math
 import time
 import random
 from io import StringIO
@@ -16,6 +17,41 @@ logger = logging.getLogger(__name__)
 # CSV STREAMING PARSER
 # ==============================================================================
 
+# Known numeric columns in Bronze tables - coerce from CSV string to Python type.
+# Without this, DLT infers all CSV columns as text after a schema cache reset
+# (e.g. container rebuild), causing INSERT type mismatches against existing tables.
+_NUMERIC_COLUMNS: Dict[str, type] = {
+    # piezometry_chroniques_raw
+    'timestamp_mesure': int,
+    'niveau_nappe_eau': float,
+    'profondeur_nappe': float,
+    # hydrometry_obs_elab_raw
+    'resultat_obs_elab': float,
+    'longitude': float,
+    'latitude': float,
+    # piezometry_stations_raw (coordinates)
+    'x': float,
+    'y': float,
+    'altitude_station': float,
+}
+
+
+def _coerce_numeric(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce known numeric columns from CSV string to Python int/float.
+
+    Invalid values (non-numeric strings like 'NaN', 'null') become None
+    so DLT inserts NULL instead of failing on type mismatch.
+    """
+    for col, type_fn in _NUMERIC_COLUMNS.items():
+        if col in record and record[col] is not None:
+            try:
+                val = type_fn(record[col])
+                record[col] = None if (isinstance(val, float) and math.isnan(val)) else val
+            except (ValueError, TypeError):
+                record[col] = None
+    return record
+
+
 def parse_csv_stream(text: str, delimiter: str = ';') -> Iterator[Dict[str, Any]]:
     if not text or not text.strip():
         return
@@ -27,7 +63,7 @@ def parse_csv_stream(text: str, delimiter: str = ';') -> Iterator[Dict[str, Any]
     reader = csv.DictReader(StringIO(text), delimiter=delimiter)
     for row in reader:
         normalized = {k.lower().strip(): (v if v != '' else None) for k, v in row.items()}
-        yield normalized
+        yield _coerce_numeric(normalized)
 
 # ==============================================================================
 # PAGINATION & HELPERS

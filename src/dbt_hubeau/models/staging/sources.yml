@@ -22,7 +22,7 @@ sources:
         freshness:
           warn_after: {count: 3, period: day}
           error_after: {count: 7, period: day}
-        loaded_at_field: "date_mesure::timestamp"
+        loaded_at_field: "date_mesure"
       - name: hydrometry_sites_raw
         description: Sites hydrométriques bruts
         freshness: null  # Static reference data
@@ -34,7 +34,7 @@ sources:
         freshness:
           warn_after: {count: 3, period: day}
           error_after: {count: 7, period: day}
-        loaded_at_field: "date_obs_elab::timestamp"
+        loaded_at_field: "date_obs_elab"
       # Référentiel TME (entités hydrogéologiques)
       - name: tme_entites_hydrogeo
         description: Attributs TME (niveau, etat, nature, milieu, theme, origine) depuis TME.csv local ou ZIP national

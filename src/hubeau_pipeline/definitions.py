@@ -11,17 +11,13 @@ from .io.io_managers import noop_io_manager
 from .assets.dbt_assets import dbt_resource
 from .schedules import all_schedules
 from .sensors import all_sensors
-from .utils import env_true
-
-
-ENABLE_SENSORS = env_true("DAGSTER_ENABLE_SENSORS", "false")
 
 
 defs = Definitions(
     assets=all_assets,
     jobs=all_jobs,
     schedules=all_schedules,
-    sensors=all_sensors if ENABLE_SENSORS else None,
+    sensors=all_sensors,
     resources={
         **RESOURCES, 
         "noop_io_manager": noop_io_manager,

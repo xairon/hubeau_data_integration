@@ -58,7 +58,7 @@ deduplicated AS (
         {{ cast_silver_text('type_contexte_loi_stat_site') }} AS type_contexte_loi_stat_site,
         {{ cast_silver_text('type_loi_site') }} AS type_loi_site
     FROM source
-    ORDER BY code_site
+    ORDER BY code_site, {{ cast_silver_timestamp('date_maj_site') }} DESC NULLS LAST
 )
 
 SELECT 

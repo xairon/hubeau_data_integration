@@ -2,7 +2,7 @@
   config(
     materialized = 'incremental',
     unique_key = 'code_station',
-    incremental_strategy = 'append',
+    incremental_strategy = 'delete+insert',
     indexes=[
       {'columns': ['code_site']},
       {'columns': ['era5_latitude', 'era5_longitude']},

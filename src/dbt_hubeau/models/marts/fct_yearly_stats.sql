@@ -5,12 +5,11 @@
     incremental_strategy = 'delete+insert',
     indexes = [
       {'columns': ['code_bss']},
-      {'columns': ['annee'], 'type': 'brin'},
+      {'columns': ['annee']},
       {'columns': ['code_departement']}
     ],
     post_hook = [
       "{{ add_primary_key(['code_bss', 'annee']) }}",
-      "{{ convert_to_hypertable('annee', '10') }}",
       "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
@@ -63,8 +62,8 @@ yearly_agg AS (
         SUM(precipitation_totale) AS precipitation_totale_annuelle,
         AVG(evaporation_moyenne) AS evaporation_moyenne_annuelle,
         
-        -- Bilan hydrique simplifié (P - ETP), pondéré par le nombre réel de jours mesurés par mois
-        SUM(precipitation_totale) - SUM(evaporation_moyenne * nb_jours_mesures) AS bilan_hydrique_annuel,
+        -- Bilan hydrique simplifié (P - ETP), pondéré par le nombre de jours calendaires du mois
+        SUM(precipitation_totale) - SUM(evaporation_moyenne * EXTRACT(DAY FROM (DATE_TRUNC('month', mois) + INTERVAL '1 month' - INTERVAL '1 day'))) AS bilan_hydrique_annuel,
         
         -- Comptage
         SUM(nb_jours_mesures) AS nb_jours_mesures_annuel,

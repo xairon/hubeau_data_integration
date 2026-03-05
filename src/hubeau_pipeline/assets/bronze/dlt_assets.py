@@ -31,6 +31,25 @@ from hubeau_pipeline.utils import extract_dlt_row_count
 
 
 # ============================================================================
+# DLT COLUMN HINTS - Force correct types for Bronze tables.
+# Without these, DLT infers 'text' for all CSV columns and generates
+# INSERT SQL with varchar values, which fails against existing typed columns.
+# ============================================================================
+
+_PIEZO_CHRONIQUES_COLUMNS: Dict[str, Any] = {
+    "timestamp_mesure": {"data_type": "bigint"},
+    "niveau_nappe_eau": {"data_type": "double"},
+    "profondeur_nappe": {"data_type": "double"},
+}
+
+_HYDRO_OBS_ELAB_COLUMNS: Dict[str, Any] = {
+    "resultat_obs_elab": {"data_type": "double"},
+    "longitude": {"data_type": "double"},
+    "latitude": {"data_type": "double"},
+}
+
+
+# ============================================================================
 # PARTITIONS
 # ============================================================================
 
@@ -186,14 +205,16 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                         SELECT COUNT(*)
                         FROM {}.{}
                         WHERE {} IS NOT NULL
-                          AND {}::text LIKE %s
+                          AND {} >= %s::date
+                          AND {} < (%s::date + INTERVAL '1 year')
                     """).format(
                         sql.Identifier(schema),
                         sql.Identifier(table_name),
                         sql.Identifier(date_column),
+                        sql.Identifier(date_column),
                         sql.Identifier(date_column)
                     ),
-                    (f"{year}-%",)
+                    (f"{year}-01-01", f"{year}-01-01")
                 )
                 
                 existing_count = cur.fetchone()[0]
@@ -208,14 +229,16 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                     sql.SQL("""
                         DELETE FROM {}.{}
                         WHERE {} IS NOT NULL
-                          AND {}::text LIKE %s
+                          AND {} >= %s::date
+                          AND {} < (%s::date + INTERVAL '1 year')
                     """).format(
                         sql.Identifier(schema),
                         sql.Identifier(table_name),
                         sql.Identifier(date_column),
+                        sql.Identifier(date_column),
                         sql.Identifier(date_column)
                     ),
-                    (f"{year}-%",)
+                    (f"{year}-01-01", f"{year}-01-01")
                 )
                 
                 deleted_count = cur.rowcount
@@ -236,6 +259,62 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
             f"Partition cleanup failed for {schema}.{table_name} year {year}. "
             f"Cannot proceed with load to avoid data corruption. Error: {e}"
         ) from e
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _clean_recent_data(table_name: str, schema: str, days_back: int, date_column: str, logger=None) -> int:
+    """
+    Nettoie les données récentes (N derniers jours) avant rechargement daily.
+    Permet d'utiliser write_disposition='append' sans doublons.
+    """
+    log = logger.info if logger else print
+    conn = None
+
+    try:
+        conn = psycopg2.connect(
+            host=os.environ.get("PG_HOST", "postgres"),
+            port=int(os.environ.get("PG_PORT", "5432")),
+            database=os.environ.get("PG_DB", "postgres"),
+            user=os.environ.get("PG_USER", "postgres"),
+            password=os.environ.get("PG_PASSWORD"),
+        )
+
+        with conn:
+            with conn.cursor() as cur:
+                # Vérifier si la table existe
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = %s AND table_name = %s
+                    )
+                """, (schema, table_name))
+
+                if not cur.fetchone()[0]:
+                    log(f"📋 Table {schema}.{table_name} n'existe pas encore")
+                    return 0
+
+                cur.execute(
+                    sql.SQL("""
+                        DELETE FROM {}.{}
+                        WHERE {} >= CURRENT_DATE - %s::integer
+                    """).format(
+                        sql.Identifier(schema),
+                        sql.Identifier(table_name),
+                        sql.Identifier(date_column),
+                    ),
+                    (days_back,)
+                )
+                deleted = cur.rowcount
+                conn.commit()
+                log(f"🧹 [DAILY] {deleted:,} lignes supprimées ({days_back}j) dans {schema}.{table_name}")
+                return deleted
+
+    except Exception as e:
+        if logger:
+            logger.error(f"❌ Erreur nettoyage daily {schema}.{table_name}: {e}")
+        raise
     finally:
         if conn is not None:
             conn.close()
@@ -296,11 +375,9 @@ def create_piezometry_chroniques_resource(year: str, dagster_context=None):
     
     @dlt.resource(
         name="piezometry_chroniques_raw",
-        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
-        primary_key=["code_bss", "date_mesure"],  # Clé composite : une mesure par station/date
-        # Note: même si l'API retourne plusieurs mesures par station/date (différents mode_obtention),
-        # dbt ne conserve qu'une seule mesure (celle avec niveau_nappe_eau le plus élevé)
-        parallelized=False
+        write_disposition="append",  # Append: _clean_partition_data gère la dédup avant chargement
+        parallelized=False,
+        columns=_PIEZO_CHRONIQUES_COLUMNS,
     )
     def _resource():
         # 1. LAZY LOAD: Fetch stations NOW (Runtime), inside the generator
@@ -367,18 +444,18 @@ def create_hydrometry_obs_elab_resource(year: str, dagster_context=None):
     Matches the pattern used in create_piezometry_chroniques_resource.
     """
     config = _load_config("hydrometry_obs_elab")
-    
+
     @dlt.resource(
         name="hydrometry_obs_elab_raw",
-        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
-        primary_key=["code_site", "date_obs_elab", "grandeur_hydro_elab"],  # Clé composite unique
-        parallelized=False
+        write_disposition="append",  # Append: _clean_partition_data gère la dédup avant chargement
+        parallelized=False,
+        columns=_HYDRO_OBS_ELAB_COLUMNS,
     )
     def _resource():
         # Lazy load station codes from hydrometry_stations_raw
         logger = dagster_context.log if dagster_context else None
         log = logger.info if logger else print
-        
+
         log("🔄 Démarrage du générateur de ressource DLT (hydrometry obs_elab)...")
 
         # Fetch site codes from hydrometry_sites_raw.code_site
@@ -529,6 +606,7 @@ def piezometry_chroniques_raw(context: AssetExecutionContext) -> Output[Dict[str
     compute_kind="dlt",
     group_name="hydrometry_chroniques",
     partitions_def=MODE_PARTITIONS,
+    deps=["hydrometry_sites_raw"],
 )
 def hydrometry_obs_elab_raw(context: AssetExecutionContext) -> Output[Dict[str, Any]]:
     """
@@ -590,19 +668,19 @@ def create_piezometry_chroniques_daily_resource(days_back: int = 7, dagster_cont
     
     @dlt.resource(
         name="piezometry_chroniques_raw",
-        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
-        primary_key=["code_bss", "date_mesure"],  # Clé composite unique
-        parallelized=False
+        write_disposition="append",  # Append: nettoyage des N derniers jours fait en amont
+        parallelized=False,
+        columns=_PIEZO_CHRONIQUES_COLUMNS,
     )
     def _resource():
         logger = dagster_context.log if dagster_context else None
         log = logger.info if logger else print
 
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
-        
+
         station_codes = _fetch_distinct_column_values(
-            "piezometry_stations_raw", 
-            "code_bss", 
+            "piezometry_stations_raw",
+            "code_bss",
             logger=logger
         )
         
@@ -631,16 +709,16 @@ def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=Non
     
     @dlt.resource(
         name="hydrometry_obs_elab_raw",
-        write_disposition="merge",  # UPSERT pour éviter doublons sur retry
-        primary_key=["code_site", "date_obs_elab", "grandeur_hydro_elab"],  # Clé composite unique
-        parallelized=False
+        write_disposition="append",  # Append: nettoyage des N derniers jours fait en amont
+        parallelized=False,
+        columns=_HYDRO_OBS_ELAB_COLUMNS,
     )
     def _resource():
         logger = dagster_context.log if dagster_context else None
         log = logger.info if logger else print
 
         log(f"🔄 [DAILY] Démarrage du chargement incrémental ({days_back} jours)...")
-        
+
         station_codes = _fetch_distinct_column_values(
             "hydrometry_sites_raw",
             "code_site",
@@ -674,7 +752,16 @@ def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Di
     Used by scheduled daily pipeline.
     """
     context.log.info("📅 [DAILY] Chargement incrémental piézométrie")
-    
+
+    # Nettoyer les données récentes avant rechargement (évite doublons avec append)
+    _clean_recent_data(
+        table_name="piezometry_chroniques_raw",
+        schema="bronze",
+        days_back=7,
+        date_column="date_mesure",
+        logger=context.log
+    )
+
     pipeline = _create_pipeline("hubeau_piezometry_chroniques_daily")
     resource = create_piezometry_chroniques_daily_resource(days_back=7, dagster_context=context)
     
@@ -708,7 +795,16 @@ def hydrometry_obs_daily_raw(context: AssetExecutionContext) -> Output[Dict[str,
     Used by scheduled daily pipeline.
     """
     context.log.info("📅 [DAILY] Chargement incrémental hydrométrie")
-    
+
+    # Nettoyer les données récentes avant rechargement (évite doublons avec append)
+    _clean_recent_data(
+        table_name="hydrometry_obs_elab_raw",
+        schema="bronze",
+        days_back=7,
+        date_column="date_obs_elab",
+        logger=context.log
+    )
+
     pipeline = _create_pipeline("hubeau_hydrometry_obs_daily")
     resource = create_hydrometry_obs_daily_resource(days_back=7, dagster_context=context)
     

@@ -4,355 +4,317 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hub'Eau Data Pipeline is a production-grade data warehouse for French hydrological data, following a **Medallion Architecture** (Bronze → Silver → Gold). It orchestrates data ingestion from Hub'Eau APIs and ERA5 climate data, transforms them using dbt, and serves analytics via Apache Superset.
+Hub'Eau Data Pipeline: a production data warehouse for French hydrological data using a **Medallion Architecture** (Bronze → Silver → Gold). Ingests data from Hub'Eau APIs and ERA5 climate reanalysis, transforms via dbt, serves analytics via Apache Superset.
 
-**Key Technologies**: Dagster (orchestration), DLT (ingestion), dbt (transformation), PostgreSQL 16 + TimescaleDB + PostGIS
+**Stack**: Dagster (orchestration), DLT (ingestion), dbt 1.7.0 (transformation), PostgreSQL 16 + TimescaleDB + PostGIS, Docker Compose
 
 ## Essential Commands
 
-### 🚨 FIRST TIME SETUP - CRÉER LES VOLUMES (CRITIQUE)
+### Stack Operations
 ```bash
-# ⚠️ OBLIGATOIRE avant le premier "docker compose up"
-# Les volumes externes protègent les données contre suppression accidentelle
-
-# Linux/Mac:
+# First time: create external volumes (required before first docker compose up)
 bash scripts/init_volumes.sh
 
-# Windows:
-scripts\init_volumes.bat
-
-# OU manuellement:
-docker volume create brgm_postgres_data
-docker volume create brgm_dagster_pg_data
-docker volume create brgm_cloudbeaver_data
-```
-
-**IMPORTANT**: Les volumes sont maintenant **externes** - ils NE SERONT PAS supprimés par `docker compose down -v`. C'est voulu pour protéger vos données.
-
-### Docker Operations
-```bash
-# Start the entire stack (volumes doivent exister!)
+# Start everything
 docker compose up -d --build
 
-# Check service status
-docker compose ps
-
-# View logs (most useful for debugging)
-docker compose logs -f dlt_worker
-docker compose logs -f dagster_webserver
-
-# Restart a service after code changes
+# Restart worker after Python code changes (dbt model changes are auto-detected)
 docker compose restart dlt_worker
 
-# Complete rebuild (when dependencies change)
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-
-# Arrêt propre (SAFE - ne supprime PAS les volumes externes)
-docker compose down
-
-# ⚠️ Pour supprimer les données (DANGEREUX):
-docker volume rm brgm_postgres_data brgm_dagster_pg_data brgm_cloudbeaver_data
+# Full rebuild (when dependencies change)
+docker compose down && docker compose build --no-cache && docker compose up -d
 ```
 
-### Database Access
+### dbt (run inside worker container)
 ```bash
-# Connect to PostgreSQL
-docker exec -it brgm-postgres psql -U postgres -d postgres
+docker exec brgm-dlt-worker dbt run                          # Full pipeline
+docker exec brgm-dlt-worker dbt run --select model_name      # Single model
+docker exec brgm-dlt-worker dbt run --select model_name+     # Model + downstream
+docker exec brgm-dlt-worker dbt test                          # Data quality tests
+docker exec brgm-dlt-worker dbt test --select model_name      # Test single model
+docker exec brgm-dlt-worker dbt source freshness              # Check source freshness
+docker exec brgm-dlt-worker dbt run --full-refresh --select model_name  # Force rebuild
+docker exec brgm-dlt-worker dbt docs generate                 # Generate documentation
 
-# Inside psql - inspect tables by schema
-\dt bronze.*    # Raw data from APIs
-\dt silver.*    # Cleaned data
-\dt gold.*      # Analytics tables
-
-# Count rows across all schemas
-SELECT schemaname, tablename, n_live_tup AS rows
-FROM pg_stat_user_tables
-WHERE schemaname IN ('bronze', 'silver', 'gold')
-ORDER BY n_live_tup DESC;
-```
-
-### dbt Commands (inside worker container)
-```bash
-# Run full transformation pipeline
-docker exec brgm-dlt-worker dbt run
-
-# Run specific models
-docker exec brgm-dlt-worker dbt run --select stg_piezo_chroniques
-docker exec brgm-dlt-worker dbt run --select int_daily_measurements+
-
-# Run data quality tests
-docker exec brgm-dlt-worker dbt test
-
-# Check source freshness
-docker exec brgm-dlt-worker dbt source freshness
-
-# Generate documentation (catalog + manifest)
-docker exec brgm-dlt-worker dbt docs generate
-
-# Serve documentation locally (inside container)
-docker exec brgm-dlt-worker dbt docs serve --port 8080
-
-# Force rebuild of incremental models
+# Force rebuild of incremental ERA5 mapping (needed after TME data changes)
 docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'
 ```
 
-**dbt Documentation**: Auto-généré hebdomadairement via le job `dbt_docs_job` (schedule: dimanche 5h UTC)
-
-### Dagster Operations
-- **Web UI**: http://localhost:49500
-- **Jobs** are launched via the Dagster UI (Launchpad tab)
-- **Schedules** are configured in `src/hubeau_pipeline/schedules.py` and controlled by `DAGSTER_ENABLE_SCHEDULES` env var
-
-**Available Jobs**:
-- `full_bootstrap_job`: Complete database population (TME → stations → chroniques → ERA5 → dbt)
-- `reference_data_bronze_job`: Load TME reference data only
-
-**dbt Jobs (4-Stage Pipeline)**:
-```
-Stage 1: dbt_shared_staging_job     → ERA5 timeseries + grid points (prerequisite)
-Stage 2: dbt_piezo_pipeline_job     → Piezometry domain (can run in PARALLEL)
-         dbt_hydro_pipeline_job     → Hydrometry domain (can run in PARALLEL)
-Stage 3: dbt_shared_dimensions_job  → dim_date, dim_geography (run LAST)
-```
-- `dbt_silver_gold_pipeline_job`: Run ALL dbt models (for bootstrap/full refresh)
-- `dbt_test_job`: Run dbt data quality tests
-- `dbt_docs_job`: Generate dbt documentation (hebdomadaire: dimanche 5h UTC)
-- `dbt_quality_job`: Combined freshness + tests
-
-**Daily Bronze Jobs**: `daily_piezometry_bronze_job`, `daily_hydrometry_bronze_job`, `era5_weekly_job`
-
-### Initial Data Load
+### Database
 ```bash
-# Complete bootstrap (reference data → stations → chroniques → ERA5 → dbt)
-# Launch the "full_bootstrap_job" from Dagster UI
-# This is a sequential job that populates the entire database from scratch
+docker exec -it brgm-postgres psql -U postgres -d postgres
+# \dt bronze.*   \dt silver.*   \dt gold.*
 ```
 
-**Important**: The `full_bootstrap_job` orchestrates the complete pipeline in the correct order. Don't run individual partitions manually unless you understand the dependencies.
-
-## Architecture Overview
-
-### Medallion Layers
-
-**Bronze (Raw)**: DLT ingests data from APIs into `*_raw` tables
-- Piezometry: `piezometry_stations_raw`, `piezometry_chroniques_raw`
-- Hydrometry: `hydrometry_sites_raw`, `hydrometry_stations_raw`, `hydrometry_obs_elab_raw`
-- Climate: `era5_france_timeseries`
-- Reference: `tme_entites_hydrogeo`, `bdlisa_entites_raw`
-
-**Silver (Clean)**: dbt staging models (`stg_*`) clean and type-cast data
-- 7 staging models in `src/dbt_hubeau/models/staging/`
-- Data validation via dbt tests
-- Invalid records moved to `silver_rejects` schema
-
-**Gold (Analytics)**: dbt intermediate + marts create analytics-ready tables
-- **Intermediate** (7 models): Daily aggregations, spatial joins, ERA5 mappings
-- **Marts** (14 models): Dimension tables (`dim_*`), fact tables (`fct_*`), aggregations (`agg_*`)
-- **Main Fact Tables**: `hubeau_daily_chroniques` (piezometry + weather), `hydro_daily_chroniques` (hydrometry + weather)
-
-### Key Asset Dependencies
-
-```
-Bronze (DLT assets)
-  ↓
-Silver (dbt staging models)
-  ↓
-Gold (dbt intermediate models)
-  ↓
-Gold (dbt marts models)
+### Linting & Formatting
+```bash
+# Configured in pyproject.toml: line-length=120, target=py311
+ruff check src/                  # Lint (pycodestyle, pyflakes, isort, bugbear)
+ruff check --fix src/            # Lint + auto-fix
+black src/                       # Format
+mypy src/                        # Type check (lenient: ignore_missing_imports=true)
 ```
 
-The pipeline has automatic dependency resolution. When Bronze data changes, downstream dbt models can be triggered via sensors or schedules.
+### Testing
+There are **no Python unit tests**. Data quality is managed entirely through dbt tests (not_null, unique, relationships, accepted_range) defined in `schema.yml` files. Run via `docker exec brgm-dlt-worker dbt test`.
+
+pytest config exists in `pyproject.toml` (testpaths=`tests/`) but no test files are present.
+
+## Architecture
+
+### How Dagster Definitions Wire Together
+
+Entry point: `src/hubeau_pipeline/__init__.py` → exports `defs` from `definitions.py`.
+
+`definitions.py` assembles a single `Definitions()` object:
+- **assets** = `all_assets` (14 bronze DLT assets + 1 `hubeau_dbt_assets` which auto-discovers all dbt models from the manifest)
+- **jobs** = `all_jobs` (22 jobs from `jobs/__init__.py`)
+- **schedules** = `all_schedules` (9 schedules, controlled by `DAGSTER_ENABLE_SCHEDULES` env var)
+- **sensors** = `all_sensors` (3 sensors, controlled by `DAGSTER_ENABLE_SENSORS` env var)
+- **resources** = `pg` (PostgreSQLResource), `dlt` (DagsterDltResource), `dbt` (DbtCliResource), `noop_io_manager` (NoOpIOManager for DLT assets that write directly to PostgreSQL)
+
+### Docker Architecture
+
+Two custom images, communicating via GRPC (defined in `dagster_home/workspace.yaml`):
+
+- **Worker** (`docker/worker/Dockerfile`): ~2GB, includes GDAL/GEOS, runs `dagster code-server` on port 4000. Uses `uv` package manager for fast builds. Generates dbt manifest at build time via `dbt deps && dbt parse`. Source code hot-reloaded via volume mounts.
+- **Orchestrator** (`docker/orchestrator/Dockerfile`): ~500MB, lightweight, runs `dagster-webserver` + `dagster-daemon`. No source code, connects to worker via GRPC.
+
+### Medallion Layers & dbt Schema Mapping
+
+| Layer | dbt folder | PostgreSQL schema | Materialization |
+|-------|-----------|-------------------|-----------------|
+| Bronze | (DLT, not dbt) | `bronze` | DLT MERGE |
+| Silver | `staging/` (7 models) | `silver` | table |
+| Rejects | `rejects/` (3 models) | `silver_rejects` | table |
+| Gold (intermediate) | `intermediate/` (7 models) | `gold` | table (some incremental) |
+| Gold (marts) | `marts/` (14 models) | `gold` | table |
+
+Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_project.yml` model configs.
+
+### Data Domains
+
+- **Piezometry**: Groundwater level stations + chroniques (year-partitioned 1967-present)
+- **Hydrometry**: River flow sites → stations → observations (year-partitioned 2000-present)
+- **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid
+- **Reference**: TME hydrogeo entities, SANDRE nomenclatures, geographic referentials (regions, departments, hydrological zones)
+
+### Pipeline Flow
+
+```
+Bronze (DLT assets) → Silver (dbt staging/) → Gold (dbt intermediate/ → marts/)
+```
+
+**Main fact tables**: `hubeau_daily_chroniques` (piezometry + ERA5 weather), `hydro_daily_chroniques` (hydrometry + ERA5 weather)
+
+The spatial join between stations and ERA5 grid is done in `int_station_era5_mapping` (KNN nearest grid point). This model is incremental with special rebuild logic via `recompute_station_era5_mapping` var.
+
+### 4-Stage Daily Schedule (UTC)
+
+```
+3h00  ERA5 Smart Update (Bronze)
+4h00  Hub'Eau Bronze: piezometry + hydrometry (parallel)
+5h00  dbt Stage 1: shared staging (ERA5 timeseries + grid points)
+6h30  dbt Stage 2: domain pipelines (piezo + hydro, parallel)
+8h00  dbt Stage 3: shared dimensions (dim_date, dim_geography)
+```
+
+Monthly (1st, 2h00): Reference data refresh. Weekly (Sunday, 5h00): dbt docs generation.
+
+Schedules are time-based with buffer gaps. Sensors (`sensors.py`) provide event-driven alternative: `bronze_to_silver_sensor` triggers dbt when Bronze chroniques materialize (5 min cooldown).
+
+### Bootstrap
+
+`full_bootstrap_job` orchestrates complete initial load: reference data → stations → chroniques (iterates year partitions) → ERA5 → dbt. Tracks state in `ops.bootstrap_state` table for restartability. Controlled by env vars: `BOOTSTRAP_PARTITIONS`, `BOOTSTRAP_FORCE_RERUN`, `BOOTSTRAP_CONTINUE_ON_ERROR`.
 
 ## Code Organization
 
-### Dagster Assets (`src/hubeau_pipeline/assets/`)
-- `bronze/dlt_assets.py` - Hub'Eau API ingestion definitions
-- `bronze/era5_assets.py` - ERA5 climate data ingestion
-- `bronze/tme_entites_assets.py` - TME reference data
-- `dbt_assets.py` - Bridges dbt models as Dagster assets
+### Key Directories
 
-### Dagster Jobs (`src/hubeau_pipeline/jobs/`)
-- `hubeau_jobs.py` - Station and chronique loading jobs (partitioned by year)
-- `era5_jobs.py` - Climate data loading jobs
-- `dbt_jobs.py` - Transformation pipeline jobs
-- `full_bootstrap_job.py` - **Sequential** job for complete initialization
-- `reference_data_jobs.py` - TME and BDLISA loading
+- `src/hubeau_pipeline/` - Dagster pipeline (Python)
+  - `assets/bronze/` - DLT ingestion assets (one file per data source)
+  - `assets/dbt_assets.py` - Bridges dbt models as Dagster assets via `@dbt_assets` decorator
+  - `jobs/` - 22 job definitions (bronze, dbt staged pipelines, bootstrap)
+  - `sources/` - DLT source clients: `hubeau_csv_source.py` (API pagination + retry), `era5_source.py` (CADS API + NetCDF)
+  - `schedules.py` - 9 cron schedules
+  - `sensors.py` - 3 event-driven sensors
+  - `resources.py` - PostgreSQLResource (Pydantic-based), DLT resource
+  - `io/io_managers.py` - NoOpIOManager for DLT (data goes to PostgreSQL, not filesystem)
+- `src/dbt_hubeau/` - dbt project
+  - `models/{staging,intermediate,marts,rejects}/` - SQL models with `schema.yml` tests
+  - `macros/` - `cast_silver.sql` (type helpers), `timescaledb.sql` (hypertable creation), `make_point.sql` (PostGIS geometry), `constraints.sql` (PK/FK), `generate_schema_name.sql`
+  - `profiles.yml` - PostgreSQL connection (env var templated)
+  - `packages.yml` - depends on `dbt_utils`
+- `configs/` - YAML configs for API endpoints (`hubeau/`), ERA5 parameters (`era5/`), BDLISA (`bdlisa/`)
+- `docker/` - Dockerfiles, init SQL, monitoring (Grafana dashboards, Prometheus), Superset config
+- `dagster_home/` - Dagster metadata, `workspace.yaml` (GRPC connection to worker)
 
-### DLT Sources (`src/hubeau_pipeline/sources/`)
-- `hubeau_csv_source.py` - Hub'Eau API pagination logic with retry mechanism
-- `era5_source.py` - Copernicus CDS downloads via new CADS API client
+### CI/CD
 
-### dbt Models (`src/dbt_hubeau/models/`)
-- `staging/` - Silver layer (7 models)
-- `intermediate/` - Gold layer transformations (7 models)
-- `marts/` - Final analytics tables (14 models)
-- `rejects/` - Data quality rejection tables
+GitLab CI (`.gitlab-ci.yml`): Generates dbt documentation and deploys to GitLab Pages on `main` branch pushes.
 
 ## Important Patterns
 
-### DLT Ingestion Pattern
-All DLT assets use:
-- **Cursor-based pagination** for large API responses
-- **Exponential backoff retry** (5 attempts) for 5xx errors
-- **Automatic deduplication** via MERGE strategy
-- **Year-based partitioning** for chroniques (1967-present for piezometry, 2000-present for hydrometry)
+### DLT Ingestion
+All DLT assets use cursor-based pagination, exponential backoff retry (5 attempts for 5xx), MERGE deduplication, and year-based partitioning for chroniques data.
 
-### dbt Materialization Strategy
-- **Staging models**: `materialized: table` (full refresh)
-- **Intermediate models**: `materialized: table` (some incremental)
-- **Marts**: `materialized: table` (optimized for query performance)
+### dbt Incremental Strategy
+Staging models use delete+insert with configurable lookback windows (default 7 days, set in `dbt_project.yml` vars). The `on-run-start` hooks in `dbt_project.yml` create indexes and configure TimescaleDB decompression settings.
 
-### TimescaleDB Hypertables
-- `bronze.piezometry_chroniques_raw` and `bronze.era5_france_timeseries` are hypertables partitioned by time
-- Compression policies achieve 90%+ space savings on historical data
-- Indexes are created via `on-run-start` hooks in `dbt_project.yml`
+### TimescaleDB
+`bronze.piezometry_chroniques_raw` and `bronze.era5_france_timeseries` are hypertables. Compression policies achieve 90%+ savings on data >90 days old. The `timescaledb.sql` macro handles hypertable creation.
 
-### Incremental Models
-`int_station_era5_mapping` is incremental and may need forced rebuild:
-```bash
-docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'
-```
-
-## Configuration Files
-
-### YAML Configs (`/configs/`)
-- `hubeau/piezometry_*.yml` - Piezometry API endpoint parameters
-- `hubeau/hydrometry_*.yml` - Hydrometry API endpoint parameters
-- `era5/era5_france_meteo.yml` - ERA5 download parameters (variables, grid, dates)
-
-### Environment Variables (`.env`)
-Key variables:
-- `PG_HOST`, `PG_PORT`, `PG_DB`, `PG_USER`, `PG_PASSWORD` - Main database credentials
-- `DAGSTER_PG_*` - Dagster metadata database credentials
-- `DAGSTER_ENABLE_SCHEDULES=true|false` - Enable automated schedules
-- `DAGSTER_ENABLE_SENSORS=true|false` - Enable event-driven sensors
-- `DAGSTER_DBT_PARSE_PROJECT_ON_LOAD=1` - Force dbt manifest parsing (dev only)
-- `BOOTSTRAP_PARTITIONS` - Filter partitions for `full_bootstrap_job` (e.g., `"piezometry_stations_job:*,piezometry_chroniques_job:2020,piezometry_chroniques_job:2021"`)
-- `BOOTSTRAP_FORCE_RERUN=true` - Rerun completed partitions
-- `BOOTSTRAP_CONTINUE_ON_ERROR=true` - Best-effort mode
-
-### Docker Architecture
-- **Worker Image** (`docker/worker/Dockerfile`): ~2GB, includes GDAL/GEOS for geospatial processing, runs DLT + dbt
-- **Orchestrator Image** (`docker/orchestrator/Dockerfile`): ~500MB, lightweight, UI + scheduling only
-- **GRPC Communication**: Orchestrator communicates with worker via GRPC (defined in `workspace.yaml`)
-
-## Common Issues
-
-### Missing TME Labels in Gold Tables
-**Symptom**: `libelle_eh` is NULL in `stations_piezo_carte` or `int_station_era5_mapping`
-
-**Cause**: Incremental model hasn't been rebuilt after TME data loaded
-
-**Fix**:
-```bash
-docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'
-```
-
-### Hub'Eau API 503 Errors
-**Symptom**: Job fails with `HTTPError 503`
-
-**Cause**: Hub'Eau API temporarily overloaded
-
-**Fix**: Wait 15-30 minutes and retry via Dagster UI
-
-### ERA5 CDS Timeouts
-**Symptom**: `TimeoutError` during ERA5 download
-
-**Fix**: Retry the job (has built-in exponential backoff). If persistent, check [CDS Status](https://cds.climate.copernicus.eu/)
-
-### Duplicates in Bronze Tables
-**Symptom**: More rows than expected after incremental load
-
-**Cause**: 7-day overlap window in daily jobs
-
-**Fix**: Silver layer automatically deduplicates. Run:
-```bash
-docker exec brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
-```
-
-### Worker Container Won't Start
-**Diagnosis**: Check logs with `docker compose logs dlt_worker`
-
-**Common Fixes**:
-- Port conflict: Change ports in `docker-compose.yml`
-- Volume permissions: `docker compose down -v` and restart
-- Stale image: `docker compose build --no-cache dlt_worker`
-
-## Development Workflow
-
-### Making Code Changes
-
-1. **Python code** (`src/hubeau_pipeline/`): Mounted as volume, changes require `docker compose restart dlt_worker`
-2. **dbt models** (`src/dbt_hubeau/models/`): Mounted as volume, auto-detected by Dagster
-3. **Config files** (`configs/`): Mounted as volume, changes apply immediately
-
-### Testing Changes
-
-```bash
-# Run dbt tests
-docker exec brgm-dlt-worker dbt test
-
-# Run specific model
-docker exec brgm-dlt-worker dbt run --select your_model_name
-
-# Test with fresh data
-docker exec brgm-dlt-worker dbt run --full-refresh --select your_model_name
-```
-
-### Adding a New dbt Model
-
-1. Create SQL file in `src/dbt_hubeau/models/{staging|intermediate|marts}/`
-2. Define materialization in `dbt_project.yml` (or use folder defaults)
-3. Run model: `docker exec brgm-dlt-worker dbt run --select your_model_name`
-4. Add tests in `schema.yml` or separate test file
-5. Run tests: `docker exec brgm-dlt-worker dbt test --select your_model_name`
-
-### Adding a New DLT Source
-
-1. Create YAML config in `configs/hubeau/` or `configs/era5/`
-2. Add asset definition in `src/hubeau_pipeline/assets/bronze/`
-3. Update `__init__.py` to export asset
-4. Rebuild worker: `docker compose restart dlt_worker`
-5. Asset appears in Dagster UI
-
-## Performance Considerations
-
-- **Bronze Layer**: Indexed on code_bss, date_mesure, coordinates (via `on-run-start` hooks)
-- **Silver Layer**: Additional indexes created by dbt post-hooks
-- **Gold Layer**: Materialized tables for fast queries
-- **TimescaleDB**: Hypertables partition chroniques data by time (monthly chunks)
-- **Compression**: Historical data (>90 days old) compressed at 90%+ ratio
-
-## Documentation
-
-- `docs/ARCHITECTURE.md` - Detailed system architecture
-- `docs/SCHEMA_BDD.md` - Database schema reference
-- `docs/CONFIGURATION.md` - Environment variables and settings
-- `docs/ERA5_DATA_STORAGE.md` - ERA5 data storage strategy
-- `docs/TIMESCALE_ET_INDEX.md` - TimescaleDB optimization details
-- `docs/BDLISA_INTEGRATION.md` - BDLISA and TME reference data
-- `docs/runbook.md` - Operational procedures and troubleshooting
-- `docs/SUPERSET.md` - Business Intelligence setup
+### Hot Reload
+- **Python code** (`src/hubeau_pipeline/`): Volume-mounted, requires `docker compose restart dlt_worker`
+- **dbt models** (`src/dbt_hubeau/models/`): Volume-mounted, auto-detected by Dagster (reload definitions in UI)
+- **Config files** (`configs/`): Volume-mounted, changes apply immediately
 
 ## Key Constraints
 
-- **Python 3.11+** required
-- **PostgreSQL 16** with PostGIS 3.4 and TimescaleDB extensions
-- **dbt version pinned to 1.7.0** (compatibility with Dagster integration)
-- **DLT version 0.4.12** (schema evolution features)
-- **GDAL/GEOS** required in worker for geospatial processing (`pyogrio`, `geopandas`)
+- Python 3.11+, dbt pinned to 1.7.0 (Dagster compatibility), DLT pinned to 0.4.12
+- Docker volumes are **external** (not deleted by `docker compose down -v`) - must be created first via `scripts/init_volumes.sh`
+- GDAL/GEOS required in worker for geospatial processing (`pyogrio`, `geopandas`)
+- The `timescale/timescaledb-ha:pg16` image uses Patroni - do NOT add `command:` overrides in docker-compose
 
 ## Access Points
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Dagster UI | http://localhost:49500 | Pipeline orchestration and monitoring |
-| Adminer | http://localhost:49501 | Lightweight PostgreSQL admin |
-| PostgreSQL | localhost:49502 | Direct database access |
+| Service | URL | Notes |
+|---------|-----|-------|
+| Dagster UI | http://localhost:49500 | Pipeline orchestration |
+| PostgreSQL | localhost:49502 | Direct DB access |
+| Adminer | http://localhost:49501 | Lightweight DB admin |
 | CloudBeaver | http://localhost:49503 | Advanced SQL client |
-| Superset | http://localhost:49504 | Business Intelligence dashboards |
-| Grafana | http://localhost:49507 | Dashboards monitoring (admin/admin) |
-| Prometheus | http://localhost:49508 | Metrics collection |
+| Superset | http://localhost:49504 | BI dashboards |
+| dbt docs | http://localhost:49505 | Manual: `docker exec brgm-dlt-worker dbt docs serve --port 8080` |
+| Grafana | http://localhost:49507 | Monitoring (admin/admin) |
+| Prometheus | http://localhost:49508 | Metrics |
+
+## Common Issues
+
+- **Missing TME labels in Gold tables**: Rebuild incremental mapping: `docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'`
+- **Hub'Eau API 503**: API overloaded, wait 15-30 min and retry via Dagster UI
+- **ERA5 CDS timeouts**: Retry (built-in backoff). Check [CDS Status](https://cds.climate.copernicus.eu/) if persistent
+- **Bronze duplicates**: Expected from 7-day overlap window. Silver layer deduplicates automatically
+- **Worker won't start**: Check `docker compose logs dlt_worker`. Common: port conflict, stale image (`docker compose build --no-cache dlt_worker`)
+
+## Skills Reference
+
+Skills are invoked via `/skill-name` or the Skill tool. Always check if a skill applies before starting work.
+
+### Development Workflow Skills
+
+These skills form a structured development pipeline. Follow the chain that matches your task.
+
+**Typical feature chain**: `/brainstorming` → `/writing-plans` → `/executing-plans` or `/subagent-driven-development` → `/verification-before-completion` → `/commit` → `/requesting-code-review`
+
+| Skill | Invoke when... | Why |
+|-------|---------------|-----|
+| `superpowers:brainstorming` | Starting any new feature, design, or creative task | Turns ideas into validated designs via collaborative Q&A. Produces a design doc in `docs/plans/`. **Must precede implementation.** |
+| `superpowers:writing-plans` | You have a spec/design and need implementation steps | Creates a step-by-step plan file from the design. Follows brainstorming. |
+| `superpowers:executing-plans` | You have a written plan ready to implement | Executes plans step by step with checkpoints. For sequential work. |
+| `superpowers:subagent-driven-development` | A plan has independent tasks that can run in parallel | Dispatches subagents for parallel execution. Ideal for multi-model dbt changes or independent asset + job work. |
+| `superpowers:dispatching-parallel-agents` | Facing 2+ independent tasks (research, implementation) | Parallel agent coordination. Use when tasks have zero dependencies between them. |
+| `superpowers:test-driven-development` | Implementing any feature or bugfix | Write tests first, then implementation. For this project: write dbt `schema.yml` tests before model SQL, or Python tests before asset code. |
+| `superpowers:systematic-debugging` | Any bug, test failure, or unexpected behavior | Structured root-cause analysis. Use when dbt tests fail, jobs error, or data quality issues appear. |
+| `superpowers:verification-before-completion` | About to claim work is complete | Final checklist before marking done. Prevents missed edge cases. **Always use before committing.** |
+| `superpowers:finishing-a-development-branch` | Implementation is complete, all tests pass | Prepares branch for merge: cleanup, final review, squash guidance. |
+| `superpowers:using-git-worktrees` | Starting feature work that needs isolation | Creates a git worktree so you can work without affecting main. Useful for multi-day features. |
+
+### Code Review & Git Skills
+
+| Skill | Invoke when... | Why |
+|-------|---------------|-----|
+| `commit-commands:commit` (`/commit`) | Ready to commit staged changes | Creates well-formatted git commits with proper messages. |
+| `commit-commands:commit-push-pr` (`/commit-push-pr`) | Ready to commit, push, and open a PR in one step | Full workflow: commit → push → create PR with summary. |
+| `commit-commands:clean_gone` | Branches have piled up locally | Cleans all local branches whose remote tracking branch is `[gone]`. |
+| `code-review:code-review` | Need to review a PR (yours or someone else's) | Structured code review with checklist. |
+| `superpowers:requesting-code-review` | Completed a feature, want review | Prepares code for review, highlights key changes. |
+| `superpowers:receiving-code-review` | Received code review feedback | Structured approach to addressing reviewer comments. |
+
+### Feature Development
+
+| Skill | Invoke when... | Why |
+|-------|---------------|-----|
+| `feature-dev:feature-dev` | Developing a feature with guided codebase exploration | Full guided workflow: understand codebase → design → implement → test. Combines exploration with implementation. Good starting point when you're not sure which specific workflow to use. |
+
+### Scientific & Data Skills (relevant to this project)
+
+This project handles hydrological time series, geospatial data, and climate reanalysis. These skills are directly useful:
+
+**Geospatial & Data Processing**
+
+| Skill | Invoke when... | Why for this project |
+|-------|---------------|---------------------|
+| `scientific-skills:geopandas` | Working with spatial data, geometries, PostGIS | Project uses geopandas extensively: BDLISA GeoPackage loading, station coordinates, spatial joins. Use for any `assets/bronze/bdlisa_*.py` or PostGIS work. |
+| `scientific-skills:polars` | Processing large DataFrames (alternative to pandas) | Faster than pandas for large chroniques datasets. Consider for new DLT sources or data transformation scripts. |
+| `scientific-skills:dask` | Data too large for single-machine pandas | Distributed processing for full historical chroniques (millions of rows). |
+| `scientific-skills:zarr-python` | Working with chunked N-D arrays, cloud storage | Useful if ERA5 data needs intermediate storage in chunked format before PostgreSQL load. |
+
+**Analysis & Visualization**
+
+| Skill | Invoke when... | Why for this project |
+|-------|---------------|---------------------|
+| `scientific-skills:exploratory-data-analysis` | Exploring data quality, distributions, anomalies | Run EDA on Gold tables to validate data pipeline output, detect outliers in chroniques, check ERA5 coverage. |
+| `scientific-skills:statistical-analysis` | Trend analysis, seasonality, hypothesis testing | Analyze piezometric trends (`agg_station_trends`), validate seasonal patterns, statistical tests on data quality. |
+| `scientific-skills:statsmodels` | Regression, time series decomposition | Trend detection in water levels, seasonal decomposition of hydrometric data, autocorrelation analysis. |
+| `scientific-skills:scikit-learn` | Anomaly detection, clustering, classification | Detect anomalous measurements in chroniques, cluster stations by behavior, classify data quality. |
+| `scientific-skills:plotly` | Interactive charts and maps | Interactive station maps, time series exploration. Superset uses Plotly internally. |
+| `scientific-skills:matplotlib` | Static publication-quality plots | Detailed custom plots when Plotly is overkill. |
+| `scientific-skills:seaborn` | Statistical visualization with pandas | Heatmaps of data coverage, distribution plots, correlation matrices between hydro variables. |
+| `scientific-skills:scientific-visualization` | Publication-ready multi-panel figures | Meta-skill for combining matplotlib/seaborn/plotly into polished figures. |
+| `scientific-skills:networkx` | Graph/network analysis | Model hydrological networks: upstream/downstream station relationships, aquifer connectivity. |
+
+**Research & Documentation**
+
+| Skill | Invoke when... | Why for this project |
+|-------|---------------|---------------------|
+| `scientific-skills:scientific-writing` | Writing technical reports or documentation | Document data pipeline methodology, data quality reports, architecture decisions. |
+| `scientific-skills:hypothesis-generation` | Formulating research questions from data | Generate hypotheses about groundwater trends, climate impact on hydrology. |
+| `scientific-skills:literature-review` | Reviewing scientific literature | Research Hub'Eau API changes, ERA5 methodology, hydrological analysis methods. |
+
+**Export & Reporting**
+
+| Skill | Invoke when... | Why for this project |
+|-------|---------------|---------------------|
+| `scientific-skills:xlsx` | Creating/editing spreadsheets | Export Gold table summaries, station inventories, data quality reports to Excel. |
+| `scientific-skills:pdf` | PDF generation or manipulation | Generate PDF reports from pipeline data, extract data from PDF sources. |
+| `scientific-skills:docx` | Creating Word documents | Technical documentation, data delivery reports. |
+| `scientific-skills:pptx` | Creating presentations | Pipeline status presentations, data analysis results. |
+| `scientific-skills:scientific-slides` | Research talk slide decks | Present hydro data analysis findings, pipeline architecture talks. |
+| `scientific-skills:markitdown` | Converting files to Markdown | Convert existing docs to Markdown for the repository. |
+
+### Frontend & BI
+
+| Skill | Invoke when... | Why for this project |
+|-------|---------------|---------------------|
+| `frontend-design:frontend-design` | Building web interfaces | Custom dashboards beyond Superset, data quality monitoring UIs, admin panels. |
+
+### Meta & Maintenance Skills
+
+| Skill | Invoke when... | Why |
+|-------|---------------|-----|
+| `claude-md-management:revise-claude-md` | End of a productive session with new learnings | Updates this CLAUDE.md with patterns discovered during work. |
+| `claude-md-management:claude-md-improver` | CLAUDE.md feels outdated or incomplete | Audits and improves CLAUDE.md files. |
+| `claude-code-setup:claude-automation-recommender` | Want to set up hooks/automations | Analyzes codebase and recommends Claude Code automations (pre-commit hooks, etc.). |
+| `superpowers:writing-skills` | Creating or editing custom skills | For building project-specific skills (e.g., a "dbt-model-generator" skill). |
+
+### Common Workflow Examples
+
+**Adding a new data source (e.g., new Hub'Eau API endpoint)**:
+1. `/brainstorming` — design the asset, schema, API config
+2. `/writing-plans` — plan: YAML config → DLT source → Dagster asset → dbt staging model → tests
+3. `/test-driven-development` — write `schema.yml` tests first, then model SQL
+4. `/verification-before-completion` — verify end-to-end
+5. `/commit-push-pr` — ship it
+
+**Debugging a dbt test failure**:
+1. `/systematic-debugging` — trace from failing test → model SQL → source data → root cause
+
+**Analyzing data quality on Gold tables**:
+1. `scientific-skills:exploratory-data-analysis` — profile data distributions
+2. `scientific-skills:statistical-analysis` — test for anomalies and trends
+3. `scientific-skills:plotly` or `seaborn` — visualize findings
+
+**Creating a data export/report**:
+1. `scientific-skills:xlsx` or `pdf` — generate formatted output from Gold tables
+2. `scientific-skills:scientific-writing` — write methodology section if needed

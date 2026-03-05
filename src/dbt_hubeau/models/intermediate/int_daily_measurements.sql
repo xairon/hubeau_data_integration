@@ -4,7 +4,7 @@
     unique_key = ['code_bss', 'date_mesure'],
     incremental_strategy = 'delete+insert',
     incremental_predicates = [
-      "DBT_INTERNAL_DEST.date_mesure >= CURRENT_DATE - INTERVAL '30 days'"
+      time_range_delete_predicate('date_mesure', '30 days')
     ],
     indexes = [
       {'columns': ['code_bss']},
@@ -12,9 +12,7 @@
     ],
     post_hook = [
       "{{ add_primary_key(['code_bss', 'date_mesure']) }}",
-      "{{ convert_to_hypertable('date_mesure', '1 year') }}",
-      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}",
-      "{{ enable_compression(segment_by=['code_bss'], order_by='date_mesure DESC', compress_after='365 days') }}"
+      "{{ add_foreign_key(['code_bss'], 'stg_piezo_stations', ['code_bss']) }}"
     ]
   )
 }}

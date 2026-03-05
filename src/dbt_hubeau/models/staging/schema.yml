@@ -28,8 +28,10 @@ models:
         tests:
           - not_null
     tests:
-      - unique:
-          column_name: "code_bss || '-' || date_mesure"
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_bss
+            - date_mesure
 
   - name: stg_hydrometry_sites
     description: "Sites hydrométriques (Silver)"
@@ -78,6 +80,12 @@ models:
           - not_null
           - accepted_values:
               values: ['QmnJ', 'QmxJ', 'H']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - code_site
+            - date_obs_elab
+            - grandeur_hydro_elab
 
   - name: stg_tme_entites
     description: |
@@ -141,3 +149,5 @@ models:
         description: "Point géographique PostGIS"
         tests:
           - not_null
+    # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).
+    # Test dbt_utils.unique_combination_of_columns retiré: OOM sur ~100M lignes ERA5.
