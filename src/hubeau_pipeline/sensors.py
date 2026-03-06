@@ -69,7 +69,10 @@ def bronze_to_shared_staging_sensor(context: MultiAssetSensorEvaluationContext):
         if record is not None:
             materialized_assets.append(asset_key.to_user_string())
             max_storage_id = max(max_storage_id, record.storage_id)
-            context.advance_cursor({asset_key: record})
+
+    # Always advance all cursors to prevent trailing_unconsumed_events overflow.
+    # Must be called whether we yield a RunRequest or skip.
+    context.advance_all_cursors()
 
     if not materialized_assets:
         return SkipReason("No new Bronze materializations detected")

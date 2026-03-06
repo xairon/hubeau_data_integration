@@ -196,6 +196,9 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 - **ERA5 CDS timeouts**: Retry (built-in backoff). Check [CDS Status](https://cds.climate.copernicus.eu/) if persistent
 - **Bronze duplicates**: Expected from 7-day overlap window. Silver layer deduplicates automatically
 - **Worker won't start**: Check `docker compose logs dlt_worker`. Common: port conflict, stale image (`docker compose build --no-cache dlt_worker`)
+- **Phantom hypertables (table is hypertable but shouldn't be)**: NEVER use `dbt run --full-refresh` — TimescaleDB event trigger `timescaledb_ddl_command_end` intercepts dbt's `ALTER TABLE RENAME` and re-applies hypertable metadata to the new table. Instead: `DROP TABLE schema.table CASCADE` then `dbt run --select model_name` (without `--full-refresh`). Also clean orphaned compression policies: `SELECT delete_job(id) FROM _timescaledb_config.bgw_job WHERE ...`
+- **dbt daily mart runs 1h+ instead of minutes**: Check if `unique_key` is set on an `append` model — dbt 1.7.0 ignores `append` strategy when `unique_key` is present and generates `DELETE...USING` which seq-scans all hypertable chunks. Fix: remove `unique_key` from the model config
+- **Dagster sensor crash loop (trailing_unconsumed_events)**: `multi_asset_sensor` must call `context.advance_all_cursors()` on EVERY evaluation, not just when yielding a RunRequest. Without this, events accumulate to the 25-event limit and crash the daemon
 
 ## Skills Reference
 
