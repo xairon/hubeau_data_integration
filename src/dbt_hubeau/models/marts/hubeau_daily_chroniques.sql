@@ -1,7 +1,6 @@
 {{
   config(
     materialized = 'incremental',
-    unique_key = ['code_bss', 'date'],
     incremental_strategy = 'append',
     indexes = [
       {'columns': ['code_bss']},

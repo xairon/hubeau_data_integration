@@ -1,7 +1,6 @@
 {{
   config(
     materialized = 'incremental',
-    unique_key = ['code_station', 'date', 'grandeur_hydro_elab'],
     incremental_strategy = 'append',
     indexes = [
       {'columns': ['code_station']},
