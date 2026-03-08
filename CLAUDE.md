@@ -165,9 +165,14 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 `bronze.piezometry_chroniques_raw` and `bronze.era5_france_timeseries` are hypertables. Compression policies achieve 90%+ savings on data >90 days old. The `timescaledb.sql` macro handles hypertable creation.
 
 ### Hot Reload
-- **Python code** (`src/hubeau_pipeline/`): Volume-mounted, requires `docker compose restart dlt_worker`
+- **Python code** (`src/hubeau_pipeline/`): Volume-mounted in worker only. After changes:
+  1. `docker compose restart dlt_worker` (picks up volume-mounted code)
+  2. **Rebuild orchestrator image**: `docker compose build dagster_webserver` then recreate daemon+webserver (the orchestrator image copies `src/` at build time — the daemon executes runs using its own baked-in code, NOT the worker's volume mount)
+  3. Reload code location via Dagster UI or GraphQL `reloadRepositoryLocation`
 - **dbt models** (`src/dbt_hubeau/models/`): Volume-mounted, auto-detected by Dagster (reload definitions in UI)
 - **Config files** (`configs/`): Volume-mounted, changes apply immediately
+
+> **WARNING**: The daemon container has its own copy of `src/` baked into the `hubeau-orchestrator` image. Restarting only the worker is NOT sufficient for Python code changes — the daemon will continue using stale code from its image.
 
 ## Key Constraints
 
@@ -198,6 +203,7 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 - **Worker won't start**: Check `docker compose logs dlt_worker`. Common: port conflict, stale image (`docker compose build --no-cache dlt_worker`)
 - **Phantom hypertables (table is hypertable but shouldn't be)**: The event trigger `timescaledb_ddl_command_end` has been **DISABLED** (2026-03-06) to prevent dbt's `ALTER TABLE RENAME` from re-applying hypertable metadata. This is the permanent fix. If somehow re-enabled: `ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;`. Manual cleanup: `DROP TABLE schema.table CASCADE` then `dbt run --select model_name` (NOT `--full-refresh`). Clean orphaned policies: `SELECT delete_job(id) FROM _timescaledb_config.bgw_job WHERE ...`
 - **dbt daily mart runs 1h+ instead of minutes**: Check if `unique_key` is set on an `append` model — dbt 1.7.0 ignores `append` strategy when `unique_key` is present and generates `DELETE...USING` which seq-scans all hypertable chunks. Fix: remove `unique_key` from the model config
+- **Bronze daily cleanup fails with `text >= date`**: DLT stores all Bronze columns as `text`. The `_clean_recent_data()` function must cast date columns explicitly (`{}::date >= CURRENT_DATE`). If you see `operator does not exist: text >= date`, check that the `::date` cast is present
 - **Dagster sensor crash loop (trailing_unconsumed_events)**: `multi_asset_sensor` must call `context.advance_all_cursors()` on EVERY evaluation, not just when yielding a RunRequest. Without this, events accumulate to the 25-event limit and crash the daemon
 
 ## Skills Reference

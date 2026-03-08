@@ -74,11 +74,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      dagster_postgres:
+        condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
       PYTHONDONTWRITEBYTECODE: 1
-      # Database credentials
+      # Dagster storage database (used by dagster.yaml for run storage, event logs, sensors)
+      DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
+      DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-REDACTED}
+      # Application database credentials
       PG_HOST: ${PG_HOST:-postgres}
       PG_PORT: ${PG_PORT:-5432}
       PG_DB: ${PG_DB:-postgres}
@@ -126,6 +134,7 @@ services:
     restart: unless-stopped
 
   # Dagster Web UI
+  # ⚠️ NO USER CODE — communicates with worker (code location) via GRPC
   dagster_webserver:
     build:
       context: .
@@ -139,24 +148,13 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
-      PYTHONDONTWRITEBYTECODE: 1
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
       DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
       DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-REDACTED}
-      PYTHONPATH: /app
-      # Application database credentials
-      PG_HOST: ${PG_HOST:-postgres}
-      PG_PORT: ${PG_PORT:-5432}
-      PG_DB: ${PG_DB:-postgres}
-      PG_USER: ${PG_USER:-postgres}
-      PG_PASSWORD: ${PG_PASSWORD:-REDACTED}
-      HUBEAU_SCHEMA_DIR: /app/scripts/schema
     volumes:
       - ./dagster_home:/app/dagster_home
-      - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
     command: [ "dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster_home/workspace.yaml" ]
     ports:
       - "49500:3000" # Dagster UI - fixed port
@@ -169,7 +167,8 @@ services:
     mem_limit: 2G
     restart: unless-stopped
 
-  # Dagster Daemon - Schedules & Sensors
+  # Dagster Daemon - Schedules, Sensors & Run Queue
+  # ⚠️ NO USER CODE — delegates run execution to worker via GRPC
   dagster_daemon:
     image: hubeau-orchestrator:latest
     container_name: brgm-dagster-daemon
@@ -180,27 +179,14 @@ services:
         condition: service_healthy
     environment:
       DAGSTER_HOME: /app/dagster_home
-      PYTHONDONTWRITEBYTECODE: 1
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
       DAGSTER_PG_PORT: ${DAGSTER_PG_PORT:-5432}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
       DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-REDACTED}
-      PYTHONPATH: /app
-      # Application database credentials
-      PG_HOST: ${PG_HOST:-postgres}
-      PG_PORT: ${PG_PORT:-5432}
-      PG_DB: ${PG_DB:-postgres}
-      PG_USER: ${PG_USER:-postgres}
-      PG_PASSWORD: ${PG_PASSWORD:-REDACTED}
-      HUBEAU_SCHEMA_DIR: /app/scripts/schema
-      DAGSTER_ENABLE_SCHEDULES: ${DAGSTER_ENABLE_SCHEDULES:-true}
-      DAGSTER_ENABLE_SENSORS: ${DAGSTER_ENABLE_SENSORS:-true}
     volumes:
       - ./dagster_home:/app/dagster_home
-      - ./configs:/app/configs:ro
-      - ./scripts:/app/scripts:ro
-    command: [ "dagster-daemon", "run" ]
+    command: [ "dagster-daemon", "run", "-w", "/app/dagster_home/workspace.yaml" ]
     healthcheck:
       test: [ "CMD-SHELL", "dagster-daemon liveness-check || exit 1" ]
       interval: 30s
