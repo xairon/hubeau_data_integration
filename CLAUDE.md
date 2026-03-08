@@ -77,8 +77,8 @@ Entry point: `src/hubeau_pipeline/__init__.py` → exports `defs` from `definiti
 
 Two custom images, communicating via GRPC (defined in `dagster_home/workspace.yaml`):
 
-- **Worker** (`docker/worker/Dockerfile`): ~2GB, includes GDAL/GEOS, runs `dagster code-server` on port 4000. Uses `uv` package manager for fast builds. Generates dbt manifest at build time via `dbt deps && dbt parse`. Source code hot-reloaded via volume mounts.
-- **Orchestrator** (`docker/orchestrator/Dockerfile`): ~500MB, lightweight, runs `dagster-webserver` + `dagster-daemon`. No source code, connects to worker via GRPC.
+- **Worker** (`docker/worker/Dockerfile`): ~2GB, includes GDAL/GEOS, runs `dagster code-server` on port 4000. Uses `uv` package manager for fast builds. Generates dbt manifest at build time via `dbt deps && dbt parse`. Source code hot-reloaded via volume mounts. All runs execute here via GRPC.
+- **Orchestrator** (`docker/orchestrator/Dockerfile`): ~500MB, lightweight, runs `dagster-webserver` + `dagster-daemon`. **NO user code** — only Dagster packages (`docker/orchestrator/requirements.txt`). Connects to worker via GRPC. Only rebuild when upgrading Dagster version.
 
 ### Medallion Layers & dbt Schema Mapping
 
@@ -164,15 +164,16 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 ### TimescaleDB
 `bronze.piezometry_chroniques_raw` and `bronze.era5_france_timeseries` are hypertables. Compression policies achieve 90%+ savings on data >90 days old. The `timescaledb.sql` macro handles hypertable creation.
 
-### Hot Reload
+### Hot Reload & Deployment
 - **Python code** (`src/hubeau_pipeline/`): Volume-mounted in worker only. After changes:
   1. `docker compose restart dlt_worker` (picks up volume-mounted code)
-  2. **Rebuild orchestrator image**: `docker compose build dagster_webserver` then recreate daemon+webserver (the orchestrator image copies `src/` at build time — the daemon executes runs using its own baked-in code, NOT the worker's volume mount)
-  3. Reload code location via Dagster UI or GraphQL `reloadRepositoryLocation`
+  2. Reload code location via Dagster UI or GraphQL `reloadRepositoryLocation`
+  3. No need to touch orchestrator — it has NO user code (standard Dagster architecture)
 - **dbt models** (`src/dbt_hubeau/models/`): Volume-mounted, auto-detected by Dagster (reload definitions in UI)
 - **Config files** (`configs/`): Volume-mounted, changes apply immediately
+- **Orchestrator image rebuild**: Only needed when upgrading Dagster version (edit `docker/orchestrator/requirements.txt`)
 
-> **WARNING**: The daemon container has its own copy of `src/` baked into the `hubeau-orchestrator` image. Restarting only the worker is NOT sufficient for Python code changes — the daemon will continue using stale code from its image.
+> **Architecture**: The orchestrator image (webserver + daemon) contains ONLY Dagster packages — no user code. All runs execute on the worker via GRPC. This is the standard Dagster Docker deployment pattern.
 
 ## Key Constraints
 
@@ -205,6 +206,7 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 - **dbt daily mart runs 1h+ instead of minutes**: Check if `unique_key` is set on an `append` model — dbt 1.7.0 ignores `append` strategy when `unique_key` is present and generates `DELETE...USING` which seq-scans all hypertable chunks. Fix: remove `unique_key` from the model config
 - **Bronze daily cleanup fails with `text >= date`**: DLT stores all Bronze columns as `text`. The `_clean_recent_data()` function must cast date columns explicitly (`{}::date >= CURRENT_DATE`). If you see `operator does not exist: text >= date`, check that the `::date` cast is present
 - **Dagster sensor crash loop (trailing_unconsumed_events)**: `multi_asset_sensor` must call `context.advance_all_cursors()` on EVERY evaluation, not just when yielding a RunRequest. Without this, events accumulate to the 25-event limit and crash the daemon
+- **DLT SchemaNotFoundError or CannotCoerceColumnException**: DLT state lives in 4 places — ALL must be cleaned for a fresh pipeline start: (1) filesystem `docker exec brgm-dlt-worker rm -rf /var/dlt/pipelines/<name>`, (2) `DELETE FROM bronze._dlt_version WHERE schema_name = '<name>'`, (3) `DELETE FROM bronze._dlt_pipeline_state WHERE pipeline_name = '<name>'`, (4) `DELETE FROM bronze._dlt_loads WHERE schema_name = '<name>'`. Cleaning only some locations causes cascading errors
 
 ## Skills Reference
 
