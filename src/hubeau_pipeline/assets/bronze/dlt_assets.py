@@ -298,7 +298,7 @@ def _clean_recent_data(table_name: str, schema: str, days_back: int, date_column
                 cur.execute(
                     sql.SQL("""
                         DELETE FROM {}.{}
-                        WHERE {} >= CURRENT_DATE - %s::integer
+                        WHERE {}::date >= CURRENT_DATE - %s::integer
                     """).format(
                         sql.Identifier(schema),
                         sql.Identifier(table_name),
