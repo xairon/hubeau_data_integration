@@ -153,26 +153,6 @@ models:
       - name: tendance_classification
         description: "HAUSSE / BAISSE / STABLE / INSUFFISANT"
 
-  - name: agg_station_trends
-    description: "Tendances saisonnières par station"
-    columns:
-      - name: code_bss
-        tests:
-          - not_null
-      - name: saison
-        tests:
-          - accepted_values:
-              values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
-      - name: classification_tendance
-        tests:
-          - accepted_values:
-              values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - code_bss
-            - saison
-
   - name: hydro_daily_chroniques
     description: "Table finale hydrométrie combinant observations et météo ERA5"
     columns:
@@ -288,30 +268,6 @@ models:
           combination_of_columns:
             - code_station
             - annee
-            - grandeur_hydro_elab
-
-  - name: agg_hydro_trends
-    description: "Tendances saisonnières hydrométriques par station"
-    columns:
-      - name: code_station
-        tests:
-          - not_null
-      - name: grandeur_hydro_elab
-        tests:
-          - not_null
-      - name: saison
-        tests:
-          - accepted_values:
-              values: ['HIVER', 'PRINTEMPS', 'ETE', 'AUTOMNE']
-      - name: classification_tendance
-        tests:
-          - accepted_values:
-              values: ['HAUSSE_FORTE', 'HAUSSE_LEGERE', 'STABLE', 'BAISSE_LEGERE', 'BAISSE_FORTE']
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - code_station
-            - saison
             - grandeur_hydro_elab
 
   - name: dim_hydro_stations

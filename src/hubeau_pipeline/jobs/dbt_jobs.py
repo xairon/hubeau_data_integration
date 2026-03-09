@@ -1,6 +1,7 @@
-from dagster import define_asset_job, AssetSelection, op, job, In, Out, Nothing
+from dagster import In, Out, define_asset_job, job, op
+from dagster_dbt import DbtCliResource, build_dbt_asset_selection
+
 from ..assets.dbt_assets import hubeau_dbt_assets
-from dagster_dbt import build_dbt_asset_selection, DbtCliResource
 
 # ==============================================================================
 # FULL DBT PIPELINE (All models - for bootstrap/full refresh)
@@ -28,8 +29,9 @@ dbt_silver_gold_pipeline_job = define_asset_job(
 # Shared models used by both piezo and hydro pipelines
 # Must run BEFORE domain pipelines to avoid conflicts
 SHARED_STAGING_MODELS = [
-    "stg_era5_timeseries",   # ERA5 climate data (used by both domains)
-    "int_era5_grid_points",  # ERA5 grid reference (used by both KNN mappings)
+    "stg_era5_timeseries",        # ERA5 climate data (used by both domains)
+    "int_era5_grid_points",       # ERA5 grid reference (used by both KNN mappings)
+    "int_era5_for_all_stations",  # ERA5 filtered for all station grid points (piezo + hydro)
 ]
 
 dbt_shared_staging_job = define_asset_job(
@@ -61,12 +63,10 @@ PIEZO_MODELS = [
     # Intermediate (Gold)
     "int_daily_measurements",
     "int_station_era5_mapping",
-    "int_era5_for_stations",
     # Marts (Gold)
     "hubeau_daily_chroniques",
     "fct_monthly_chroniques",
     "fct_yearly_stats",
-    "agg_station_trends",
     "dim_piezo_stations",
     "stations_piezo_carte",
 ]
@@ -85,7 +85,6 @@ PIEZO_DAILY_MODELS = [
     # Intermediate (Gold)
     "int_daily_measurements",
     "int_station_era5_mapping",
-    "int_era5_for_stations",
     # Daily mart (incremental) - only the fast-path models
     "hubeau_daily_chroniques",
 ]
@@ -136,12 +135,10 @@ HYDRO_MODELS = [
     # Intermediate (Gold)
     "int_hydro_daily_measurements",
     "int_hydro_station_era5_mapping",
-    "int_era5_for_hydro_stations",
     # Marts (Gold)
     "hydro_daily_chroniques",
     "fct_monthly_hydro",
     "fct_yearly_hydro",
-    "agg_hydro_trends",
     "dim_hydro_stations",
     "stations_hydro_carte",
     # Rejects
@@ -163,7 +160,6 @@ HYDRO_DAILY_MODELS = [
     # Intermediate (Gold)
     "int_hydro_daily_measurements",
     "int_hydro_station_era5_mapping",
-    "int_era5_for_hydro_stations",
     # Daily mart (incremental) - only the fast-path models
     "hydro_daily_chroniques",
 ]
@@ -240,7 +236,7 @@ def run_dbt_tests(context):
     Tests are defined in schema.yml files (not_null, unique, accepted_values, etc.)
     """
     dbt: DbtCliResource = context.resources.dbt
-    
+
     context.log.info("🧪 Starting dbt test...")
 
     try:
@@ -265,7 +261,7 @@ def run_dbt_source_freshness(context):
     Freshness thresholds are defined in sources.yml.
     """
     dbt: DbtCliResource = context.resources.dbt
-    
+
     context.log.info("📅 Checking source freshness...")
 
     try:
@@ -340,7 +336,7 @@ def run_dbt_docs_generate(context):
     context.log.info("📚 Generating dbt documentation...")
 
     # Run dbt docs generate command
-    docs_result = dbt.cli(["docs", "generate"], context=context).wait()
+    dbt.cli(["docs", "generate"], context=context).wait()
 
     context.log.info("✅ dbt documentation generated successfully")
     context.log.info("📂 Documentation artifacts saved to: target/catalog.json, target/manifest.json")

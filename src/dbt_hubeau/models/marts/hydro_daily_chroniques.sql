@@ -37,7 +37,7 @@ mapping AS (
 ),
 
 era5_filtered AS (
-    SELECT * FROM {{ ref('int_era5_for_hydro_stations') }}
+    SELECT * FROM {{ ref('int_era5_for_all_stations') }}
     {% if is_incremental() %}
     WHERE era5_date >= CURRENT_DATE - INTERVAL '30 days'
     {% endif %}

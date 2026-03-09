@@ -266,7 +266,7 @@ This project handles hydrological time series, geospatial data, and climate rean
 | Skill | Invoke when... | Why for this project |
 |-------|---------------|---------------------|
 | `scientific-skills:exploratory-data-analysis` | Exploring data quality, distributions, anomalies | Run EDA on Gold tables to validate data pipeline output, detect outliers in chroniques, check ERA5 coverage. |
-| `scientific-skills:statistical-analysis` | Trend analysis, seasonality, hypothesis testing | Analyze piezometric trends (`agg_station_trends`), validate seasonal patterns, statistical tests on data quality. |
+| `scientific-skills:statistical-analysis` | Trend analysis, seasonality, hypothesis testing | Analyze piezometric trends, validate seasonal patterns, statistical tests on data quality. |
 | `scientific-skills:statsmodels` | Regression, time series decomposition | Trend detection in water levels, seasonal decomposition of hydrometric data, autocorrelation analysis. |
 | `scientific-skills:scikit-learn` | Anomaly detection, clustering, classification | Detect anomalous measurements in chroniques, cluster stations by behavior, classify data quality. |
 | `scientific-skills:plotly` | Interactive charts and maps | Interactive station maps, time series exploration. Superset uses Plotly internally. |

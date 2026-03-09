@@ -48,8 +48,8 @@ models:
               min_value: -5.5
               max_value: 10.0
 
-  - name: int_era5_for_stations
-    description: "Données ERA5 filtrées pour les points de grille utilisés par les stations"
+  - name: int_era5_for_all_stations
+    description: "Données ERA5 filtrées pour les points de grille utilisés par toutes les stations (piézo + hydro)"
     columns:
       - name: latitude
         tests:
@@ -144,35 +144,3 @@ models:
               min_value: -5.5
               max_value: 10.0
 
-  - name: int_era5_for_hydro_stations
-    description: "Données ERA5 filtrées pour les points de grille utilisés par les stations hydrométriques"
-    columns:
-      - name: latitude
-        tests:
-          - not_null
-      - name: longitude
-        tests:
-          - not_null
-      - name: era5_date
-        description: "Date ERA5 (time casté en date)"
-        tests:
-          - not_null
-      - name: temperature_2m
-        description: "Température à 2m en °C"
-        tests:
-          - dbt_utils.accepted_range:
-              min_value: -40
-              max_value: 50
-              config:
-                severity: warn
-      - name: total_precipitation
-        description: "Précipitations totales en mm"
-        tests:
-          - dbt_utils.accepted_range:
-              min_value: 0
-              max_value: 500
-              config:
-                severity: warn
-                where: "total_precipitation IS NOT NULL"
-    # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).
-    # Test dbt_utils retiré: OOM sur ~40M lignes ERA5.

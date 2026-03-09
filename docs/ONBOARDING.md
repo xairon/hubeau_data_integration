@@ -489,8 +489,7 @@ Ces modèles préparent les données pour les marts :
 | `int_era5_grid_points` | Points de grille ERA5 uniques sur la France |
 | `int_station_era5_mapping` | Jointure spatiale PostGIS : chaque station piézo → cellule ERA5 la plus proche (KNN) |
 | `int_hydro_station_era5_mapping` | Idem pour les stations hydrométriques |
-| `int_era5_for_stations` | Séries temporelles ERA5 filtrées pour les stations piézo |
-| `int_era5_for_hydro_stations` | Idem pour les stations hydro |
+| `int_era5_for_all_stations` | Séries temporelles ERA5 filtrées pour toutes les stations (piézo + hydro) |
 | `int_daily_measurements` | Mesures piézo dédupliquées et validées |
 | `int_hydro_daily_measurements` | Mesures hydro dédupliquées et validées |
 
@@ -541,8 +540,6 @@ Ces tables utilisent le pattern **append + hypertable_delete** :
 
 | Table | Usage |
 |-------|-------|
-| `agg_station_trends` | Tendances piézo : pentes saisonnières, variations annuelles |
-| `agg_hydro_trends` | Tendances hydro |
 | `stations_piezo_carte` | Stations piézo avec dernier niveau (pour cartes Superset) |
 | `stations_hydro_carte` | Stations hydro avec dernier débit (pour cartes Superset) |
 

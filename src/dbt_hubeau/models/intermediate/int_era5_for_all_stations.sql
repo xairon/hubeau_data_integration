@@ -7,7 +7,6 @@
       time_range_delete_predicate('era5_date', '30 days')
     ],
     indexes = [
-      {'columns': ['latitude', 'longitude']},
       {'columns': ['era5_date'], 'type': 'brin'}
     ],
     post_hook = [
@@ -17,11 +16,18 @@
   )
 }}
 
--- ERA5 filtré sur les points de grille utilisés par les stations hydrométriques
--- Incremental: ne traite que les nouvelles dates ERA5
--- Filtrage: uniquement les 3 colonnes météo non nulles
+-- ERA5 filtré sur les points de grille utilisés par TOUTES les stations (piézo + hydro).
+-- Union des grid points des deux mappings pour éviter la duplication de données ERA5.
+-- Incremental: ne traite que les nouvelles dates ERA5.
 
-WITH station_grid_points AS (
+WITH all_station_grid_points AS (
+    SELECT DISTINCT
+        era5_latitude AS latitude,
+        era5_longitude AS longitude
+    FROM {{ ref('int_station_era5_mapping') }}
+
+    UNION
+
     SELECT DISTINCT
         era5_latitude AS latitude,
         era5_longitude AS longitude
@@ -37,7 +43,7 @@ filtered_era5 AS (
         e.total_precipitation::numeric AS total_precipitation,
         e.potential_evaporation::numeric AS potential_evaporation
     FROM {{ ref('stg_era5_timeseries') }} e
-    INNER JOIN station_grid_points g
+    INNER JOIN all_station_grid_points g
         ON e.latitude = g.latitude
         AND e.longitude = g.longitude
     WHERE e.temperature_2m IS NOT NULL

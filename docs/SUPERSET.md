@@ -21,12 +21,10 @@ Pour éviter les jointures dans Superset, le pipeline produit des **marts gold**
 | **Chroniques quotidiennes piézo** (séries + météo + TME) | `gold.hubeau_daily_chroniques` | 1 ligne / station / jour : niveau nappe, météo ERA5, `code_eh`, `libelle_eh`, `station_latitude`, `station_longitude`. Pas de colonne PostGIS ; utiliser lat/lon pour scatter ou filtrer par date. |
 | **Agrégations mensuelles piézo** | `gold.fct_monthly_chroniques` | 1 ligne / station / mois : moyennes, min, max, variations, moyennes mobiles. |
 | **Agrégations annuelles piézo** | `gold.fct_yearly_stats` | 1 ligne / station / année : bilans annuels, percentiles, classifications. |
-| **Tendances saisonnières piézo** | `gold.agg_station_trends` | 1 ligne / station / saison : régressions linéaires, projections. |
 | **Dimension stations piézo** | `gold.dim_piezo_stations` | 1 ligne / station : métadonnées enrichies + stats globales + tendances. |
 | **Chroniques quotidiennes hydro** (séries + météo) | `gold.hydro_daily_chroniques` | 1 ligne / station / jour / grandeur : observations hydro + météo ERA5. |
 | **Agrégations mensuelles hydro** | `gold.fct_monthly_hydro` | 1 ligne / station / mois / grandeur : stats mensuelles + moyennes mobiles. |
 | **Agrégations annuelles hydro** | `gold.fct_yearly_hydro` | 1 ligne / station / année / grandeur : bilans annuels + classifications. |
-| **Tendances saisonnières hydro** | `gold.agg_hydro_trends` | 1 ligne / station / saison / grandeur : régressions linéaires, projections. |
 | **Dimension stations hydro** | `gold.dim_hydro_stations` | 1 ligne / station : métadonnées enrichies + stats hydrométriques. |
 | **Carte stations hydro** (points + indicateurs) | `gold.stations_hydro_carte` | 1 ligne / station : géométrie + indicateurs principaux. |
 | **Grille météo ERA5** | `gold.int_era5_grid_points` | Points de grille : `geom`, `era5_latitude`, `era5_longitude`. |

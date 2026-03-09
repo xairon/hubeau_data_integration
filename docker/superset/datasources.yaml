@@ -156,25 +156,12 @@ databases:
           - column_name: nom_departement
             filterable: true
             groupby: true
-      - table_name: agg_station_trends
-        schema: gold
-        description: "Tendances saisonnières piézo par station (régressions linéaires)"
-        columns:
-          - column_name: code_bss
-            filterable: true
-            groupby: true
-          - column_name: saison
-            filterable: true
-            groupby: true
-          - column_name: nom_departement
-            filterable: true
-            groupby: true
       - table_name: int_daily_measurements
         schema: gold
         description: "Mesures quotidiennes piézo agrégées (intermediate)"
-      - table_name: int_era5_for_stations
+      - table_name: int_era5_for_all_stations
         schema: gold
-        description: "ERA5 filtré pour stations piézo (intermediate)"
+        description: "ERA5 filtré pour toutes les stations piézo + hydro (intermediate)"
       - table_name: int_station_era5_mapping
         schema: gold
         description: "Mapping stations piézo ↔ grille ERA5 + TME (code_eh, libelle_eh)"

@@ -22,11 +22,10 @@ ERA5 API ──────┘
 ## 🔥 Optimisations TimescaleDB
 
 Les tables suivantes sont converties en **Hypertables** (PK incluant la colonne temps, puis `create_hypertable`) :
-- **Silver** : `stg_piezo_chroniques`, `stg_hydrometry_obs_elab`, `stg_era5_timeseries`
-- **Gold** : `int_daily_measurements`, `int_era5_for_stations`
-- **Marts** : `hubeau_daily_chroniques`, `fct_monthly_chroniques`, `fct_yearly_stats`
+- **Silver** : `stg_era5_timeseries`
+- **Marts** : `hubeau_daily_chroniques`, `hydro_daily_chroniques`
 
-**Compression** (chunks anciens compressés) : `stg_era5_timeseries` (90 j), `int_era5_for_stations`, `hubeau_daily_chroniques`, `fct_monthly_chroniques` (730 j).
+**Compression** (chunks anciens compressés) : `stg_era5_timeseries` (90 j), `hubeau_daily_chroniques` (365 j), `hydro_daily_chroniques` (365 j).
 
 ## 🗺 PostGIS
 
@@ -145,21 +144,16 @@ Tables transformées et prêtes pour l'analyse.
 | `int_daily_measurements` | Mesures quotidiennes agrégées (piézo) | `silver.stg_piezo_chroniques` |
 | `int_station_era5_mapping` | Mapping stations piézo → grille ERA5 + métadonnées TME | `silver.stg_piezo_stations` + `silver.stg_tme_entites` |
 | `int_era5_grid_points` | Points de grille ERA5 uniques (pour jointure spatiale) | `silver.stg_era5_timeseries` |
-| `int_era5_for_stations` | ERA5 filtré pour les points de grille utilisés par les stations piézo | `silver.stg_era5_timeseries` |
+| `int_era5_for_all_stations` | ERA5 filtré pour les points de grille utilisés par toutes les stations (piézo + hydro) | `silver.stg_era5_timeseries` + mappings |
+| `int_hydro_daily_measurements` | Mesures quotidiennes agrégées (hydrométrie) | `silver.stg_hydrometry_obs_elab` |
+| `int_hydro_station_era5_mapping` | Mapping stations hydrométriques → grille ERA5 | `silver.stg_hydrometry_stations` |
 
 **Détails** :
 - `int_daily_measurements` : Agrégation par `code_bss` et `date_mesure` (AVG)
 - `int_station_era5_mapping` : Mapping spatial + jointure avec TME
-- `int_era5_for_stations` : Filtrage ERA5 sur les points utilisés par piézométrie
-
-| `int_hydro_daily_measurements` | Mesures quotidiennes agrégées (hydrométrie) | `silver.stg_hydrometry_obs_elab` |
-| `int_hydro_station_era5_mapping` | Mapping stations hydrométriques → grille ERA5 | `silver.stg_hydrometry_stations` |
-| `int_era5_for_hydro_stations` | ERA5 filtré pour les stations hydrométriques | `silver.stg_era5_timeseries` |
-
-**Détails hydrométrie** :
+- `int_era5_for_all_stations` : Filtrage ERA5 sur l'union des points piézo + hydro (une seule table au lieu de deux)
 - `int_hydro_daily_measurements` : Agrégation par `code_station`, `date_obs_elab`, `grandeur_hydro_elab`
 - `int_hydro_station_era5_mapping` : Mapping spatial + métadonnées station/site
-- `int_era5_for_hydro_stations` : Filtrage ERA5 sur les points utilisés par hydrométrie
 
 ### Marts (Piézométrie)
 
@@ -211,7 +205,7 @@ Agrégats mensuels :
 - Moyennes, Min, Max, Écart-type
 - Variations : vs mois précédent, vs année précédente
 - Moyennes mobiles : 3 mois, 12 mois
-- **Hypertable (5 ans)** + Compression (730 jours)
+- Table plain avec `delete+insert` incrémental (25 mois lookback)
 
 #### `fct_yearly_stats`
 
@@ -221,16 +215,7 @@ Agrégats annuels :
 - Moyennes annuelles, Bilan hydrique
 - Percentiles historiques
 - Classification annuelle : `TRES_BAS`, `BAS`, `NORMAL`, `HAUT`, `TRES_HAUT`
-- **Hypertable (10 ans)**
-
-#### `agg_station_trends`
-
-**Granularité** : Station x Saison
-
-Tendances saisonnières :
-- Régression linéaire (Slope) sur la saison
-- Classification tendance : `HAUSSE_FORTE`, `HAUSSE_LEGERE`, `STABLE`, `BAISSE_LEGERE`, `BAISSE_FORTE`
-- Projection à 5 ans (extrapolation linéaire)
+- Table plain avec `delete+insert` incrémental
 
 #### `dim_piezo_stations`
 
@@ -270,7 +255,7 @@ Mart "prêt carte" pour Superset :
 - Agrégats mensuels (moyenne, min, max, stddev)
 - Moyennes mobiles 3/12 mois
 - Variations vs mois précédent et vs année précédente
-- **Hypertable (5 ans)** + Compression (730 jours)
+- Table plain avec `delete+insert` incrémental (25 mois lookback)
 
 #### `fct_yearly_hydro`
 
@@ -278,14 +263,6 @@ Mart "prêt carte" pour Superset :
 
 - Agrégats annuels + percentiles historiques
 - Classification annuelle : `TRES_BAS`, `BAS`, `NORMAL`, `HAUT`, `TRES_HAUT`
-
-#### `agg_hydro_trends`
-
-**Granularité** : Station × Saison × Grandeur
-
-- Tendances saisonnières (régression linéaire)
-- Classification tendance : `HAUSSE_FORTE`, `HAUSSE_LEGERE`, `STABLE`, `BAISSE_LEGERE`, `BAISSE_FORTE`
-- Projection à 5 ans
 
 #### `dim_hydro_stations`
 
