@@ -73,9 +73,12 @@ def run(
         hidden_dims=cfg.embedding_dim,
         depth=depth,
         device=device,
+        lr=lr,
+        batch_size=batch_size,
+        max_train_length=cfg.window_size * 2,
     )
 
-    model.fit(train_data, n_epochs=n_epochs, lr=lr, batch_size=batch_size, verbose=True)
+    model.fit(train_data, n_epochs=n_epochs, verbose=True)
 
     # Encoding identique à TS2Vec
     window_embeddings: Dict[str, np.ndarray] = {}

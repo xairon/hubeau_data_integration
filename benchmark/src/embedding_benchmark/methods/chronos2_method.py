@@ -41,9 +41,9 @@ def run(series: Dict[str, np.ndarray], dates: Dict[str, list]) -> MethodResult:
             # Chronos-2 multivariate : tenseur 2D (n_channels, T)
             mv_tensor = torch.tensor(window.T, dtype=torch.float32)  # (4, 365)
             with torch.no_grad():
-                emb, _ = pipeline.embed([mv_tensor])
-            # emb: (1, n_patches, d_model) → mean pool sur patches
-            emb_pooled = emb.squeeze(0).mean(dim=0).cpu().numpy()
+                embeddings, _ = pipeline.embed([mv_tensor])
+            # embeddings[0]: (n_channels, n_patches, d_model) → mean pool
+            emb_pooled = embeddings[0].mean(dim=(0, 1)).cpu().numpy()
             bss_embs.append(emb_pooled)
 
         all_window_embs[bss] = np.stack(bss_embs)

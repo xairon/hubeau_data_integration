@@ -43,8 +43,11 @@ def run(
         hidden_dims=cfg.embedding_dim,
         depth=depth,
         device=device,
+        lr=lr,
+        batch_size=batch_size,
+        max_train_length=cfg.window_size * 2,  # Limit to avoid OOM on long series
     )
-    model.fit(train_data, n_epochs=n_epochs, lr=lr, batch_size=batch_size, verbose=True)
+    model.fit(train_data, n_epochs=n_epochs, verbose=True)
 
     # Encoder fenêtres
     window_embeddings: Dict[str, np.ndarray] = {}

@@ -54,7 +54,7 @@ def run(series: Dict[str, np.ndarray], dates: Dict[str, list]) -> MethodResult:
                 chan = window[:input_len, v_idx]
                 x = torch.tensor(chan, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
                 with torch.no_grad():
-                    output = model(x)
+                    output = model(x_enc=x)
                 emb = output.embeddings.squeeze().cpu().numpy()
                 chan_embs.append(emb)
 
