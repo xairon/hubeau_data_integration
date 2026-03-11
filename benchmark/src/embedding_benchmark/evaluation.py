@@ -11,8 +11,8 @@ Métriques d'évaluation non-supervisées pour comparer les embeddings.
 import json
 import numpy as np
 import pandas as pd
-import hdbscan
 from pathlib import Path
+from sklearn.cluster import HDBSCAN
 from sklearn.metrics import silhouette_score, adjusted_rand_score
 from sklearn.neighbors import NearestNeighbors
 from typing import Dict
@@ -22,7 +22,7 @@ from .config import cfg
 
 def cluster_hdbscan(embeddings: np.ndarray, min_cluster_size: int = 5) -> np.ndarray:
     """HDBSCAN clustering. Retourne labels (noise = -1)."""
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=3, metric="euclidean")
+    clusterer = HDBSCAN(min_cluster_size=min_cluster_size, min_samples=3, metric="euclidean")
     return clusterer.fit_predict(embeddings)
 
 
@@ -90,9 +90,11 @@ def run_full_evaluation(
     station_meta: pd.DataFrame,
     window_embeddings: Dict[str, np.ndarray] | None = None,
     method_name: str = "unknown",
-) -> Dict:
-    """Lance les 4 métriques, retourne un dict, sauvegarde en JSON."""
-    labels = cluster_hdbscan(station_embeddings)
+    labels: np.ndarray | None = None,
+) -> tuple[Dict, np.ndarray]:
+    """Lance les 4 métriques, retourne (dict, labels), sauvegarde en JSON."""
+    if labels is None:
+        labels = cluster_hdbscan(station_embeddings)
     n_clusters = len(set(labels[labels >= 0]))
     n_noise = int((labels == -1).sum())
 
@@ -122,7 +124,7 @@ def run_full_evaluation(
     with open(out, "w") as f:
         json.dump(result, f, indent=2)
 
-    return result
+    return result, labels
 
 
 def save_embeddings(

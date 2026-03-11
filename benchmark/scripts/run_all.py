@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from embedding_benchmark.config import cfg
 from embedding_benchmark.data_loader import get_eligible_stations, sample_stations, load_series
-from embedding_benchmark.evaluation import run_full_evaluation, save_embeddings, cluster_hdbscan
+from embedding_benchmark.evaluation import run_full_evaluation, save_embeddings
 
 
 METHODS = {
@@ -76,8 +76,7 @@ def main():
             result = run_method(method_name, series, dates)
 
             # Évaluation
-            labels = cluster_hdbscan(result.station_embeddings)
-            metrics = run_full_evaluation(
+            metrics, labels = run_full_evaluation(
                 result.station_embeddings,
                 result.station_ids,
                 sample,

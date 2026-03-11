@@ -5,7 +5,7 @@ Même encoder que TS2Vec, loss modifiée avec soft assignments.
 L'intégration repose sur le monkey-patching de la loss dans TS2Vec.
 
 Si le patching échoue (API SoftCLT incompatible), on fallback sur TS2Vec
-standard avec un warning — le notebook documentera l'issue.
+standard avec un warning visible dans la sortie CLI.
 """
 
 import time
