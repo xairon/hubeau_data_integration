@@ -65,6 +65,9 @@ def eval_knn_coherence(
     col: str = "nature_eh",
 ) -> float:
     """% de kNN qui partagent le même attribut. [0, 1], haut = cohérent."""
+    k = min(k, len(embeddings) - 1)
+    if k < 1:
+        return -1.0
     nn = NearestNeighbors(n_neighbors=k + 1, metric="cosine")
     nn.fit(embeddings)
     _, indices = nn.kneighbors(embeddings)

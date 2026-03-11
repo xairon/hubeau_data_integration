@@ -23,17 +23,16 @@ def get_eligible_stations(min_days: int = 730) -> pd.DataFrame:
     """
     query = """
         SELECT
-            c.code_bss,
+            code_bss,
             COUNT(*) AS n_days,
-            MIN(c.date) AS first_date,
-            MAX(c.date) AS last_date,
-            d.nature_eh,
-            d.milieu_eh
-        FROM gold.hubeau_daily_chroniques c
-        LEFT JOIN gold.dim_piezo_stations d ON c.code_bss = d.code_bss
-        GROUP BY c.code_bss, d.nature_eh, d.milieu_eh
+            MIN(date) AS first_date,
+            MAX(date) AS last_date,
+            nature_eh,
+            milieu_eh
+        FROM gold.hubeau_daily_chroniques
+        GROUP BY code_bss, nature_eh, milieu_eh
         HAVING COUNT(*) >= %(min_days)s
-           AND MAX(c.date) >= '2024-01-01'
+           AND MAX(date) >= '2024-01-01'
         ORDER BY n_days DESC
     """
     with psycopg2.connect(cfg.dsn) as conn:

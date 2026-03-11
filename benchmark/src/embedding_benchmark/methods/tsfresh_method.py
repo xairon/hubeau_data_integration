@@ -58,7 +58,7 @@ def _extract_and_reduce(df_long: pd.DataFrame, embedding_dim: int, scaler=None, 
         pad = np.zeros((embeddings.shape[0], embedding_dim - embeddings.shape[1]), dtype=np.float32)
         embeddings = np.concatenate([embeddings, pad], axis=1)
 
-    return embeddings, features.index.tolist(), scaler, pca
+    return embeddings, features.index.tolist(), scaler, pca, list(features.columns)
 
 
 def run(series: Dict[str, np.ndarray], dates: Dict[str, list]) -> MethodResult:
@@ -67,7 +67,7 @@ def run(series: Dict[str, np.ndarray], dates: Dict[str, list]) -> MethodResult:
 
     # Station-level
     df_long = _series_to_tsfresh_df(series, cfg.piezo_cols)
-    station_emb, station_ids, scaler, pca = _extract_and_reduce(df_long, cfg.embedding_dim, fit=True)
+    station_emb, station_ids, scaler, pca, feature_names = _extract_and_reduce(df_long, cfg.embedding_dim, fit=True)
 
     # Window-level
     window_embeddings: Dict[str, np.ndarray] = {}
@@ -95,6 +95,8 @@ def run(series: Dict[str, np.ndarray], dates: Dict[str, list]) -> MethodResult:
             disable_progressbar=True, n_jobs=4,
         )
         win_features = impute(win_features)
+        # Align columns with station-level features
+        win_features = win_features.reindex(columns=feature_names, fill_value=0)
         win_scaled = scaler.transform(win_features)
         win_emb = pca.transform(win_scaled).astype(np.float32)
         if win_emb.shape[1] < cfg.embedding_dim:
