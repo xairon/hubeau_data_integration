@@ -9,7 +9,7 @@ Checks:
 - whether the raw NetCDF chunk covering 2006 exists in staging.era5_france_meteo_raw
 
 Usage (PowerShell):
-  python scripts/diagnose_era5_db.py --host dib-2019006065.univ-tours.local --port 49502 --user postgres --password REDACTED --db postgres --year 2006
+  python scripts/diagnose_era5_db.py --host localhost --port 5432 --user postgres --password $PG_PASSWORD --db postgres --year 2006
 """
 
 from __future__ import annotations

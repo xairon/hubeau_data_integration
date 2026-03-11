@@ -5,7 +5,7 @@ ROW_LIMIT = 5000
 SUPERSET_WEBSERVER_PORT = 8088
 
 # Secret key - SHOULD be overridden in production
-SECRET_KEY = os.environ.get("SUPERSET_SECRET_KEY", "REDACTED")
+SECRET_KEY = os.environ.get("SUPERSET_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION")
 
 # Database connection
 # Used for Superset's own metadata (users, dashboards, slices)

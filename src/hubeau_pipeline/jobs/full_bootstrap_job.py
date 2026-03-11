@@ -253,7 +253,7 @@ def load_all_stations(context: OpExecutionContext) -> Nothing:
     # Credentials from standard env vars (available in all containers)
     db_creds = {
         "database": os.getenv("PG_DB", "postgres"),
-        "password": os.getenv("PG_PASSWORD", "postgres"),
+        "password": os.getenv("PG_PASSWORD", ""),
         "username": os.getenv("PG_USER", "postgres"),
         "host": os.getenv("PG_HOST", "postgres"),
         "port": int(os.getenv("PG_PORT", "5432")),
@@ -317,7 +317,7 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
     # Credentials from standard env vars
     db_creds = {
         "database": os.getenv("PG_DB", "postgres"),
-        "password": os.getenv("PG_PASSWORD", "postgres"),
+        "password": os.getenv("PG_PASSWORD", ""),
         "username": os.getenv("PG_USER", "postgres"),
         "host": os.getenv("PG_HOST", "postgres"),
         "port": int(os.getenv("PG_PORT", "5432")),

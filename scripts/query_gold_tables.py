@@ -1,11 +1,12 @@
+import os
 import psycopg2
 
 conn = psycopg2.connect(
-    host="dib-2019006065",
-    port=49502,
-    user="postgres",
-    password="REDACTED",
-    dbname="postgres",
+    host=os.getenv("PG_HOST", "localhost"),
+    port=int(os.getenv("PG_PORT", "5432")),
+    user=os.getenv("PG_USER", "postgres"),
+    password=os.getenv("PG_PASSWORD", ""),
+    dbname=os.getenv("PG_DB", "postgres"),
 )
 cur = conn.cursor()
 cur.execute(

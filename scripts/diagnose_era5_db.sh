@@ -3,7 +3,7 @@
 # Diagnose ERA5 tables on a remote Postgres (no server install; Docker only)
 # ============================================================================
 # Usage:
-#   bash scripts/diagnose_era5_db.sh dib-2019006065.univ-tours.local 49502 postgres REDACTED postgres
+#   bash scripts/diagnose_era5_db.sh localhost 5432 postgres "$PG_PASSWORD" postgres
 #
 # Notes:
 # - Runs a one-shot postgres client container to execute SQL.

@@ -3,7 +3,7 @@ REM ============================================================================
 REM Diagnose ERA5 tables on a remote Postgres (no server install; Docker only)
 REM ============================================================================
 REM Usage:
-REM   scripts\diagnose_era5_db.bat dib-2019006065.univ-tours.local 49502 postgres REDACTED postgres
+REM   scripts\diagnose_era5_db.bat localhost 5432 postgres %PG_PASSWORD% postgres
 REM
 REM Notes:
 REM - This runs a one-shot postgres client container to execute SQL.

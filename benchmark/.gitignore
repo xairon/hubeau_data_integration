@@ -1,0 +1,11 @@
+# Résultats (régénérables)
+results/embeddings/*.parquet
+results/metrics/*.json
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
