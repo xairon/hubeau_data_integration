@@ -20,14 +20,26 @@ class BenchmarkConfig:
 
     # Benchmark params
     sample_size: int = field(default_factory=lambda: int(os.getenv("SAMPLE_SIZE", "300")))
+    piezo_sample_size: int = field(default_factory=lambda: int(os.getenv("PIEZO_SAMPLE_SIZE", "1000")))
+    hydro_sample_size: int = field(default_factory=lambda: int(os.getenv("HYDRO_SAMPLE_SIZE", "1000")))
     window_size: int = field(default_factory=lambda: int(os.getenv("WINDOW_SIZE", "365")))
     stride: int = field(default_factory=lambda: int(os.getenv("STRIDE", "90")))
     embedding_dim: int = field(default_factory=lambda: int(os.getenv("EMBEDDING_DIM", "320")))
     seed: int = field(default_factory=lambda: int(os.getenv("SEED", "42")))
 
-    # Variables piézo
+    # Variables piézo (measurement + ERA5)
     piezo_cols: list[str] = field(default_factory=lambda: [
         "niveau_nappe_eau", "temperature_2m", "total_precipitation", "potential_evaporation"
+    ])
+
+    # Variables hydro (measurement + ERA5)
+    hydro_cols: list[str] = field(default_factory=lambda: [
+        "resultat_obs_elab", "temperature_2m", "total_precipitation", "potential_evaporation"
+    ])
+
+    # ERA5 columns (shared)
+    era5_cols: list[str] = field(default_factory=lambda: [
+        "temperature_2m", "total_precipitation", "potential_evaporation"
     ])
 
     @property
@@ -48,8 +60,20 @@ class BenchmarkConfig:
         return d
 
     @property
+    def windows_dir(self):
+        d = self.results_dir / "windows"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @property
     def metrics_dir(self):
         d = self.results_dir / "metrics"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @property
+    def models_dir(self):
+        d = self.results_dir / "models"
         d.mkdir(parents=True, exist_ok=True)
         return d
 

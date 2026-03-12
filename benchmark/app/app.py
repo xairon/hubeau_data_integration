@@ -1,55 +1,29 @@
-"""
-Démonstrateur Streamlit — Benchmark Embeddings Hydrologiques.
-
-Lancement : cd benchmark && streamlit run app/app.py
-Prérequis : avoir exécuté run_all.py pour générer results/
-"""
-
-import streamlit as st
-from pathlib import Path
+"""SoftCLT Embedding Platform — Piezo + Hydro."""
 import sys
+from pathlib import Path
 
-# Ajouter src/ au path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-st.set_page_config(
-    page_title="Benchmark Embeddings Hydro",
-    page_icon="💧",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+import streamlit as st
+from embedding_benchmark.ui.components import has_results, load_metrics
 
-st.title("💧 Benchmark Embeddings — Séries Temporelles Hydrologiques")
+st.set_page_config(page_title="SoftCLT Embeddings", page_icon="🌊", layout="wide")
 
-st.markdown("""
-### Objectif
+st.title("SoftCLT Embedding Platform")
+st.markdown("Exploration des embeddings de séries temporelles hydrologiques (piézométrie + hydrométrie)")
 
-Comparer **5 méthodes d'embedding** sur ~300 stations piézométriques :
+if not has_results():
+    st.error("Aucun résultat trouvé. Lancez d'abord le benchmark :")
+    st.code("cd benchmark && python scripts/run_softclt.py --piezo 50 --hydro 50")
+    st.stop()
 
-| # | Méthode | Type |
-|---|---------|------|
-| 1 | **tsfresh** | Features classiques (baseline) |
-| 2 | **MOMENT** | Foundation model zero-shot (univariate) |
-| 3 | **Chronos-2** | Foundation model zero-shot (multivariate) |
-| 4 | **TS2Vec** | Contrastif hiérarchique (entraîné) |
-| 5 | **SoftCLT** | Contrastif soft assignments (entraîné) |
+metrics = load_metrics()
+if metrics:
+    cols = st.columns(4)
+    cols[0].metric("Stations", metrics.get("n_stations", "?"))
+    cols[1].metric("Clusters", metrics.get("n_clusters", "?"))
+    cols[2].metric("Silhouette", metrics.get("silhouette", "?"))
+    cols[3].metric("Stabilité temporelle", metrics.get("temporal_stability", "?"))
 
-### Navigation
-
-- **Comparaison** : tableau récapitulatif + radar chart
-- **Exploration embeddings** : UMAP interactif coloré par cluster/nature_eh
-- **Similarité stations** : recherche des k plus proches voisins
-""")
-
-# Vérifier que les résultats existent
-results_dir = Path(__file__).parent.parent / "results"
-metrics_dir = results_dir / "metrics"
-embeddings_dir = results_dir / "embeddings"
-
-if not metrics_dir.exists() or not list(metrics_dir.glob("*.json")):
-    st.warning("⚠️ Aucun résultat trouvé. Exécuter d'abord le benchmark :")
-    st.code("cd benchmark && python scripts/run_all.py", language="bash")
-else:
-    n_methods = len(list(metrics_dir.glob("*.json"))) - (1 if (metrics_dir / "summary.json").exists() else 0)
-    n_embeddings = len(list(embeddings_dir.glob("*.parquet")))
-    st.success(f"✅ {n_methods} méthodes évaluées, {n_embeddings} fichiers embeddings disponibles.")
+    st.markdown("---")
+    st.markdown("Naviguez dans les pages ci-dessous pour explorer les embeddings.")
