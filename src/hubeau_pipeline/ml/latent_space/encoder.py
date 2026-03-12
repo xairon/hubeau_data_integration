@@ -194,12 +194,14 @@ class SoftCLTEncoder:
         conv_keys = sorted([k for k in state_dict if "feature_extractor" in k and "weight" in k])
         output_dim = state_dict[conv_keys[-1]].shape[0]
         # Count depth from conv blocks
+        # DilatedConvEncoder creates [hidden]*depth + [output] = depth+1 blocks
+        # So depth = number of blocks - 1 (last block is the output projection)
         block_indices = set()
         for k in state_dict:
             if "feature_extractor.net." in k:
                 idx = k.split("feature_extractor.net.")[1].split(".")[0]
                 block_indices.add(int(idx))
-        depth = len(block_indices)
+        depth = len(block_indices) - 1
 
         enc.input_dims = input_dim
         enc.embedding_dim = output_dim
