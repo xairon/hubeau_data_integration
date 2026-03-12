@@ -346,6 +346,31 @@ services:
     mem_limit: 1G  # Superset idles at ~115 MB, 4G was excessive
     restart: unless-stopped
 
+  # ── Benchmark Embedding UI ──────────────────────────────────────────────
+  benchmark:
+    build:
+      context: .
+      dockerfile: docker/benchmark/Dockerfile
+    container_name: brgm-benchmark
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_DB: ${PG_DB:-postgres}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - ./benchmark/app:/app/app:ro
+      - ./benchmark/src:/app/src:ro
+      - ./benchmark/scripts:/app/scripts:ro
+      - ./benchmark/results:/app/results
+    ports:
+      - "49514:8501"
+    mem_limit: 4G
+    restart: unless-stopped
+
 volumes:
   # ============================================================================
   # VOLUMES PERSISTANTS - PROTECTION MAXIMALE CONTRE SUPPRESSION ACCIDENTELLE

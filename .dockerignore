@@ -11,6 +11,11 @@ __pycache__/
 venv/
 ENV/
 env/
+*/.venv/
+*/venv/
+
+# Benchmark results (large files)
+benchmark/results/
 
 # IDEs
 .vscode/
