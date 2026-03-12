@@ -34,13 +34,97 @@ Separate encoders for different physical dynamics:
 
 Per-domain normalization: separate `StandardScaler` per domain (meters vs l/s scales).
 
-### 2.2 Embedding Strategy
+### 2.2 Hyperparameters
 
-- **Window size**: 365 days (1 hydrological cycle)
-- **Stride**: 90 days (~4 windows/year)
-- **Embedding dim**: 320
-- **Station embedding**: mean pooling of all window embeddings
-- **Eligibility**: ≥730 days of data + last measurement ≥2024-01-01
+#### Architecture
+| Param | Value | Rationale |
+|-------|-------|-----------|
+| `input_dims` | 4 | 1 hydro variable + 3 ERA5 climate variables |
+| `hidden_dims` | **64** | TS2Vec/SoftCLT paper default. Internal CNN filter count |
+| `output_dims` | 320 | Embedding dimension. TS2Vec paper default |
+| `depth` | 10 | 10 dilated conv layers → receptive field = 1024 timesteps (~2.8 years) |
+
+#### Training
+| Param | Value | Rationale |
+|-------|-------|-----------|
+| `batch_size` | **128** | Maximizes GPU utilization on A6000 48GB with hidden=64 |
+| `n_epochs` | 200 | Max epochs (early stopping may terminate sooner) |
+| `lr` | 1e-3 | AdamW default, standard for TS2Vec |
+| `max_train_length` | **1500** | Cap for padding/splitting long series. >1024 (receptive field), limits memory |
+| `early_stop_patience` | **20** | Stop if loss doesn't improve for 20 consecutive epochs |
+
+#### Encoding
+| Param | Value | Rationale |
+|-------|-------|-----------|
+| `window_size` | 365 | 1 hydrological cycle — captures full seasonal pattern |
+| `stride` | 90 | 75% overlap, ~4 windows/year. Balances resolution vs volume |
+| `station_embedding` | mean pooling | Average of all window embeddings → stable station-level representation |
+
+#### Eligibility
+- ≥730 days of data (2 full cycles minimum for meaningful windows)
+- Last measurement ≥2024-01-01 (exclude defunct stations)
+
+### 2.3 Preprocessing & Normalization Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ TRAINING (manual, ~33 min/domain on RTX A6000)                 │
+│                                                                 │
+│ 1. SQL: SELECT from gold.{domain}_daily_chroniques              │
+│    WHERE station eligible (≥730 days, active 2024+)             │
+│    → {station_id: (T_i, 4)} dict, variable-length              │
+│                                                                 │
+│ 2. _interpolate_and_fill():                                     │
+│    - Linear interpolation for interior NaN gaps (per column)    │
+│    - Remaining NaN (edge cases) → 0                             │
+│                                                                 │
+│ 3. StandardScaler (GLOBAL per-feature):                         │
+│    all_data = concat([arr for arr in series_dict.values()])     │
+│    scaler.fit(all_data)  → mean/std per column                  │
+│    scaled = [scaler.transform(arr) for arr in series]           │
+│    ⚠ Global, NOT per-station — preserves absolute scale         │
+│                                                                 │
+│ 4. TS2Vec padding + splitting:                                  │
+│    - Pad all series to min(max_len, max_train_length=1500)      │
+│    - Series > 1500: split into chunks, each ≤1500               │
+│    - NaN padding for variable-length centering                  │
+│                                                                 │
+│ 5. SoftCLT contrastive training:                                │
+│    - Random crop augmentation (2 views per series)              │
+│    - Soft instance CL: cosine similarity soft labels            │
+│    - Soft temporal CL: sigmoid timelag weighting                │
+│    - Hierarchical: max-pool 2x at each scale level              │
+│                                                                 │
+│ 6. Save: model.pt + scaler.pkl + stations.json                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ NIGHTLY ENCODING (sensor-driven, ~5 min/domain on GPU)         │
+│                                                                 │
+│ 1. Load model.pt + scaler.pkl (SAME scaler as training)        │
+│                                                                 │
+│ 2. For each station:                                            │
+│    a. scaler.transform(raw_arr)  → normalized with train stats  │
+│    b. Sliding windows: 365d window, 90d stride                  │
+│    c. encode(window) → (320,) embedding per window              │
+│    d. mean(window_embeddings) → (320,) station embedding        │
+│                                                                 │
+│ 3. Upsert to pgvector:                                         │
+│    - ml.{domain}_station_embeddings (HNSW cosine index)        │
+│    - ml.{domain}_window_embeddings                             │
+│                                                                 │
+│ 4. HDBSCAN clustering → update cluster_id                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Why Global Normalization (not per-station)?
+
+**Global StandardScaler** (fit on all stations concatenated, per-feature) is the correct choice:
+
+- **Per-station z-score** would make all stations scale-invariant → a deep aquifer at -50m and a shallow one at +2m would have identical normalized profiles. This loses physically meaningful information.
+- **Global normalization** preserves relative magnitudes across stations. Two stations with similar levels AND similar dynamics will be close in embedding space.
+- This follows the **TS2Vec paper** (Yue et al., AAAI 2022) which normalizes per-dataset, not per-instance.
+- The 4 features have very different scales (meters, Kelvin, mm) → per-feature normalization is necessary. `StandardScaler` does this by default.
 
 ### 2.3 Volumetry
 
@@ -65,12 +149,15 @@ Embedding jobs run **in parallel** with the existing dimensions sensor. No depen
 
 ### 2.5 Training vs Encoding
 
-| Operation | Trigger | Duration (CPU) | Frequency |
+| Operation | Trigger | Duration (GPU) | Frequency |
 |-----------|---------|----------------|-----------|
-| Training | Manual (Dagster UI) | ~15-30 min | Monthly or on-demand |
-| Nightly encoding | Sensor (after domain pipeline) | ~5-10 min | Daily |
+| Training | Manual (Dagster UI) | ~33 min | Monthly or on-demand |
+| Nightly encoding | Sensor (after domain pipeline) | ~5 min | Daily |
+| Clustering | After encoding | ~30s (CPU) | Daily |
 
-Training produces `model.pt` + `scaler.pkl`. Nightly encoding loads the latest model and re-encodes all eligible stations (v1: full re-encode; v2: incremental).
+Training produces `model.pt` + `scaler.pkl` + `stations.json`. Nightly encoding loads the latest model and re-encodes all eligible stations (v1: full re-encode; v2: incremental).
+
+**Monitoring**: Training logs epoch progress (loss, best, ETA) to Dagster structured events every 10 epochs. Early stopping halts training after 20 epochs without improvement.
 
 ---
 
@@ -291,9 +378,9 @@ Add to `docker/worker/Dockerfile` (or `pyproject.toml` deps):
 - `scikit-learn>=1.3.0` (already present)
 - `joblib>=1.3.0` (already present)
 
-### 9.2 GPU Support (Optional)
+### 9.2 GPU Support
 
-If GPU available on the server:
+GPU is enabled via NVIDIA Container Toolkit (v1.18.2):
 ```yaml
 # docker-compose.yml - dlt_worker
 deploy:
@@ -303,9 +390,19 @@ deploy:
         - driver: nvidia
           count: 1
           capabilities: [gpu]
+environment:
+  NVIDIA_VISIBLE_DEVICES: all
+mem_limit: 32G  # Training peaks at ~17GB RAM (padding + tensors)
 ```
 
-CPU fallback works via `device="auto"` — just slower (~15min vs ~2min for encoding).
+**Measured performance** (RTX A6000, 48GB VRAM):
+| Operation | Duration | GPU util | VRAM |
+|-----------|----------|----------|------|
+| Piezo training (2,936 stations, 200 epochs) | **33 min** | 80-100% | 32-48 GB |
+| Hydro training (2,535 stations, 200 epochs) | ~28 min | 80-100% | 32-48 GB |
+| Nightly encoding (~3,000 stations) | ~5 min | 30-50% | ~2 GB |
+
+CPU fallback works via `device="auto"` — ~10x slower for training.
 
 ### 9.3 Model Persistence
 
