@@ -9,11 +9,13 @@ Dagster Assets — SoftCLT Embeddings (ML Layer)
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 
 import joblib
 import numpy as np
+import torch
 from dagster import asset, AssetExecutionContext, MetadataValue
 from sklearn.preprocessing import StandardScaler
 
@@ -46,12 +48,19 @@ def ml_piezo_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
     series_dict, _ = load_piezo_series(pg, min_days=730)
     context.log.info(f"{len(series_dict)} eligible piezo stations")
 
+    if torch.cuda.is_available():
+        gpu = torch.cuda.get_device_properties(0)
+        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
+
     all_data = np.concatenate(list(series_dict.values()))
     scaler = StandardScaler().fit(all_data)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
+    t0 = time.time()
     encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, depth=DEPTH)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE)
+    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, dagster_context=context)
+    train_duration = time.time() - t0
+    context.log.info(f"Training complete in {train_duration:.0f}s ({train_duration/60:.1f} min)")
 
     version = f"piezo_{datetime.now():%Y%m%d_%H%M}"
     path = MODELS_DIR / version
@@ -66,6 +75,7 @@ def ml_piezo_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
         "n_stations": len(series_dict),
         "device": encoder.device,
         "embedding_dim": EMBEDDING_DIM,
+        "train_duration_sec": MetadataValue.float(train_duration),
     })
 
 
@@ -81,12 +91,19 @@ def ml_hydro_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
     series_dict, _ = load_hydro_series(pg, min_days=730)
     context.log.info(f"{len(series_dict)} eligible hydro stations")
 
+    if torch.cuda.is_available():
+        gpu = torch.cuda.get_device_properties(0)
+        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
+
     all_data = np.concatenate(list(series_dict.values()))
     scaler = StandardScaler().fit(all_data)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
+    t0 = time.time()
     encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, depth=DEPTH)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE)
+    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, dagster_context=context)
+    train_duration = time.time() - t0
+    context.log.info(f"Training complete in {train_duration:.0f}s ({train_duration/60:.1f} min)")
 
     version = f"hydro_{datetime.now():%Y%m%d_%H%M}"
     path = MODELS_DIR / version
@@ -101,6 +118,7 @@ def ml_hydro_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
         "n_stations": len(series_dict),
         "device": encoder.device,
         "embedding_dim": EMBEDDING_DIM,
+        "train_duration_sec": MetadataValue.float(train_duration),
     })
 
 
@@ -138,7 +156,8 @@ def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
     n_days_map = {}
     n_windows_map = {}
 
-    for bss, arr in series_dict.items():
+    total = len(series_dict)
+    for i, (bss, arr) in enumerate(series_dict.items(), 1):
         scaled = scaler.transform(arr).astype(np.float32)
         dates = dates_dict.get(bss, [])
         n_days_map[bss] = len(arr)
@@ -150,6 +169,9 @@ def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
         window_data[bss] = (win_embs, win_dates)
         station_embs[bss] = SoftCLTEncoder.station_embedding(win_embs)
         n_windows_map[bss] = win_embs.shape[0]
+
+        if i % 500 == 0 or i == total:
+            context.log.info(f"Piezo encoding: {i}/{total} stations ({len(station_embs)} encoded, {sum(w[0].shape[0] for w in window_data.values())} windows)")
 
     upsert_station_embeddings(pg, "piezo", "code_bss", station_embs, n_days_map, n_windows_map, version)
     upsert_window_embeddings(pg, "piezo", "code_bss", window_data, version)
@@ -192,7 +214,8 @@ def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
     n_days_map = {}
     n_windows_map = {}
 
-    for station, arr in series_dict.items():
+    total = len(series_dict)
+    for i, (station, arr) in enumerate(series_dict.items(), 1):
         scaled = scaler.transform(arr).astype(np.float32)
         dates = dates_dict.get(station, [])
         n_days_map[station] = len(arr)
@@ -204,6 +227,9 @@ def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
         window_data[station] = (win_embs, win_dates)
         station_embs[station] = SoftCLTEncoder.station_embedding(win_embs)
         n_windows_map[station] = win_embs.shape[0]
+
+        if i % 500 == 0 or i == total:
+            context.log.info(f"Hydro encoding: {i}/{total} stations ({len(station_embs)} encoded, {sum(w[0].shape[0] for w in window_data.values())} windows)")
 
     upsert_station_embeddings(pg, "hydro", "code_station", station_embs, n_days_map, n_windows_map, version)
     upsert_window_embeddings(pg, "hydro", "code_station", window_data, version)

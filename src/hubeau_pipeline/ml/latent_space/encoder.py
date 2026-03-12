@@ -1,10 +1,14 @@
 """SoftCLT encoder wrapper for hydrological time series."""
 
+import logging
+import time
 import numpy as np
 import torch
 import joblib
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _patch_softclt_loss():
@@ -51,11 +55,37 @@ class SoftCLTEncoder:
         lr: float = 1e-3,
         batch_size: int = 16,
         max_train_length: int = 3000,
+        dagster_context=None,
     ) -> "SoftCLTEncoder":
-        """Train SoftCLT on a list of multivariate series."""
+        """Train SoftCLT on a list of multivariate series.
+
+        Args:
+            dagster_context: Optional AssetExecutionContext for Dagster event logging.
+                If provided, logs epoch progress and loss to Dagster structured logs.
+        """
         from ..ts2vec.ts2vec import TS2Vec
 
         _patch_softclt_loss()
+
+        # Training progress tracker
+        training_state = {"start_time": time.time(), "n_epochs": n_epochs, "best_loss": float("inf")}
+
+        def _epoch_callback(model, loss):
+            epoch = model.n_epochs
+            elapsed = time.time() - training_state["start_time"]
+            avg_sec = elapsed / max(epoch, 1)
+            remaining = avg_sec * (training_state["n_epochs"] - epoch)
+            training_state["best_loss"] = min(training_state["best_loss"], loss)
+
+            msg = (
+                f"Epoch {epoch}/{training_state['n_epochs']} — "
+                f"loss={loss:.6f} (best={training_state['best_loss']:.6f}) — "
+                f"{elapsed:.0f}s elapsed, ~{remaining:.0f}s remaining"
+            )
+            if dagster_context is not None:
+                dagster_context.log.info(msg)
+            else:
+                logger.info(msg)
 
         self.model = TS2Vec(
             input_dims=self.input_dims,
@@ -66,8 +96,9 @@ class SoftCLTEncoder:
             lr=lr,
             batch_size=batch_size,
             max_train_length=max_train_length,
+            after_epoch_callback=_epoch_callback,
         )
-        self.model.fit(train_series, n_epochs=n_epochs, verbose=True)
+        self.model.fit(train_series, n_epochs=n_epochs, verbose=False)
         return self
 
     def encode_windows(
