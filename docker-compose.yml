@@ -140,7 +140,7 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
-    mem_limit: 16G  # dbt + ML encoding (GPU VRAM separate, but CPU-side needs ~8G for data loading)
+    mem_limit: 32G  # dbt + ML training (GPU VRAM separate; training pads 2936 series → ~12-16G RAM peak)
     restart: unless-stopped
 
   # Dagster Web UI

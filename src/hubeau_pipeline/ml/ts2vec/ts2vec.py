@@ -60,11 +60,16 @@ class TS2Vec:
         '''
         # Support list of variable-length arrays
         if isinstance(train_data, list):
+            # Cap padding length to max_train_length to avoid OOM
+            # (series longer than cap are split later anyway)
+            cap = self.max_train_length if self.max_train_length else None
             max_len = max(arr.shape[0] for arr in train_data)
+            if cap and max_len > cap:
+                max_len = cap
             n_features = train_data[0].shape[1]
             padded = np.full((len(train_data), max_len, n_features), np.nan, dtype=np.float32)
             for i, arr in enumerate(train_data):
-                padded[i, :arr.shape[0]] = arr
+                padded[i, :min(arr.shape[0], max_len)] = arr[:max_len]
             train_data = padded
 
         assert train_data.ndim == 3

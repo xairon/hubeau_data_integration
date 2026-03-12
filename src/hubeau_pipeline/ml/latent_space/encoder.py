@@ -54,7 +54,7 @@ class SoftCLTEncoder:
         n_epochs: int = 200,
         lr: float = 1e-3,
         batch_size: int = 128,
-        max_train_length: int = 3000,
+        max_train_length: int = 1500,
         early_stop_patience: int = 20,
         dagster_context=None,
     ) -> "SoftCLTEncoder":
