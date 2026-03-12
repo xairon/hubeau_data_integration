@@ -187,21 +187,19 @@ class SoftCLTEncoder:
         # Need to know dims to reconstruct — infer from state dict
         state_dict = torch.load(str(model_path), map_location=enc.device)
         # Infer dims from state dict keys
-        # module.module.input_fc.weight has shape (hidden_dims, input_dims)
         input_fc_key = [k for k in state_dict if "input_fc.weight" in k][0]
         hidden_dim, input_dim = state_dict[input_fc_key].shape
-        # Last conv layer output_dims
-        conv_keys = sorted([k for k in state_dict if "feature_extractor" in k and "weight" in k])
-        output_dim = state_dict[conv_keys[-1]].shape[0]
-        # Count depth from conv blocks
-        # DilatedConvEncoder creates [hidden]*depth + [output] = depth+1 blocks
-        # So depth = number of blocks - 1 (last block is the output projection)
+        # Count conv blocks and find max index
         block_indices = set()
         for k in state_dict:
             if "feature_extractor.net." in k:
                 idx = k.split("feature_extractor.net.")[1].split(".")[0]
                 block_indices.add(int(idx))
+        # DilatedConvEncoder creates [hidden]*depth + [output] = depth+1 blocks
         depth = len(block_indices) - 1
+        # Output dim from final block's conv2
+        max_block = max(block_indices)
+        output_dim = state_dict[f"module.feature_extractor.net.{max_block}.conv2.conv.weight"].shape[0]
 
         enc.input_dims = input_dim
         enc.embedding_dim = output_dim
