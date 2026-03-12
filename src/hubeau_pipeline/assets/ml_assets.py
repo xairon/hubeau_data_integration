@@ -27,9 +27,11 @@ MODELS_DIR = Path("/var/ml/models")
 WINDOW_SIZE = 365
 STRIDE = 90
 N_EPOCHS = 200
-BATCH_SIZE = 16
+BATCH_SIZE = 128  # A6000 48GB VRAM can handle large batches with hidden=64
 EMBEDDING_DIM = 320
+HIDDEN_DIM = 64  # TS2Vec/SoftCLT paper default (NOT output_dims)
 DEPTH = 10
+EARLY_STOP_PATIENCE = 20  # Stop if no improvement for 20 epochs
 
 
 # ======================================================================
@@ -57,8 +59,8 @@ def ml_piezo_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
     t0 = time.time()
-    encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, depth=DEPTH)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, dagster_context=context)
+    encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, hidden_dim=HIDDEN_DIM, depth=DEPTH)
+    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
     train_duration = time.time() - t0
     context.log.info(f"Training complete in {train_duration:.0f}s ({train_duration/60:.1f} min)")
 
@@ -100,8 +102,8 @@ def ml_hydro_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
     t0 = time.time()
-    encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, depth=DEPTH)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, dagster_context=context)
+    encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, hidden_dim=HIDDEN_DIM, depth=DEPTH)
+    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
     train_duration = time.time() - t0
     context.log.info(f"Training complete in {train_duration:.0f}s ({train_duration/60:.1f} min)")
 

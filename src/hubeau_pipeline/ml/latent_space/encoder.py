@@ -53,39 +53,65 @@ class SoftCLTEncoder:
         train_series: list[np.ndarray],
         n_epochs: int = 200,
         lr: float = 1e-3,
-        batch_size: int = 16,
+        batch_size: int = 128,
         max_train_length: int = 3000,
+        early_stop_patience: int = 20,
         dagster_context=None,
     ) -> "SoftCLTEncoder":
         """Train SoftCLT on a list of multivariate series.
 
         Args:
+            early_stop_patience: Stop training if loss doesn't improve for N epochs.
+                Set to 0 to disable early stopping.
             dagster_context: Optional AssetExecutionContext for Dagster event logging.
-                If provided, logs epoch progress and loss to Dagster structured logs.
         """
         from ..ts2vec.ts2vec import TS2Vec
 
         _patch_softclt_loss()
 
-        # Training progress tracker
-        training_state = {"start_time": time.time(), "n_epochs": n_epochs, "best_loss": float("inf")}
+        # Training progress tracker with early stopping
+        training_state = {
+            "start_time": time.time(),
+            "n_epochs": n_epochs,
+            "best_loss": float("inf"),
+            "patience_counter": 0,
+            "best_epoch": 0,
+        }
+
+        def _log(msg):
+            if dagster_context is not None:
+                dagster_context.log.info(msg)
+            else:
+                logger.info(msg)
 
         def _epoch_callback(model, loss):
             epoch = model.n_epochs
             elapsed = time.time() - training_state["start_time"]
             avg_sec = elapsed / max(epoch, 1)
             remaining = avg_sec * (training_state["n_epochs"] - epoch)
-            training_state["best_loss"] = min(training_state["best_loss"], loss)
 
-            msg = (
-                f"Epoch {epoch}/{training_state['n_epochs']} — "
-                f"loss={loss:.6f} (best={training_state['best_loss']:.6f}) — "
-                f"{elapsed:.0f}s elapsed, ~{remaining:.0f}s remaining"
-            )
-            if dagster_context is not None:
-                dagster_context.log.info(msg)
+            if loss < training_state["best_loss"]:
+                training_state["best_loss"] = loss
+                training_state["patience_counter"] = 0
+                training_state["best_epoch"] = epoch
             else:
-                logger.info(msg)
+                training_state["patience_counter"] += 1
+
+            # Log every 10 epochs or at milestones
+            if epoch % 10 == 0 or epoch == 1 or epoch == training_state["n_epochs"]:
+                _log(
+                    f"Epoch {epoch}/{training_state['n_epochs']} — "
+                    f"loss={loss:.6f} (best={training_state['best_loss']:.6f} @{training_state['best_epoch']}) — "
+                    f"{elapsed:.0f}s elapsed, ~{remaining:.0f}s remaining"
+                )
+
+            # Early stopping
+            if early_stop_patience > 0 and training_state["patience_counter"] >= early_stop_patience:
+                _log(
+                    f"Early stopping at epoch {epoch} — no improvement for {early_stop_patience} epochs "
+                    f"(best={training_state['best_loss']:.6f} @epoch {training_state['best_epoch']})"
+                )
+                raise _EarlyStopSignal()
 
         self.model = TS2Vec(
             input_dims=self.input_dims,
@@ -98,8 +124,19 @@ class SoftCLTEncoder:
             max_train_length=max_train_length,
             after_epoch_callback=_epoch_callback,
         )
-        self.model.fit(train_series, n_epochs=n_epochs, verbose=False)
+        try:
+            self.model.fit(train_series, n_epochs=n_epochs, verbose=False)
+        except _EarlyStopSignal:
+            pass  # Training stopped early, model is usable
+
+        total = time.time() - training_state["start_time"]
+        _log(f"Training done: {training_state['best_epoch']} best epoch, {total:.0f}s total")
         return self
+
+
+class _EarlyStopSignal(Exception):
+    """Internal signal to break out of TS2Vec's training loop."""
+    pass
 
     def encode_windows(
         self,
