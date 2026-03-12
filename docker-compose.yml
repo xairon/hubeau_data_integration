@@ -64,7 +64,7 @@ services:
     command: ["python", "/app/apply-tuning.py"]
     restart: "no"
 
-  # DLT Worker - Pipeline execution
+  # DLT Worker - Pipeline execution (GPU-enabled for ML embeddings)
   dlt_worker:
     build:
       context: .
@@ -76,7 +76,15 @@ services:
         condition: service_healthy
       dagster_postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     environment:
+      NVIDIA_VISIBLE_DEVICES: all
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
       PYTHONDONTWRITEBYTECODE: 1
@@ -119,6 +127,8 @@ services:
       - ./configs:/app/configs
       - ./scripts:/app/scripts
       - ./dagster_home:/app/dagster_home
+      # ML models persistence (trained SoftCLT weights + scalers)
+      - ml_models:/var/ml/models
     command: [ "dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline.definitions" ]
     ports:
       - "49505:8080"   # dbt docs serve (lancer manuellement: docker exec -it brgm-dlt-worker dbt docs serve --port 8080)
@@ -130,7 +140,7 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
-    mem_limit: 8G  # dbt 12 threads + streaming runs ~4G peak
+    mem_limit: 16G  # dbt + ML encoding (GPU VRAM separate, but CPU-side needs ~8G for data loading)
     restart: unless-stopped
 
   # Dagster Web UI
@@ -390,3 +400,6 @@ volumes:
   cloudbeaver_data:
     external: true
     name: brgm_cloudbeaver_data
+  ml_models:
+    external: true
+    name: brgm_ml_models

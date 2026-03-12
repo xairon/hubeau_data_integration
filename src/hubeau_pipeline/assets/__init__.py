@@ -22,6 +22,15 @@ from .bronze import (
 
 from .dbt_assets import hubeau_dbt_assets
 
+from .ml_assets import (
+    ml_piezo_model_train,
+    ml_hydro_model_train,
+    ml_piezo_embeddings_update,
+    ml_hydro_embeddings_update,
+    ml_piezo_clusters,
+    ml_hydro_clusters,
+)
+
 all_bronze_assets = [
     piezometry_stations_raw,
     piezometry_chroniques_raw,
@@ -42,6 +51,16 @@ all_bronze_assets = [
 # dbt assets replace the manual aggregation assets
 all_dbt_assets = [hubeau_dbt_assets]
 
-all_assets = all_bronze_assets + all_dbt_assets
+# ML — SoftCLT Embeddings
+all_ml_assets = [
+    ml_piezo_model_train,
+    ml_hydro_model_train,
+    ml_piezo_embeddings_update,
+    ml_hydro_embeddings_update,
+    ml_piezo_clusters,
+    ml_hydro_clusters,
+]
 
-__all__ = ["all_assets", "all_bronze_assets", "all_dbt_assets"]
+all_assets = all_bronze_assets + all_dbt_assets + all_ml_assets
+
+__all__ = ["all_assets", "all_bronze_assets", "all_dbt_assets", "all_ml_assets"]

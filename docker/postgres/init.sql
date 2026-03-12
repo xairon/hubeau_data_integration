@@ -66,12 +66,16 @@ ALTER SYSTEM SET checkpoint_timeout = '15min';
 ALTER SYSTEM SET default_statistics_target = 500;
 ALTER SYSTEM SET jit = 'off';
 
+-- pgvector extension (for ML embeddings — HNSW similarity search)
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Create schemas if not exist
 CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;
 CREATE SCHEMA IF NOT EXISTS silver_rejects;
 CREATE SCHEMA IF NOT EXISTS gold;
 CREATE SCHEMA IF NOT EXISTS ops;
+CREATE SCHEMA IF NOT EXISTS ml;
 
 -- Create Superset database (idempotent way)
 SELECT 'CREATE DATABASE superset'
