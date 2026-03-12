@@ -26,6 +26,10 @@ def _resolve_device(device: str) -> str:
     return device
 
 
+class _EarlyStopSignal(Exception):
+    """Internal signal to break out of TS2Vec's training loop."""
+
+
 class SoftCLTEncoder:
     """SoftCLT encoder for multivariate hydrological time series.
 
@@ -133,10 +137,6 @@ class SoftCLTEncoder:
         _log(f"Training done: {training_state['best_epoch']} best epoch, {total:.0f}s total")
         return self
 
-
-class _EarlyStopSignal(Exception):
-    """Internal signal to break out of TS2Vec's training loop."""
-    pass
 
     def encode_windows(
         self,
