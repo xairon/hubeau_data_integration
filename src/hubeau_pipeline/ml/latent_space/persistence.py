@@ -14,7 +14,12 @@ CREATE TABLE IF NOT EXISTS ml.{domain}_station_embeddings (
     model_version TEXT NOT NULL,
     n_days INT NOT NULL,
     n_windows INT NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    umap_2d_x FLOAT,
+    umap_2d_y FLOAT,
+    umap_3d_x FLOAT,
+    umap_3d_y FLOAT,
+    umap_3d_z FLOAT
 )
 """
 
@@ -120,6 +125,42 @@ def upsert_window_embeddings(pg, domain: str, id_col: str,
                 total += 1
         conn.commit()
     logger.info(f"Upserted {total} window embeddings into {table}")
+
+
+def update_umap_coords(pg, domain: str, id_col: str,
+                       station_ids: list,
+                       umap_2d: np.ndarray,
+                       umap_3d: np.ndarray):
+    """Update UMAP 2D and 3D coordinates for station embeddings.
+
+    Args:
+        pg: SQLAlchemy engine or psycopg2 connection wrapper with get_connection().
+        domain: "piezo" or "hydro".
+        id_col: "code_bss" or "code_station".
+        station_ids: list of N station IDs.
+        umap_2d: numpy array of shape (N, 2) — UMAP 2D coordinates.
+        umap_3d: numpy array of shape (N, 3) — UMAP 3D coordinates.
+    """
+    table = f"ml.{domain}_station_embeddings"
+    sql = f"""
+        UPDATE {table}
+        SET umap_2d_x = %s,
+            umap_2d_y = %s,
+            umap_3d_x = %s,
+            umap_3d_y = %s,
+            umap_3d_z = %s
+        WHERE {id_col} = %s
+    """
+    with pg.get_connection() as conn:
+        cur = conn.cursor()
+        for i, sid in enumerate(station_ids):
+            cur.execute(sql, (
+                float(umap_2d[i, 0]), float(umap_2d[i, 1]),
+                float(umap_3d[i, 0]), float(umap_3d[i, 1]), float(umap_3d[i, 2]),
+                sid,
+            ))
+        conn.commit()
+    logger.info(f"Updated UMAP coords for {len(station_ids)} stations in {table}")
 
 
 def search_similar(pg, domain: str, id_col: str, station_id: str, k: int = 10) -> list[dict]:
