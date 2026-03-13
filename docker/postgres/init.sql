@@ -93,6 +93,43 @@ END $$;
 -- These are converted by dlt on first load, this is a safety net
 -- ============================================================================
 
+-- ============================================================================
+-- ML Schema: UMAP 2D/3D columns for latent space visualization
+-- Added to both piezo and hydro station_embeddings tables
+-- ============================================================================
+
+-- These columns are added via ALTER TABLE for live databases.
+-- The CREATE TABLE templates in persistence.py already include these columns.
+-- The DO blocks below are idempotent (safe to re-run).
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'ml' AND table_name = 'piezo_station_embeddings' AND column_name = 'umap_2d_x'
+    ) THEN
+        ALTER TABLE ml.piezo_station_embeddings ADD COLUMN umap_2d_x FLOAT;
+        ALTER TABLE ml.piezo_station_embeddings ADD COLUMN umap_2d_y FLOAT;
+        ALTER TABLE ml.piezo_station_embeddings ADD COLUMN umap_3d_x FLOAT;
+        ALTER TABLE ml.piezo_station_embeddings ADD COLUMN umap_3d_y FLOAT;
+        ALTER TABLE ml.piezo_station_embeddings ADD COLUMN umap_3d_z FLOAT;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'ml' AND table_name = 'hydro_station_embeddings' AND column_name = 'umap_2d_x'
+    ) THEN
+        ALTER TABLE ml.hydro_station_embeddings ADD COLUMN umap_2d_x FLOAT;
+        ALTER TABLE ml.hydro_station_embeddings ADD COLUMN umap_2d_y FLOAT;
+        ALTER TABLE ml.hydro_station_embeddings ADD COLUMN umap_3d_x FLOAT;
+        ALTER TABLE ml.hydro_station_embeddings ADD COLUMN umap_3d_y FLOAT;
+        ALTER TABLE ml.hydro_station_embeddings ADD COLUMN umap_3d_z FLOAT;
+    END IF;
+END $$;
+
 -- Function to convert existing tables to hypertables (safe, idempotent)
 CREATE OR REPLACE FUNCTION convert_to_hypertable_if_exists(
     table_name TEXT,
