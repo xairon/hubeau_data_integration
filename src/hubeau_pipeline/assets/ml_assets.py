@@ -254,13 +254,33 @@ def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
     description="HDBSCAN clustering on piezo station embeddings (~2,935 stations)",
 )
 def ml_piezo_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
+    from umap import UMAP
     from ..ml.latent_space.clustering import cluster_and_update
+    from ..ml.latent_space.persistence import update_umap_coords
+
     result = cluster_and_update(pg, "piezo", "code_bss")
+
+    # Compute UMAP projections on station embeddings for visualization
+    embeddings = result["embeddings"]        # shape (N, 320)
+    station_ids = result["station_ids"]      # list of N station IDs
+
+    context.log.info(f"Computing UMAP 2D for {len(station_ids)} piezo stations...")
+    umap_2d = UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
+                   metric="cosine", random_state=42).fit_transform(embeddings)
+
+    context.log.info("Computing UMAP 3D...")
+    umap_3d = UMAP(n_components=3, n_neighbors=15, min_dist=0.1,
+                   metric="cosine", random_state=42).fit_transform(embeddings)
+
+    update_umap_coords(pg, "piezo", "code_bss", station_ids, umap_2d, umap_3d)
+
     context.add_output_metadata({
         "n_clusters": result["n_clusters"],
         "n_noise": result["n_noise"],
         "silhouette": MetadataValue.float(result["silhouette_score"]),
         "davies_bouldin": MetadataValue.float(result["davies_bouldin_index"]),
+        "umap_2d_computed": True,
+        "umap_3d_computed": True,
     })
 
 
@@ -270,11 +290,31 @@ def ml_piezo_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
     description="HDBSCAN clustering on hydro station embeddings (~2,535 stations)",
 )
 def ml_hydro_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
+    from umap import UMAP
     from ..ml.latent_space.clustering import cluster_and_update
+    from ..ml.latent_space.persistence import update_umap_coords
+
     result = cluster_and_update(pg, "hydro", "code_station")
+
+    # Compute UMAP projections on station embeddings for visualization
+    embeddings = result["embeddings"]        # shape (N, 320)
+    station_ids = result["station_ids"]      # list of N station IDs
+
+    context.log.info(f"Computing UMAP 2D for {len(station_ids)} hydro stations...")
+    umap_2d = UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
+                   metric="cosine", random_state=42).fit_transform(embeddings)
+
+    context.log.info("Computing UMAP 3D...")
+    umap_3d = UMAP(n_components=3, n_neighbors=15, min_dist=0.1,
+                   metric="cosine", random_state=42).fit_transform(embeddings)
+
+    update_umap_coords(pg, "hydro", "code_station", station_ids, umap_2d, umap_3d)
+
     context.add_output_metadata({
         "n_clusters": result["n_clusters"],
         "n_noise": result["n_noise"],
         "silhouette": MetadataValue.float(result["silhouette_score"]),
         "davies_bouldin": MetadataValue.float(result["davies_bouldin_index"]),
+        "umap_2d_computed": True,
+        "umap_3d_computed": True,
     })
