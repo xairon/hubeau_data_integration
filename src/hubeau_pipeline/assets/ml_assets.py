@@ -257,28 +257,30 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str):
     # Ensure new tables exist
     init_ml_schema(pg)
 
-    # --- Config 1: Optuna-tuned HDBSCAN (default) ---
-    context.log.info(f"Config 1: Optuna-tuned HDBSCAN for {domain}...")
-    tuned = cluster_and_store(
+    # --- Config 1: Wide clusters (default) — fewer, larger clusters ---
+    context.log.info(f"Config 1: Wide clusters (default) for {domain}...")
+    wide = cluster_and_store(
         pg, domain, id_col,
         is_default=True,
-        tune=True, tune_n_trials=80, tune_timeout=300,
+        tune=False,
+        min_cluster_size=25, min_samples=10,
+        umap_dims=15, umap_n_neighbors=20, umap_min_dist=0.1,
     )
     context.log.info(
-        f"Tuned: {tuned['n_clusters']} clusters, DBCV={tuned['dbcv']:.4f}, "
-        f"sil={tuned['silhouette_score']:.4f}, run_id={tuned['run_id']}"
+        f"Wide: {wide['n_clusters']} clusters, DBCV={wide['dbcv']:.4f}, "
+        f"sil={wide['silhouette_score']:.4f}, run_id={wide['run_id']}"
     )
 
     # Update legacy UMAP coords from default run
-    if tuned.get("umap_2d") is not None:
+    if wide.get("umap_2d") is not None:
         update_umap_coords(
             pg, domain, id_col,
-            tuned["station_ids"], tuned["umap_2d"], tuned["umap_3d"],
+            wide["station_ids"], wide["umap_2d"], wide["umap_3d"],
         )
 
-    # --- Config 2: Fixed defaults (backup) ---
-    context.log.info(f"Config 2: Fixed defaults for {domain}...")
-    fixed = cluster_and_store(
+    # --- Config 2: Fine-grained clusters (alternative) ---
+    context.log.info(f"Config 2: Fine-grained clusters for {domain}...")
+    fine = cluster_and_store(
         pg, domain, id_col,
         is_default=False,
         tune=False,
@@ -286,22 +288,20 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str):
         umap_dims=10, umap_n_neighbors=15, umap_min_dist=0.0,
     )
     context.log.info(
-        f"Fixed: {fixed['n_clusters']} clusters, DBCV={fixed['dbcv']:.4f}, "
-        f"sil={fixed['silhouette_score']:.4f}, run_id={fixed['run_id']}"
+        f"Fine: {fine['n_clusters']} clusters, DBCV={fine['dbcv']:.4f}, "
+        f"sil={fine['silhouette_score']:.4f}, run_id={fine['run_id']}"
     )
 
-    # Metadata from tuned (default) run
-    params = tuned["params"]
+    # Metadata from default (wide) run
+    params = wide["params"]
     context.add_output_metadata({
-        "n_stations": MetadataValue.int(len(tuned["station_ids"])),
-        "tuned_run_id": MetadataValue.int(tuned["run_id"]),
-        "tuned_n_clusters": MetadataValue.int(tuned["n_clusters"]),
-        "tuned_dbcv": MetadataValue.float(tuned["dbcv"]),
-        "tuned_silhouette": MetadataValue.float(tuned["silhouette_score"]),
-        "fixed_run_id": MetadataValue.int(fixed["run_id"]),
-        "fixed_n_clusters": MetadataValue.int(fixed["n_clusters"]),
-        "fixed_dbcv": MetadataValue.float(fixed["dbcv"]),
-        "fixed_silhouette": MetadataValue.float(fixed["silhouette_score"]),
+        "n_stations": MetadataValue.int(len(wide["station_ids"])),
+        "wide_run_id": MetadataValue.int(wide["run_id"]),
+        "wide_n_clusters": MetadataValue.int(wide["n_clusters"]),
+        "wide_silhouette": MetadataValue.float(wide["silhouette_score"]),
+        "fine_run_id": MetadataValue.int(fine["run_id"]),
+        "fine_n_clusters": MetadataValue.int(fine["n_clusters"]),
+        "fine_silhouette": MetadataValue.float(fine["silhouette_score"]),
         "hdbscan_min_cluster_size": MetadataValue.int(params["hdbscan_min_cluster_size"]),
         "hdbscan_min_samples": MetadataValue.int(params["hdbscan_min_samples"]),
     })
