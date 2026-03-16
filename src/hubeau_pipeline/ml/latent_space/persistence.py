@@ -56,6 +56,44 @@ BEGIN
 END $$;
 """
 
+_CREATE_CLUSTERING_RUNS = """
+CREATE TABLE IF NOT EXISTS ml.clustering_runs (
+    id SERIAL PRIMARY KEY,
+    domain TEXT NOT NULL,
+    level TEXT NOT NULL DEFAULT 'stations',
+    method TEXT NOT NULL DEFAULT 'hdbscan',
+    params JSONB NOT NULL,
+    metrics JSONB NOT NULL,
+    n_clusters INT NOT NULL,
+    n_stations INT NOT NULL,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+"""
+
+_CREATE_CLUSTERING_LABELS = """
+CREATE TABLE IF NOT EXISTS ml.clustering_labels (
+    run_id INT NOT NULL REFERENCES ml.clustering_runs(id) ON DELETE CASCADE,
+    station_id TEXT NOT NULL,
+    cluster_id INT NOT NULL,
+    umap_2d_x FLOAT,
+    umap_2d_y FLOAT,
+    umap_3d_x FLOAT,
+    umap_3d_y FLOAT,
+    umap_3d_z FLOAT,
+    PRIMARY KEY (run_id, station_id)
+)
+"""
+
+_CREATE_CLUSTERING_LABELS_IDX = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_clustering_labels_run') THEN
+        CREATE INDEX idx_clustering_labels_run ON ml.clustering_labels (run_id);
+    END IF;
+END $$;
+"""
+
 
 def init_ml_schema(pg):
     """Create ml schema, pgvector extension, and all 4 tables + indexes (idempotent)."""
@@ -73,6 +111,10 @@ def init_ml_schema(pg):
             cur.execute(_CREATE_BTREE_INDEX.format(
                 idx_name=f"idx_{domain}_window_station", domain=domain, id_col=id_col
             ))
+
+        cur.execute(_CREATE_CLUSTERING_RUNS)
+        cur.execute(_CREATE_CLUSTERING_LABELS)
+        cur.execute(_CREATE_CLUSTERING_LABELS_IDX)
 
         conn.commit()
     logger.info("ml schema and tables initialized")
@@ -177,3 +219,71 @@ def search_similar(pg, domain: str, id_col: str, station_id: str, k: int = 10) -
             ORDER BY distance LIMIT %s
         """, (station_id, station_id, k))
         return [{id_col: r[0], "distance": float(r[1])} for r in cur.fetchall()]
+
+
+def save_clustering_run(
+    pg,
+    domain: str,
+    level: str,
+    method: str,
+    params: dict,
+    metrics: dict,
+    n_clusters: int,
+    n_stations: int,
+    is_default: bool = False,
+    station_ids: list[str] | None = None,
+    labels: np.ndarray | None = None,
+    umap_2d: np.ndarray | None = None,
+    umap_3d: np.ndarray | None = None,
+) -> int:
+    """Save a clustering run with labels and UMAP coords. Returns run_id."""
+    import json
+
+    with pg.get_connection() as conn:
+        cur = conn.cursor()
+
+        if is_default:
+            cur.execute(
+                "UPDATE ml.clustering_runs SET is_default = FALSE "
+                "WHERE domain = %s AND level = %s AND is_default = TRUE",
+                (domain, level),
+            )
+
+        cur.execute(
+            """
+            INSERT INTO ml.clustering_runs
+                (domain, level, method, params, metrics, n_clusters, n_stations, is_default)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (domain, level, method,
+             json.dumps(params), json.dumps(metrics),
+             n_clusters, n_stations, is_default),
+        )
+        run_id = cur.fetchone()[0]
+
+        if station_ids is not None and labels is not None:
+            for i, (sid, label) in enumerate(zip(station_ids, labels)):
+                u2x = float(umap_2d[i, 0]) if umap_2d is not None else None
+                u2y = float(umap_2d[i, 1]) if umap_2d is not None else None
+                u3x = float(umap_3d[i, 0]) if umap_3d is not None else None
+                u3y = float(umap_3d[i, 1]) if umap_3d is not None else None
+                u3z = float(umap_3d[i, 2]) if umap_3d is not None else None
+                cur.execute(
+                    """
+                    INSERT INTO ml.clustering_labels
+                        (run_id, station_id, cluster_id, umap_2d_x, umap_2d_y,
+                         umap_3d_x, umap_3d_y, umap_3d_z)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (run_id, sid, int(label), u2x, u2y, u3x, u3y, u3z),
+                )
+
+        conn.commit()
+
+    logger.info(
+        "Saved clustering run %d: domain=%s level=%s method=%s "
+        "n_clusters=%d n_stations=%d is_default=%s",
+        run_id, domain, level, method, n_clusters, n_stations, is_default,
+    )
+    return run_id

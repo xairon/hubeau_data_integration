@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = Path("/var/ml/models")
 WINDOW_SIZE = 365
 STRIDE = 90
+MIN_DAYS = 540  # ~1.5 years, guarantees >=2 windows of 365d
 N_EPOCHS = 200
 BATCH_SIZE = 128  # A6000 48GB VRAM can handle large batches with hidden=64
 EMBEDDING_DIM = 320
@@ -41,13 +42,13 @@ EARLY_STOP_PATIENCE = 20  # Stop if no improvement for 20 epochs
 @asset(
     group_name="ml_piezo",
     deps=["hubeau_daily_chroniques"],
-    description="Train SoftCLT encoder for piezometry (~2,935 stations, GPU)",
+    description="Train SoftCLT encoder for piezometry (~4,200 stations, GPU)",
 )
 def ml_piezo_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
     from ..ml.latent_space.encoder import SoftCLTEncoder
     from ..ml.latent_space.data import load_piezo_series
 
-    series_dict, _ = load_piezo_series(pg, min_days=730)
+    series_dict, _ = load_piezo_series(pg, min_days=MIN_DAYS)
     context.log.info(f"{len(series_dict)} eligible piezo stations")
 
     if torch.cuda.is_available():
@@ -84,13 +85,13 @@ def ml_piezo_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
 @asset(
     group_name="ml_hydro",
     deps=["hydro_daily_chroniques"],
-    description="Train SoftCLT encoder for hydrometry (~2,535 stations, GPU)",
+    description="Train SoftCLT encoder for hydrometry (~4,200 stations, GPU)",
 )
 def ml_hydro_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
     from ..ml.latent_space.encoder import SoftCLTEncoder
     from ..ml.latent_space.data import load_hydro_series
 
-    series_dict, _ = load_hydro_series(pg, min_days=730)
+    series_dict, _ = load_hydro_series(pg, min_days=MIN_DAYS)
     context.log.info(f"{len(series_dict)} eligible hydro stations")
 
     if torch.cuda.is_available():
@@ -131,7 +132,7 @@ def ml_hydro_model_train(context: AssetExecutionContext, pg: PostgreSQLResource)
 @asset(
     group_name="ml_piezo",
     deps=["hubeau_daily_chroniques"],
-    description="Nightly: encode piezo stations → ~208K windows + ~2,935 station embeddings",
+    description="Nightly: encode piezo stations → windows + station embeddings",
 )
 def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
     from ..ml.latent_space.encoder import SoftCLTEncoder
@@ -150,7 +151,7 @@ def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
 
     init_ml_schema(pg)
 
-    series_dict, dates_dict = load_piezo_series(pg, min_days=730)
+    series_dict, dates_dict = load_piezo_series(pg, min_days=MIN_DAYS)
     context.log.info(f"Encoding {len(series_dict)} piezo stations...")
 
     station_embs = {}
@@ -189,7 +190,7 @@ def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
 @asset(
     group_name="ml_hydro",
     deps=["hydro_daily_chroniques"],
-    description="Nightly: encode hydro stations → ~161K windows + ~2,535 station embeddings",
+    description="Nightly: encode hydro stations → windows + station embeddings",
 )
 def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
     from ..ml.latent_space.encoder import SoftCLTEncoder
@@ -208,7 +209,7 @@ def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
 
     init_ml_schema(pg)
 
-    series_dict, dates_dict = load_hydro_series(pg, min_days=730)
+    series_dict, dates_dict = load_hydro_series(pg, min_days=MIN_DAYS)
     context.log.info(f"Encoding {len(series_dict)} hydro stations...")
 
     station_embs = {}
@@ -248,73 +249,77 @@ def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
 # CLUSTERING — After encode, CPU (~30s)
 # ======================================================================
 
+def _cluster_and_viz(context, pg, domain: str, id_col: str):
+    """Compute 2 clustering configs per domain and store in versioned tables."""
+    from ..ml.latent_space.clustering import cluster_and_store
+    from ..ml.latent_space.persistence import update_umap_coords, init_ml_schema
+
+    # Ensure new tables exist
+    init_ml_schema(pg)
+
+    # --- Config 1: Optuna-tuned HDBSCAN (default) ---
+    context.log.info(f"Config 1: Optuna-tuned HDBSCAN for {domain}...")
+    tuned = cluster_and_store(
+        pg, domain, id_col,
+        is_default=True,
+        tune=True, tune_n_trials=80, tune_timeout=300,
+    )
+    context.log.info(
+        f"Tuned: {tuned['n_clusters']} clusters, DBCV={tuned['dbcv']:.4f}, "
+        f"sil={tuned['silhouette_score']:.4f}, run_id={tuned['run_id']}"
+    )
+
+    # Update legacy UMAP coords from default run
+    if tuned.get("umap_2d") is not None:
+        update_umap_coords(
+            pg, domain, id_col,
+            tuned["station_ids"], tuned["umap_2d"], tuned["umap_3d"],
+        )
+
+    # --- Config 2: Fixed defaults (backup) ---
+    context.log.info(f"Config 2: Fixed defaults for {domain}...")
+    fixed = cluster_and_store(
+        pg, domain, id_col,
+        is_default=False,
+        tune=False,
+        min_cluster_size=10, min_samples=5,
+        umap_dims=10, umap_n_neighbors=15, umap_min_dist=0.0,
+    )
+    context.log.info(
+        f"Fixed: {fixed['n_clusters']} clusters, DBCV={fixed['dbcv']:.4f}, "
+        f"sil={fixed['silhouette_score']:.4f}, run_id={fixed['run_id']}"
+    )
+
+    # Metadata from tuned (default) run
+    params = tuned["params"]
+    context.add_output_metadata({
+        "n_stations": MetadataValue.int(len(tuned["station_ids"])),
+        "tuned_run_id": MetadataValue.int(tuned["run_id"]),
+        "tuned_n_clusters": MetadataValue.int(tuned["n_clusters"]),
+        "tuned_dbcv": MetadataValue.float(tuned["dbcv"]),
+        "tuned_silhouette": MetadataValue.float(tuned["silhouette_score"]),
+        "fixed_run_id": MetadataValue.int(fixed["run_id"]),
+        "fixed_n_clusters": MetadataValue.int(fixed["n_clusters"]),
+        "fixed_dbcv": MetadataValue.float(fixed["dbcv"]),
+        "fixed_silhouette": MetadataValue.float(fixed["silhouette_score"]),
+        "hdbscan_min_cluster_size": MetadataValue.int(params["hdbscan_min_cluster_size"]),
+        "hdbscan_min_samples": MetadataValue.int(params["hdbscan_min_samples"]),
+    })
+
+
 @asset(
     group_name="ml_piezo",
     deps=["ml_piezo_embeddings_update"],
-    description="HDBSCAN clustering on piezo station embeddings (~2,935 stations)",
+    description="Optuna-tuned HDBSCAN clustering on piezo station embeddings (~2,935 stations)",
 )
 def ml_piezo_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
-    from umap import UMAP
-    from ..ml.latent_space.clustering import cluster_and_update
-    from ..ml.latent_space.persistence import update_umap_coords
-
-    result = cluster_and_update(pg, "piezo", "code_bss")
-
-    # Compute UMAP projections on station embeddings for visualization
-    embeddings = result["embeddings"]        # shape (N, 320)
-    station_ids = result["station_ids"]      # list of N station IDs
-
-    context.log.info(f"Computing UMAP 2D for {len(station_ids)} piezo stations...")
-    umap_2d = UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
-                   metric="cosine", random_state=42).fit_transform(embeddings)
-
-    context.log.info("Computing UMAP 3D...")
-    umap_3d = UMAP(n_components=3, n_neighbors=15, min_dist=0.1,
-                   metric="cosine", random_state=42).fit_transform(embeddings)
-
-    update_umap_coords(pg, "piezo", "code_bss", station_ids, umap_2d, umap_3d)
-
-    context.add_output_metadata({
-        "n_clusters": result["n_clusters"],
-        "n_noise": result["n_noise"],
-        "silhouette": MetadataValue.float(result["silhouette_score"]),
-        "davies_bouldin": MetadataValue.float(result["davies_bouldin_index"]),
-        "umap_2d_computed": True,
-        "umap_3d_computed": True,
-    })
+    _cluster_and_viz(context, pg, "piezo", "code_bss")
 
 
 @asset(
     group_name="ml_hydro",
     deps=["ml_hydro_embeddings_update"],
-    description="HDBSCAN clustering on hydro station embeddings (~2,535 stations)",
+    description="Optuna-tuned HDBSCAN clustering on hydro station embeddings (~2,535 stations)",
 )
 def ml_hydro_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
-    from umap import UMAP
-    from ..ml.latent_space.clustering import cluster_and_update
-    from ..ml.latent_space.persistence import update_umap_coords
-
-    result = cluster_and_update(pg, "hydro", "code_station")
-
-    # Compute UMAP projections on station embeddings for visualization
-    embeddings = result["embeddings"]        # shape (N, 320)
-    station_ids = result["station_ids"]      # list of N station IDs
-
-    context.log.info(f"Computing UMAP 2D for {len(station_ids)} hydro stations...")
-    umap_2d = UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
-                   metric="cosine", random_state=42).fit_transform(embeddings)
-
-    context.log.info("Computing UMAP 3D...")
-    umap_3d = UMAP(n_components=3, n_neighbors=15, min_dist=0.1,
-                   metric="cosine", random_state=42).fit_transform(embeddings)
-
-    update_umap_coords(pg, "hydro", "code_station", station_ids, umap_2d, umap_3d)
-
-    context.add_output_metadata({
-        "n_clusters": result["n_clusters"],
-        "n_noise": result["n_noise"],
-        "silhouette": MetadataValue.float(result["silhouette_score"]),
-        "davies_bouldin": MetadataValue.float(result["davies_bouldin_index"]),
-        "umap_2d_computed": True,
-        "umap_3d_computed": True,
-    })
+    _cluster_and_viz(context, pg, "hydro", "code_station")
