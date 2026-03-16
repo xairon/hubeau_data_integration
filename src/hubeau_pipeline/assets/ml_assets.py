@@ -39,7 +39,7 @@ EMBEDDING_DIM = 320  # keep 320 for both spaces (pgvector schema constraint)
 # Uni: 1 input dim, reduced capacity to match lower information content
 SPACE_HPARAMS = {
     "multi": {"hidden_dim": 64, "depth": 10, "batch_size": 128},
-    "uni":   {"hidden_dim": 32, "depth": 6,  "batch_size": 256},
+    "uni":   {"hidden_dim": 32, "depth": 6,  "batch_size": 128},
 }
 
 
