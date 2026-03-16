@@ -58,7 +58,7 @@ def _train_encoder(context, pg, domain: str, space: str):
 
     if torch.cuda.is_available():
         gpu = torch.cuda.get_device_properties(0)
-        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_mem / 1e9:.1f} GB")
+        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
 
     input_dims = 1 if space == "uni" else 4
     all_data = np.concatenate(list(series_dict.values()))
