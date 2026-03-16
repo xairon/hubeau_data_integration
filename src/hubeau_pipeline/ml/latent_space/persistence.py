@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 # SQL templates — parameterized by table/column names at call site
 _CREATE_STATION_TABLE = """
 CREATE TABLE IF NOT EXISTS ml.{domain}_station_embeddings (
-    {id_col} TEXT PRIMARY KEY,
+    {id_col} TEXT NOT NULL,
+    space TEXT NOT NULL DEFAULT 'multi',
     embedding vector(320) NOT NULL,
     cluster_id INT,
     model_version TEXT NOT NULL,
@@ -19,7 +20,8 @@ CREATE TABLE IF NOT EXISTS ml.{domain}_station_embeddings (
     umap_2d_y FLOAT,
     umap_3d_x FLOAT,
     umap_3d_y FLOAT,
-    umap_3d_z FLOAT
+    umap_3d_z FLOAT,
+    PRIMARY KEY ({id_col}, space)
 )
 """
 
@@ -27,11 +29,12 @@ _CREATE_WINDOW_TABLE = """
 CREATE TABLE IF NOT EXISTS ml.{domain}_window_embeddings (
     {id_col} TEXT NOT NULL,
     window_start DATE NOT NULL,
+    space TEXT NOT NULL DEFAULT 'multi',
     window_end DATE NOT NULL,
     embedding vector(320) NOT NULL,
     model_version TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY ({id_col}, window_start)
+    PRIMARY KEY ({id_col}, window_start, space)
 )
 """
 
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS ml.clustering_runs (
     id SERIAL PRIMARY KEY,
     domain TEXT NOT NULL,
     level TEXT NOT NULL DEFAULT 'stations',
+    space TEXT NOT NULL DEFAULT 'multi',
     method TEXT NOT NULL DEFAULT 'hdbscan',
     params JSONB NOT NULL,
     metrics JSONB NOT NULL,
@@ -124,7 +128,8 @@ def upsert_station_embeddings(pg, domain: str, id_col: str,
                               embeddings: dict[str, np.ndarray],
                               n_days: dict[str, int],
                               n_windows: dict[str, int],
-                              version: str):
+                              version: str,
+                              space: str = "multi"):
     """Upsert station embeddings into ml.{domain}_station_embeddings."""
     table = f"ml.{domain}_station_embeddings"
     with pg.get_connection() as conn:
@@ -132,22 +137,23 @@ def upsert_station_embeddings(pg, domain: str, id_col: str,
         for sid, emb in embeddings.items():
             emb_str = "[" + ",".join(f"{v:.6f}" for v in emb) + "]"
             cur.execute(f"""
-                INSERT INTO {table} ({id_col}, embedding, model_version, n_days, n_windows, updated_at)
-                VALUES (%s, %s::vector, %s, %s, %s, NOW())
-                ON CONFLICT ({id_col}) DO UPDATE SET
+                INSERT INTO {table} ({id_col}, space, embedding, model_version, n_days, n_windows, updated_at)
+                VALUES (%s, %s, %s::vector, %s, %s, %s, NOW())
+                ON CONFLICT ({id_col}, space) DO UPDATE SET
                     embedding = EXCLUDED.embedding,
                     model_version = EXCLUDED.model_version,
                     n_days = EXCLUDED.n_days,
                     n_windows = EXCLUDED.n_windows,
                     updated_at = NOW()
-            """, (sid, emb_str, version, n_days.get(sid, 0), n_windows.get(sid, 0)))
+            """, (sid, space, emb_str, version, n_days.get(sid, 0), n_windows.get(sid, 0)))
         conn.commit()
-    logger.info(f"Upserted {len(embeddings)} station embeddings into {table}")
+    logger.info(f"Upserted {len(embeddings)} {space} station embeddings into {table}")
 
 
 def upsert_window_embeddings(pg, domain: str, id_col: str,
                              window_data: dict[str, tuple[np.ndarray, list[tuple[str, str]]]],
-                             version: str):
+                             version: str,
+                             space: str = "multi"):
     """Upsert window embeddings into ml.{domain}_window_embeddings."""
     table = f"ml.{domain}_window_embeddings"
     total = 0
@@ -157,16 +163,16 @@ def upsert_window_embeddings(pg, domain: str, id_col: str,
             for emb, (start, end) in zip(embs, date_ranges):
                 emb_str = "[" + ",".join(f"{v:.6f}" for v in emb) + "]"
                 cur.execute(f"""
-                    INSERT INTO {table} ({id_col}, window_start, window_end, embedding, model_version)
-                    VALUES (%s, %s, %s, %s::vector, %s)
-                    ON CONFLICT ({id_col}, window_start) DO UPDATE SET
+                    INSERT INTO {table} ({id_col}, window_start, space, window_end, embedding, model_version)
+                    VALUES (%s, %s, %s, %s, %s::vector, %s)
+                    ON CONFLICT ({id_col}, window_start, space) DO UPDATE SET
                         embedding = EXCLUDED.embedding,
                         window_end = EXCLUDED.window_end,
                         model_version = EXCLUDED.model_version
-                """, (sid, start, end, emb_str, version))
+                """, (sid, start, space, end, emb_str, version))
                 total += 1
         conn.commit()
-    logger.info(f"Upserted {total} window embeddings into {table}")
+    logger.info(f"Upserted {total} {space} window embeddings into {table}")
 
 
 def update_umap_coords(pg, domain: str, id_col: str,
@@ -235,6 +241,7 @@ def save_clustering_run(
     labels: np.ndarray | None = None,
     umap_2d: np.ndarray | None = None,
     umap_3d: np.ndarray | None = None,
+    space: str = "multi",
 ) -> int:
     """Save a clustering run with labels and UMAP coords. Returns run_id."""
     import json
@@ -245,18 +252,18 @@ def save_clustering_run(
         if is_default:
             cur.execute(
                 "UPDATE ml.clustering_runs SET is_default = FALSE "
-                "WHERE domain = %s AND level = %s AND is_default = TRUE",
-                (domain, level),
+                "WHERE domain = %s AND level = %s AND space = %s AND is_default = TRUE",
+                (domain, level, space),
             )
 
         cur.execute(
             """
             INSERT INTO ml.clustering_runs
-                (domain, level, method, params, metrics, n_clusters, n_stations, is_default)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (domain, level, space, method, params, metrics, n_clusters, n_stations, is_default)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (domain, level, method,
+            (domain, level, space, method,
              json.dumps(params), json.dumps(metrics),
              n_clusters, n_stations, is_default),
         )
