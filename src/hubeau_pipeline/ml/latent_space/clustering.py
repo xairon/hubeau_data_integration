@@ -191,14 +191,17 @@ def cluster_and_store(
         return result
 
     # Compute UMAP 2D/3D for visualization
-    logger.info(f"Computing UMAP 2D/3D for {len(station_ids)} {domain} stations...")
+    # Uni embeddings have lower intrinsic dim → use fewer neighbors for sharper structure
+    viz_nn = 15 if space == "uni" else 30
+    viz_md = 0.02 if space == "uni" else 0.05
+    logger.info(f"Computing UMAP 2D/3D for {len(station_ids)} {domain}/{space} stations (nn={viz_nn}, md={viz_md})...")
     umap_2d = umap_lib.UMAP(
-        n_components=2, n_neighbors=30, min_dist=0.05,
+        n_components=2, n_neighbors=viz_nn, min_dist=viz_md,
         metric="cosine", random_state=42,
     ).fit_transform(embeddings)
 
     umap_3d = umap_lib.UMAP(
-        n_components=3, n_neighbors=30, min_dist=0.05,
+        n_components=3, n_neighbors=viz_nn, min_dist=viz_md,
         metric="cosine", random_state=42,
     ).fit_transform(embeddings)
 
