@@ -48,44 +48,74 @@ SPACE_HPARAMS = {
 # ======================================================================
 
 def _train_encoder(context, pg, domain: str, space: str):
-    """Train a SoftCLT encoder for (domain, space)."""
-    from ..ml.latent_space.encoder import SoftCLTEncoder
-    from ..ml.latent_space.data import (
-        load_piezo_series, load_hydro_series,
-        load_piezo_series_univariate, load_hydro_series_univariate,
-    )
+    """Train an encoder for (domain, space).
 
-    loaders = {
-        ("piezo", "multi"): load_piezo_series,
-        ("piezo", "uni"): load_piezo_series_univariate,
-        ("hydro", "multi"): load_hydro_series,
-        ("hydro", "uni"): load_hydro_series_univariate,
-    }
-    series_dict, _ = loaders[(domain, space)](pg, min_days=MIN_DAYS)
-    context.log.info(f"{len(series_dict)} eligible {domain} stations for {space} encoder")
+    Multi space: SoftCLT (contrastive learning, GPU).
+    Uni space: MiniRocket (random convolutions + PCA, CPU).
+    """
+    if space == "uni":
+        return _train_rocket_encoder(context, pg, domain)
+    return _train_softclt_encoder(context, pg, domain, space)
+
+
+def _train_rocket_encoder(context, pg, domain: str):
+    """Fit MiniRocket + PCA encoder for univariate series (no GPU needed)."""
+    from ..ml.latent_space.rocket_encoder import RocketEncoder
+    from ..ml.latent_space.data import load_piezo_series_univariate, load_hydro_series_univariate
+
+    loader = load_piezo_series_univariate if domain == "piezo" else load_hydro_series_univariate
+    series_dict, _ = loader(pg, min_days=MIN_DAYS)
+    context.log.info(f"{len(series_dict)} eligible {domain} stations for ROCKET encoder")
+
+    t0 = time.time()
+    encoder = RocketEncoder(
+        embedding_dim=EMBEDDING_DIM, window_size=WINDOW_SIZE, stride=STRIDE,
+    )
+    encoder.fit(series_dict, dagster_context=context)
+    train_duration = time.time() - t0
+
+    version = f"{domain}_uni_{datetime.now():%Y%m%d_%H%M}"
+    path = MODELS_DIR / version
+    encoder.save(path)
+    json.dump(list(series_dict.keys()), (path / "stations.json").open("w"))
+    (MODELS_DIR / f"{domain}_uni_latest").write_text(version)
+
+    context.add_output_metadata({
+        "model_version": version,
+        "space": "uni",
+        "method": "MiniRocket+PCA",
+        "n_stations": MetadataValue.int(len(series_dict)),
+        "train_duration_sec": MetadataValue.float(train_duration),
+    })
+
+
+def _train_softclt_encoder(context, pg, domain: str, space: str):
+    """Train SoftCLT encoder for multivariate series (GPU)."""
+    from ..ml.latent_space.encoder import SoftCLTEncoder
+    from ..ml.latent_space.data import load_piezo_series, load_hydro_series
+
+    loader = load_piezo_series if domain == "piezo" else load_hydro_series
+    series_dict, _ = loader(pg, min_days=MIN_DAYS)
+    context.log.info(f"{len(series_dict)} eligible {domain} stations for SoftCLT encoder")
 
     if torch.cuda.is_available():
         gpu = torch.cuda.get_device_properties(0)
         context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
 
-    input_dims = 1 if space == "uni" else 4
     hp = SPACE_HPARAMS[space]
-    hidden_dim = hp["hidden_dim"]
-    depth = hp["depth"]
-    batch_size = hp["batch_size"]
-    context.log.info(
-        f"Encoder config: input_dims={input_dims}, hidden_dim={hidden_dim}, "
-        f"depth={depth}, batch_size={batch_size}, embedding_dim={EMBEDDING_DIM}"
-    )
-
     all_data = np.concatenate(list(series_dict.values()))
     scaler = StandardScaler().fit(all_data)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
     t0 = time.time()
-    encoder = SoftCLTEncoder(input_dims=input_dims, embedding_dim=EMBEDDING_DIM, hidden_dim=hidden_dim, depth=depth)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=batch_size,
-                early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
+    encoder = SoftCLTEncoder(
+        input_dims=4, embedding_dim=EMBEDDING_DIM,
+        hidden_dim=hp["hidden_dim"], depth=hp["depth"],
+    )
+    encoder.fit(
+        scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=hp["batch_size"],
+        early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context,
+    )
     train_duration = time.time() - t0
 
     version = f"{domain}_{space}_{datetime.now():%Y%m%d_%H%M}"
@@ -99,7 +129,8 @@ def _train_encoder(context, pg, domain: str, space: str):
     context.add_output_metadata({
         "model_version": version,
         "space": space,
-        "input_dims": MetadataValue.int(input_dims),
+        "method": "SoftCLT",
+        "input_dims": MetadataValue.int(4),
         "n_stations": MetadataValue.int(len(series_dict)),
         "train_duration_sec": MetadataValue.float(train_duration),
     })
@@ -107,11 +138,6 @@ def _train_encoder(context, pg, domain: str, space: str):
 
 def _encode_stations(context, pg, domain: str, id_col: str, space: str):
     """Nightly: encode stations with a trained (domain, space) model."""
-    from ..ml.latent_space.encoder import SoftCLTEncoder
-    from ..ml.latent_space.data import (
-        load_piezo_series, load_hydro_series,
-        load_piezo_series_univariate, load_hydro_series_univariate,
-    )
     from ..ml.latent_space.persistence import init_ml_schema, upsert_station_embeddings, upsert_window_embeddings
 
     latest_file = MODELS_DIR / f"{domain}_{space}_latest"
@@ -123,11 +149,23 @@ def _encode_stations(context, pg, domain: str, id_col: str, space: str):
 
     version = latest_file.read_text().strip()
     path = MODELS_DIR / version
-    encoder = SoftCLTEncoder.load(path / "model.pt")
-    scaler = joblib.load(path / "scaler.pkl")
+
+    # Load space-appropriate encoder
+    if space == "uni":
+        from ..ml.latent_space.rocket_encoder import RocketEncoder
+        encoder = RocketEncoder.load(path)
+        scaler = None  # RocketEncoder handles its own scaling
+    else:
+        from ..ml.latent_space.encoder import SoftCLTEncoder
+        encoder = SoftCLTEncoder.load(path / "model.pt")
+        scaler = joblib.load(path / "scaler.pkl")
 
     init_ml_schema(pg)
 
+    from ..ml.latent_space.data import (
+        load_piezo_series, load_hydro_series,
+        load_piezo_series_univariate, load_hydro_series_univariate,
+    )
     loaders = {
         ("piezo", "multi"): load_piezo_series,
         ("piezo", "uni"): load_piezo_series_univariate,
@@ -144,14 +182,20 @@ def _encode_stations(context, pg, domain: str, id_col: str, space: str):
 
     total = len(series_dict)
     for i, (sid, arr) in enumerate(series_dict.items(), 1):
-        scaled = scaler.transform(arr).astype(np.float32)
+        if scaler is not None:
+            arr_input = scaler.transform(arr).astype(np.float32)
+        else:
+            arr_input = arr  # RocketEncoder handles its own scaling
         dates = dates_dict.get(sid, [])
         n_days_map[sid] = len(arr)
-        if len(scaled) < WINDOW_SIZE:
+        if len(arr_input) < WINDOW_SIZE:
             continue
-        win_embs, win_dates = encoder.encode_windows(scaled, WINDOW_SIZE, STRIDE, dates)
+        if space == "uni":
+            win_embs, win_dates = encoder.encode_windows(arr_input, dates)
+        else:
+            win_embs, win_dates = encoder.encode_windows(arr_input, WINDOW_SIZE, STRIDE, dates)
         window_data[sid] = (win_embs, win_dates)
-        station_embs[sid] = SoftCLTEncoder.station_embedding(win_embs)
+        station_embs[sid] = encoder.station_embedding(win_embs)
         n_windows_map[sid] = win_embs.shape[0]
         if i % 500 == 0 or i == total:
             context.log.info(f"{domain}/{space}: {i}/{total} stations")
