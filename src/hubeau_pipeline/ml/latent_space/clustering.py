@@ -24,6 +24,7 @@ def cluster_and_update(
     tune: bool = False,
     tune_n_trials: int = 80,
     tune_timeout: int = 300,
+    space: str = "multi",
 ) -> dict:
     """Load station embeddings, reduce with UMAP, run HDBSCAN, write cluster_id back to DB.
 
@@ -40,7 +41,7 @@ def cluster_and_update(
 
     with pg.get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(f"SELECT {id_col}, embedding::text FROM {table}")
+        cur.execute(f"SELECT {id_col}, embedding::text FROM {table} WHERE space = %s", (space,))
         rows = cur.fetchall()
 
     if not rows:
@@ -116,8 +117,8 @@ def cluster_and_update(
         cur = conn.cursor()
         for sid, label in zip(ids, labels):
             cur.execute(
-                f"UPDATE {table} SET cluster_id = %s WHERE {id_col} = %s",
-                (int(label), sid),
+                f"UPDATE {table} SET cluster_id = %s WHERE {id_col} = %s AND space = %s",
+                (int(label), sid, space),
             )
         conn.commit()
 
@@ -160,6 +161,7 @@ def cluster_and_store(
     umap_dims: int | None = None,
     umap_n_neighbors: int | None = None,
     umap_min_dist: float | None = None,
+    space: str = "multi",
 ) -> dict:
     """Cluster station embeddings and store results in ml.clustering_runs/labels.
 
@@ -179,6 +181,7 @@ def cluster_and_store(
         tune=tune,
         tune_n_trials=tune_n_trials,
         tune_timeout=tune_timeout,
+        space=space,
     )
 
     embeddings = result["embeddings"]
@@ -203,7 +206,7 @@ def cluster_and_store(
     table = f"ml.{domain}_station_embeddings"
     with pg.get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(f"SELECT {id_col}, cluster_id FROM {table}")
+        cur.execute(f"SELECT {id_col}, cluster_id FROM {table} WHERE space = %s", (space,))
         db_labels = {r[0]: r[1] for r in cur.fetchall()}
     labels = np.array([db_labels.get(sid, -1) for sid in station_ids])
 
@@ -229,6 +232,7 @@ def cluster_and_store(
         labels=labels,
         umap_2d=umap_2d,
         umap_3d=umap_3d,
+        space=space,
     )
 
     result["run_id"] = run_id

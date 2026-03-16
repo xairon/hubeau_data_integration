@@ -54,12 +54,16 @@ from .full_bootstrap_job import full_bootstrap_job
 # Données de référence (BDLISA + Sandre) — à lancer avant full_bootstrap ou premier dbt run
 from .reference_data_jobs import reference_data_bronze_job
 
-# ML — SoftCLT Embeddings
+# ML — SoftCLT Embeddings (uni + multi spaces)
 from .ml_jobs import (
-    ml_piezo_train_job,
-    ml_hydro_train_job,
-    ml_piezo_embeddings_job,
-    ml_hydro_embeddings_job,
+    ml_piezo_multi_train_job,
+    ml_piezo_uni_train_job,
+    ml_hydro_multi_train_job,
+    ml_hydro_uni_train_job,
+    ml_piezo_multi_embeddings_job,
+    ml_piezo_uni_embeddings_job,
+    ml_hydro_multi_embeddings_job,
+    ml_hydro_uni_embeddings_job,
 )
 
 all_jobs = [
@@ -98,11 +102,15 @@ all_jobs = [
     reference_data_bronze_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
-    # ML — SoftCLT Embeddings
-    ml_piezo_train_job,
-    ml_hydro_train_job,
-    ml_piezo_embeddings_job,
-    ml_hydro_embeddings_job,
+    # ML — SoftCLT Embeddings (uni + multi spaces)
+    ml_piezo_multi_train_job,
+    ml_piezo_uni_train_job,
+    ml_hydro_multi_train_job,
+    ml_hydro_uni_train_job,
+    ml_piezo_multi_embeddings_job,
+    ml_piezo_uni_embeddings_job,
+    ml_hydro_multi_embeddings_job,
+    ml_hydro_uni_embeddings_job,
 ]
 
 __all__ = [
@@ -141,11 +149,15 @@ __all__ = [
     "reference_data_bronze_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
-    # ML — SoftCLT Embeddings
-    "ml_piezo_train_job",
-    "ml_hydro_train_job",
-    "ml_piezo_embeddings_job",
-    "ml_hydro_embeddings_job",
+    # ML — SoftCLT Embeddings (uni + multi spaces)
+    "ml_piezo_multi_train_job",
+    "ml_piezo_uni_train_job",
+    "ml_hydro_multi_train_job",
+    "ml_hydro_uni_train_job",
+    "ml_piezo_multi_embeddings_job",
+    "ml_piezo_uni_embeddings_job",
+    "ml_hydro_multi_embeddings_job",
+    "ml_hydro_uni_embeddings_job",
     # Collections
     "all_jobs",
 ]

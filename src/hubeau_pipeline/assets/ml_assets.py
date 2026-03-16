@@ -1,10 +1,10 @@
 """
 Dagster Assets — SoftCLT Embeddings (ML Layer)
 
-6 assets in 2 groups (piezo + hydro):
-- 2 training assets (manual, GPU ~15-30min)
-- 2 encoding assets (nightly sensor-driven, GPU ~2-5min)
-- 2 clustering assets (after encoding, CPU ~30s)
+12 assets in 2 groups (piezo + hydro) x 2 spaces (uni + multi):
+- 4 training assets (manual, GPU ~15-30min)
+- 4 encoding assets (nightly sensor-driven, GPU ~2-5min)
+- 4 clustering assets (after encoding, CPU ~30s)
 """
 
 import json
@@ -36,112 +36,72 @@ EARLY_STOP_PATIENCE = 20  # Stop if no improvement for 20 epochs
 
 
 # ======================================================================
-# TRAINING — Manual, GPU (~15-30min per domain)
+# HELPERS
 # ======================================================================
 
-@asset(
-    group_name="ml_piezo",
-    deps=["hubeau_daily_chroniques"],
-    description="Train SoftCLT encoder for piezometry (~4,200 stations, GPU)",
-)
-def ml_piezo_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
+def _train_encoder(context, pg, domain: str, space: str):
+    """Train a SoftCLT encoder for (domain, space)."""
     from ..ml.latent_space.encoder import SoftCLTEncoder
-    from ..ml.latent_space.data import load_piezo_series
+    from ..ml.latent_space.data import (
+        load_piezo_series, load_hydro_series,
+        load_piezo_series_univariate, load_hydro_series_univariate,
+    )
 
-    series_dict, _ = load_piezo_series(pg, min_days=MIN_DAYS)
-    context.log.info(f"{len(series_dict)} eligible piezo stations")
+    loaders = {
+        ("piezo", "multi"): load_piezo_series,
+        ("piezo", "uni"): load_piezo_series_univariate,
+        ("hydro", "multi"): load_hydro_series,
+        ("hydro", "uni"): load_hydro_series_univariate,
+    }
+    series_dict, _ = loaders[(domain, space)](pg, min_days=MIN_DAYS)
+    context.log.info(f"{len(series_dict)} eligible {domain} stations for {space} encoder")
 
     if torch.cuda.is_available():
         gpu = torch.cuda.get_device_properties(0)
-        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
+        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_mem / 1e9:.1f} GB")
 
+    input_dims = 1 if space == "uni" else 4
     all_data = np.concatenate(list(series_dict.values()))
     scaler = StandardScaler().fit(all_data)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
     t0 = time.time()
-    encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, hidden_dim=HIDDEN_DIM, depth=DEPTH)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
+    encoder = SoftCLTEncoder(input_dims=input_dims, embedding_dim=EMBEDDING_DIM, hidden_dim=HIDDEN_DIM, depth=DEPTH)
+    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE,
+                early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
     train_duration = time.time() - t0
-    context.log.info(f"Training complete in {train_duration:.0f}s ({train_duration/60:.1f} min)")
 
-    version = f"piezo_{datetime.now():%Y%m%d_%H%M}"
+    version = f"{domain}_{space}_{datetime.now():%Y%m%d_%H%M}"
     path = MODELS_DIR / version
     path.mkdir(parents=True, exist_ok=True)
     encoder.save(path / "model.pt")
     joblib.dump(scaler, path / "scaler.pkl")
     json.dump(list(series_dict.keys()), (path / "stations.json").open("w"))
-    (MODELS_DIR / "piezo_latest").write_text(version)
+    (MODELS_DIR / f"{domain}_{space}_latest").write_text(version)
 
     context.add_output_metadata({
         "model_version": version,
-        "n_stations": len(series_dict),
-        "device": encoder.device,
-        "embedding_dim": EMBEDDING_DIM,
+        "space": space,
+        "input_dims": MetadataValue.int(input_dims),
+        "n_stations": MetadataValue.int(len(series_dict)),
         "train_duration_sec": MetadataValue.float(train_duration),
     })
 
 
-@asset(
-    group_name="ml_hydro",
-    deps=["hydro_daily_chroniques"],
-    description="Train SoftCLT encoder for hydrometry (~4,200 stations, GPU)",
-)
-def ml_hydro_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
+def _encode_stations(context, pg, domain: str, id_col: str, space: str):
+    """Nightly: encode stations with a trained (domain, space) model."""
     from ..ml.latent_space.encoder import SoftCLTEncoder
-    from ..ml.latent_space.data import load_hydro_series
-
-    series_dict, _ = load_hydro_series(pg, min_days=MIN_DAYS)
-    context.log.info(f"{len(series_dict)} eligible hydro stations")
-
-    if torch.cuda.is_available():
-        gpu = torch.cuda.get_device_properties(0)
-        context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
-
-    all_data = np.concatenate(list(series_dict.values()))
-    scaler = StandardScaler().fit(all_data)
-    scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
-
-    t0 = time.time()
-    encoder = SoftCLTEncoder(input_dims=4, embedding_dim=EMBEDDING_DIM, hidden_dim=HIDDEN_DIM, depth=DEPTH)
-    encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE, early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
-    train_duration = time.time() - t0
-    context.log.info(f"Training complete in {train_duration:.0f}s ({train_duration/60:.1f} min)")
-
-    version = f"hydro_{datetime.now():%Y%m%d_%H%M}"
-    path = MODELS_DIR / version
-    path.mkdir(parents=True, exist_ok=True)
-    encoder.save(path / "model.pt")
-    joblib.dump(scaler, path / "scaler.pkl")
-    json.dump(list(series_dict.keys()), (path / "stations.json").open("w"))
-    (MODELS_DIR / "hydro_latest").write_text(version)
-
-    context.add_output_metadata({
-        "model_version": version,
-        "n_stations": len(series_dict),
-        "device": encoder.device,
-        "embedding_dim": EMBEDDING_DIM,
-        "train_duration_sec": MetadataValue.float(train_duration),
-    })
-
-
-# ======================================================================
-# NIGHTLY ENCODE — Sensor-driven, GPU (~2-5min per domain)
-# ======================================================================
-
-@asset(
-    group_name="ml_piezo",
-    deps=["hubeau_daily_chroniques"],
-    description="Nightly: encode piezo stations → windows + station embeddings",
-)
-def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
-    from ..ml.latent_space.encoder import SoftCLTEncoder
-    from ..ml.latent_space.data import load_piezo_series
+    from ..ml.latent_space.data import (
+        load_piezo_series, load_hydro_series,
+        load_piezo_series_univariate, load_hydro_series_univariate,
+    )
     from ..ml.latent_space.persistence import init_ml_schema, upsert_station_embeddings, upsert_window_embeddings
 
-    latest_file = MODELS_DIR / "piezo_latest"
+    latest_file = MODELS_DIR / f"{domain}_{space}_latest"
+    if not latest_file.exists() and space == "multi":
+        latest_file = MODELS_DIR / f"{domain}_latest"  # backward compat
     if not latest_file.exists():
-        context.log.warning("No trained piezo model found. Run ml_piezo_model_train first.")
+        context.log.warning(f"No trained {domain}/{space} model. Run ml_{domain}_{space}_model_train first.")
         return
 
     version = latest_file.read_text().strip()
@@ -151,8 +111,14 @@ def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
 
     init_ml_schema(pg)
 
-    series_dict, dates_dict = load_piezo_series(pg, min_days=MIN_DAYS)
-    context.log.info(f"Encoding {len(series_dict)} piezo stations...")
+    loaders = {
+        ("piezo", "multi"): load_piezo_series,
+        ("piezo", "uni"): load_piezo_series_univariate,
+        ("hydro", "multi"): load_hydro_series,
+        ("hydro", "uni"): load_hydro_series_univariate,
+    }
+    series_dict, dates_dict = loaders[(domain, space)](pg, min_days=MIN_DAYS)
+    context.log.info(f"Encoding {len(series_dict)} {domain}/{space} stations...")
 
     station_embs = {}
     window_data = {}
@@ -160,97 +126,32 @@ def ml_piezo_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLRes
     n_windows_map = {}
 
     total = len(series_dict)
-    for i, (bss, arr) in enumerate(series_dict.items(), 1):
+    for i, (sid, arr) in enumerate(series_dict.items(), 1):
         scaled = scaler.transform(arr).astype(np.float32)
-        dates = dates_dict.get(bss, [])
-        n_days_map[bss] = len(arr)
-
+        dates = dates_dict.get(sid, [])
+        n_days_map[sid] = len(arr)
         if len(scaled) < WINDOW_SIZE:
             continue
-
         win_embs, win_dates = encoder.encode_windows(scaled, WINDOW_SIZE, STRIDE, dates)
-        window_data[bss] = (win_embs, win_dates)
-        station_embs[bss] = SoftCLTEncoder.station_embedding(win_embs)
-        n_windows_map[bss] = win_embs.shape[0]
-
+        window_data[sid] = (win_embs, win_dates)
+        station_embs[sid] = SoftCLTEncoder.station_embedding(win_embs)
+        n_windows_map[sid] = win_embs.shape[0]
         if i % 500 == 0 or i == total:
-            context.log.info(f"Piezo encoding: {i}/{total} stations ({len(station_embs)} encoded, {sum(w[0].shape[0] for w in window_data.values())} windows)")
+            context.log.info(f"{domain}/{space}: {i}/{total} stations")
 
-    upsert_station_embeddings(pg, "piezo", "code_bss", station_embs, n_days_map, n_windows_map, version)
-    upsert_window_embeddings(pg, "piezo", "code_bss", window_data, version)
+    upsert_station_embeddings(pg, domain, id_col, station_embs, n_days_map, n_windows_map, version, space=space)
+    upsert_window_embeddings(pg, domain, id_col, window_data, version, space=space)
 
-    total_windows = sum(w[0].shape[0] for w in window_data.values())
     context.add_output_metadata({
         "n_stations": MetadataValue.int(len(station_embs)),
-        "n_windows": MetadataValue.int(total_windows),
+        "n_windows": MetadataValue.int(sum(w[0].shape[0] for w in window_data.values())),
         "model_version": version,
+        "space": space,
     })
 
 
-@asset(
-    group_name="ml_hydro",
-    deps=["hydro_daily_chroniques"],
-    description="Nightly: encode hydro stations → windows + station embeddings",
-)
-def ml_hydro_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
-    from ..ml.latent_space.encoder import SoftCLTEncoder
-    from ..ml.latent_space.data import load_hydro_series
-    from ..ml.latent_space.persistence import init_ml_schema, upsert_station_embeddings, upsert_window_embeddings
-
-    latest_file = MODELS_DIR / "hydro_latest"
-    if not latest_file.exists():
-        context.log.warning("No trained hydro model found. Run ml_hydro_model_train first.")
-        return
-
-    version = latest_file.read_text().strip()
-    path = MODELS_DIR / version
-    encoder = SoftCLTEncoder.load(path / "model.pt")
-    scaler = joblib.load(path / "scaler.pkl")
-
-    init_ml_schema(pg)
-
-    series_dict, dates_dict = load_hydro_series(pg, min_days=MIN_DAYS)
-    context.log.info(f"Encoding {len(series_dict)} hydro stations...")
-
-    station_embs = {}
-    window_data = {}
-    n_days_map = {}
-    n_windows_map = {}
-
-    total = len(series_dict)
-    for i, (station, arr) in enumerate(series_dict.items(), 1):
-        scaled = scaler.transform(arr).astype(np.float32)
-        dates = dates_dict.get(station, [])
-        n_days_map[station] = len(arr)
-
-        if len(scaled) < WINDOW_SIZE:
-            continue
-
-        win_embs, win_dates = encoder.encode_windows(scaled, WINDOW_SIZE, STRIDE, dates)
-        window_data[station] = (win_embs, win_dates)
-        station_embs[station] = SoftCLTEncoder.station_embedding(win_embs)
-        n_windows_map[station] = win_embs.shape[0]
-
-        if i % 500 == 0 or i == total:
-            context.log.info(f"Hydro encoding: {i}/{total} stations ({len(station_embs)} encoded, {sum(w[0].shape[0] for w in window_data.values())} windows)")
-
-    upsert_station_embeddings(pg, "hydro", "code_station", station_embs, n_days_map, n_windows_map, version)
-    upsert_window_embeddings(pg, "hydro", "code_station", window_data, version)
-
-    total_windows = sum(w[0].shape[0] for w in window_data.values())
-    context.add_output_metadata({
-        "n_stations": MetadataValue.int(len(station_embs)),
-        "n_windows": MetadataValue.int(total_windows),
-        "model_version": version,
-    })
-
-
-# ======================================================================
-# CLUSTERING — After encode, CPU (~30s)
-# ======================================================================
-
-def _cluster_and_viz(context, pg, domain: str, id_col: str):
-    """Compute 2 clustering configs per domain and store in versioned tables."""
+def _cluster_and_viz(context, pg, domain: str, id_col: str, space: str):
+    """Compute 2 clustering configs per (domain, space) and store in versioned tables."""
     from ..ml.latent_space.clustering import cluster_and_store
     from ..ml.latent_space.persistence import update_umap_coords, init_ml_schema
 
@@ -258,13 +159,14 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str):
     init_ml_schema(pg)
 
     # --- Config 1: Wide clusters (default) — fewer, larger clusters ---
-    context.log.info(f"Config 1: Wide clusters (default) for {domain}...")
+    context.log.info(f"Config 1: Wide clusters (default) for {domain}/{space}...")
     wide = cluster_and_store(
         pg, domain, id_col,
         is_default=True,
         tune=False,
         min_cluster_size=25, min_samples=10,
         umap_dims=15, umap_n_neighbors=20, umap_min_dist=0.1,
+        space=space,
     )
     context.log.info(
         f"Wide: {wide['n_clusters']} clusters, DBCV={wide['dbcv']:.4f}, "
@@ -279,13 +181,14 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str):
         )
 
     # --- Config 2: Fine-grained clusters (alternative) ---
-    context.log.info(f"Config 2: Fine-grained clusters for {domain}...")
+    context.log.info(f"Config 2: Fine-grained clusters for {domain}/{space}...")
     fine = cluster_and_store(
         pg, domain, id_col,
         is_default=False,
         tune=False,
         min_cluster_size=10, min_samples=5,
         umap_dims=10, umap_n_neighbors=15, umap_min_dist=0.0,
+        space=space,
     )
     context.log.info(
         f"Fine: {fine['n_clusters']} clusters, DBCV={fine['dbcv']:.4f}, "
@@ -296,6 +199,7 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str):
     params = wide["params"]
     context.add_output_metadata({
         "n_stations": MetadataValue.int(len(wide["station_ids"])),
+        "space": space,
         "wide_run_id": MetadataValue.int(wide["run_id"]),
         "wide_n_clusters": MetadataValue.int(wide["n_clusters"]),
         "wide_silhouette": MetadataValue.float(wide["silhouette_score"]),
@@ -307,19 +211,85 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str):
     })
 
 
-@asset(
-    group_name="ml_piezo",
-    deps=["ml_piezo_embeddings_update"],
-    description="Optuna-tuned HDBSCAN clustering on piezo station embeddings (~2,935 stations)",
-)
-def ml_piezo_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
-    _cluster_and_viz(context, pg, "piezo", "code_bss")
+# ======================================================================
+# TRAINING — Manual, GPU (~15-30min per domain per space)
+# ======================================================================
+
+@asset(group_name="ml_piezo", deps=["hubeau_daily_chroniques"],
+       description="Train SoftCLT encoder for piezo MULTIVARIATE (4 vars)")
+def ml_piezo_multi_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _train_encoder(context, pg, "piezo", "multi")
 
 
-@asset(
-    group_name="ml_hydro",
-    deps=["ml_hydro_embeddings_update"],
-    description="Optuna-tuned HDBSCAN clustering on hydro station embeddings (~2,535 stations)",
-)
-def ml_hydro_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
-    _cluster_and_viz(context, pg, "hydro", "code_station")
+@asset(group_name="ml_piezo", deps=["hubeau_daily_chroniques"],
+       description="Train SoftCLT encoder for piezo UNIVARIATE (target only)")
+def ml_piezo_uni_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _train_encoder(context, pg, "piezo", "uni")
+
+
+@asset(group_name="ml_hydro", deps=["hydro_daily_chroniques"],
+       description="Train SoftCLT encoder for hydro MULTIVARIATE (4 vars)")
+def ml_hydro_multi_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _train_encoder(context, pg, "hydro", "multi")
+
+
+@asset(group_name="ml_hydro", deps=["hydro_daily_chroniques"],
+       description="Train SoftCLT encoder for hydro UNIVARIATE (target only)")
+def ml_hydro_uni_model_train(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _train_encoder(context, pg, "hydro", "uni")
+
+
+# ======================================================================
+# NIGHTLY ENCODE — Sensor-driven, GPU (~2-5min per domain per space)
+# ======================================================================
+
+@asset(group_name="ml_piezo", deps=["hubeau_daily_chroniques"],
+       description="Nightly: encode piezo MULTI embeddings")
+def ml_piezo_multi_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _encode_stations(context, pg, "piezo", "code_bss", "multi")
+
+
+@asset(group_name="ml_piezo", deps=["hubeau_daily_chroniques"],
+       description="Nightly: encode piezo UNI embeddings")
+def ml_piezo_uni_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _encode_stations(context, pg, "piezo", "code_bss", "uni")
+
+
+@asset(group_name="ml_hydro", deps=["hydro_daily_chroniques"],
+       description="Nightly: encode hydro MULTI embeddings")
+def ml_hydro_multi_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _encode_stations(context, pg, "hydro", "code_station", "multi")
+
+
+@asset(group_name="ml_hydro", deps=["hydro_daily_chroniques"],
+       description="Nightly: encode hydro UNI embeddings")
+def ml_hydro_uni_embeddings_update(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _encode_stations(context, pg, "hydro", "code_station", "uni")
+
+
+# ======================================================================
+# CLUSTERING — After encode, CPU (~30s per domain per space)
+# ======================================================================
+
+@asset(group_name="ml_piezo", deps=["ml_piezo_multi_embeddings_update"],
+       description="Cluster piezo MULTI embeddings")
+def ml_piezo_multi_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _cluster_and_viz(context, pg, "piezo", "code_bss", "multi")
+
+
+@asset(group_name="ml_piezo", deps=["ml_piezo_uni_embeddings_update"],
+       description="Cluster piezo UNI embeddings")
+def ml_piezo_uni_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _cluster_and_viz(context, pg, "piezo", "code_bss", "uni")
+
+
+@asset(group_name="ml_hydro", deps=["ml_hydro_multi_embeddings_update"],
+       description="Cluster hydro MULTI embeddings")
+def ml_hydro_multi_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _cluster_and_viz(context, pg, "hydro", "code_station", "multi")
+
+
+@asset(group_name="ml_hydro", deps=["ml_hydro_uni_embeddings_update"],
+       description="Cluster hydro UNI embeddings")
+def ml_hydro_uni_clusters(context: AssetExecutionContext, pg: PostgreSQLResource):
+    _cluster_and_viz(context, pg, "hydro", "code_station", "uni")

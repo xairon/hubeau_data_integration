@@ -29,8 +29,10 @@ from .jobs import (
     dbt_hydro_pipeline_daily_job,
     dbt_shared_staging_job,
     dbt_shared_dimensions_job,
-    ml_piezo_embeddings_job,
-    ml_hydro_embeddings_job,
+    ml_piezo_multi_embeddings_job,
+    ml_piezo_uni_embeddings_job,
+    ml_hydro_multi_embeddings_job,
+    ml_hydro_uni_embeddings_job,
 )
 from .utils import env_true
 
@@ -219,42 +221,65 @@ def domain_to_dimensions_sensor(context: RunStatusSensorContext):
 @run_status_sensor(
     run_status=DagsterRunStatus.SUCCESS,
     monitored_jobs=[dbt_piezo_pipeline_daily_job, dbt_hydro_pipeline_daily_job],
-    request_jobs=[ml_piezo_embeddings_job, ml_hydro_embeddings_job],
+    request_jobs=[
+        ml_piezo_multi_embeddings_job, ml_piezo_uni_embeddings_job,
+        ml_hydro_multi_embeddings_job, ml_hydro_uni_embeddings_job,
+    ],
     default_status=DEFAULT_SENSOR_STATUS,
     minimum_interval_seconds=30,
-    description="Step 4: Domain pipeline done → update SoftCLT embeddings (GPU)",
+    description="Step 4: Domain pipeline done → update SoftCLT embeddings for both spaces (GPU)",
 )
 def domain_to_embeddings_sensor(context: RunStatusSensorContext):
     """
     Fires after each domain pipeline succeeds.
-    Piezo done → piezo embeddings. Hydro done → hydro embeddings.
+    Piezo done → piezo multi + uni embeddings. Hydro done → hydro multi + uni embeddings.
     Runs in parallel with domain_to_dimensions_sensor (no dependency).
     """
     completed_job = context.dagster_run.job_name
     run_id = context.dagster_run.run_id
 
     if completed_job == dbt_piezo_pipeline_daily_job.name:
-        logger.info(f"Step 4: Piezo pipeline done → launching piezo embeddings (run {run_id})")
+        logger.info(f"Step 4: Piezo pipeline done → launching piezo multi+uni embeddings (run {run_id})")
         yield RunRequest(
-            run_key=f"piezo_emb_{run_id}",
-            job_name=ml_piezo_embeddings_job.name,
+            run_key=f"piezo_multi_emb_{run_id}",
+            job_name=ml_piezo_multi_embeddings_job.name,
             tags={
                 "trigger": "sensor",
                 "sensor_name": "domain_to_embeddings_sensor",
                 "parent_run_id": run_id,
-                "pipeline_chain": "step_4_piezo_embeddings",
+                "pipeline_chain": "step_4_piezo_multi_embeddings",
+            },
+        )
+        yield RunRequest(
+            run_key=f"piezo_uni_emb_{run_id}",
+            job_name=ml_piezo_uni_embeddings_job.name,
+            tags={
+                "trigger": "sensor",
+                "sensor_name": "domain_to_embeddings_sensor",
+                "parent_run_id": run_id,
+                "pipeline_chain": "step_4_piezo_uni_embeddings",
             },
         )
     elif completed_job == dbt_hydro_pipeline_daily_job.name:
-        logger.info(f"Step 4: Hydro pipeline done → launching hydro embeddings (run {run_id})")
+        logger.info(f"Step 4: Hydro pipeline done → launching hydro multi+uni embeddings (run {run_id})")
         yield RunRequest(
-            run_key=f"hydro_emb_{run_id}",
-            job_name=ml_hydro_embeddings_job.name,
+            run_key=f"hydro_multi_emb_{run_id}",
+            job_name=ml_hydro_multi_embeddings_job.name,
             tags={
                 "trigger": "sensor",
                 "sensor_name": "domain_to_embeddings_sensor",
                 "parent_run_id": run_id,
-                "pipeline_chain": "step_4_hydro_embeddings",
+                "pipeline_chain": "step_4_hydro_multi_embeddings",
+            },
+        )
+        yield RunRequest(
+            run_key=f"hydro_uni_emb_{run_id}",
+            job_name=ml_hydro_uni_embeddings_job.name,
+            tags={
+                "trigger": "sensor",
+                "sensor_name": "domain_to_embeddings_sensor",
+                "parent_run_id": run_id,
+                "pipeline_chain": "step_4_hydro_uni_embeddings",
             },
         )
 
