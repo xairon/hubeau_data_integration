@@ -29,10 +29,18 @@ STRIDE = 90
 MIN_DAYS = 540  # ~1.5 years, guarantees >=2 windows of 365d
 N_EPOCHS = 200
 BATCH_SIZE = 128  # A6000 48GB VRAM can handle large batches with hidden=64
-EMBEDDING_DIM = 320
-HIDDEN_DIM = 64  # TS2Vec/SoftCLT paper default (NOT output_dims)
 DEPTH = 10
 EARLY_STOP_PATIENCE = 20  # Stop if no improvement for 20 epochs
+
+EMBEDDING_DIM = 320  # keep 320 for both spaces (pgvector schema constraint)
+
+# Space-specific hidden_dim: controls capacity of internal representation
+# Multi: 4 input dims → 64 hidden (TS2Vec paper default, 16x expansion)
+# Uni: 1 input dim → 32 hidden (adapted, avoids 64x overparameterization)
+SPACE_HPARAMS = {
+    "multi": {"hidden_dim": 64},
+    "uni":   {"hidden_dim": 32},
+}
 
 
 # ======================================================================
@@ -61,12 +69,15 @@ def _train_encoder(context, pg, domain: str, space: str):
         context.log.info(f"GPU: {gpu.name}, VRAM: {gpu.total_memory / 1e9:.1f} GB")
 
     input_dims = 1 if space == "uni" else 4
+    hidden_dim = SPACE_HPARAMS[space]["hidden_dim"]
+    context.log.info(f"Encoder config: input_dims={input_dims}, hidden_dim={hidden_dim}, embedding_dim={EMBEDDING_DIM}")
+
     all_data = np.concatenate(list(series_dict.values()))
     scaler = StandardScaler().fit(all_data)
     scaled = [scaler.transform(arr).astype(np.float32) for arr in series_dict.values()]
 
     t0 = time.time()
-    encoder = SoftCLTEncoder(input_dims=input_dims, embedding_dim=EMBEDDING_DIM, hidden_dim=HIDDEN_DIM, depth=DEPTH)
+    encoder = SoftCLTEncoder(input_dims=input_dims, embedding_dim=EMBEDDING_DIM, hidden_dim=hidden_dim, depth=DEPTH)
     encoder.fit(scaled, n_epochs=N_EPOCHS, lr=1e-3, batch_size=BATCH_SIZE,
                 early_stop_patience=EARLY_STOP_PATIENCE, dagster_context=context)
     train_duration = time.time() - t0
@@ -158,14 +169,24 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str, space: str):
     # Ensure new tables exist
     init_ml_schema(pg)
 
+    # Space-specific UMAP pre-reduction params
+    # Uni embeddings (128d) have lower intrinsic dimensionality → smaller UMAP target
+    # Multi embeddings (320d) need more room
+    if space == "uni":
+        wide_umap = {"umap_dims": 5, "umap_n_neighbors": 10, "umap_min_dist": 0.1}
+        fine_umap = {"umap_dims": 5, "umap_n_neighbors": 8, "umap_min_dist": 0.0}
+    else:
+        wide_umap = {"umap_dims": 15, "umap_n_neighbors": 20, "umap_min_dist": 0.1}
+        fine_umap = {"umap_dims": 10, "umap_n_neighbors": 15, "umap_min_dist": 0.0}
+
     # --- Config 1: Wide clusters (default) — fewer, larger clusters ---
-    context.log.info(f"Config 1: Wide clusters (default) for {domain}/{space}...")
+    context.log.info(f"Config 1: Wide clusters (default) for {domain}/{space} — UMAP {wide_umap}")
     wide = cluster_and_store(
         pg, domain, id_col,
         is_default=True,
         tune=False,
         min_cluster_size=25, min_samples=10,
-        umap_dims=15, umap_n_neighbors=20, umap_min_dist=0.1,
+        **wide_umap,
         space=space,
     )
     context.log.info(
@@ -181,13 +202,13 @@ def _cluster_and_viz(context, pg, domain: str, id_col: str, space: str):
         )
 
     # --- Config 2: Fine-grained clusters (alternative) ---
-    context.log.info(f"Config 2: Fine-grained clusters for {domain}/{space}...")
+    context.log.info(f"Config 2: Fine-grained clusters for {domain}/{space} — UMAP {fine_umap}")
     fine = cluster_and_store(
         pg, domain, id_col,
         is_default=False,
         tune=False,
         min_cluster_size=10, min_samples=5,
-        umap_dims=10, umap_n_neighbors=15, umap_min_dist=0.0,
+        **fine_umap,
         space=space,
     )
     context.log.info(
