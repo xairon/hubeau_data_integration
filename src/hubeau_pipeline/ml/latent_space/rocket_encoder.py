@@ -68,22 +68,26 @@ class RocketEncoder:
         self.rocket.fit(X[:fit_size])
         _log(f"MiniRocket fitted on {fit_size} windows")
 
-        # Transform all windows
-        features = self.rocket.transform(X)  # (N, 9996)
-        _log(f"MiniRocket transform: {X.shape} → {features.shape}")
+        # Transform in batches to limit memory (~9996 floats × batch_size)
+        BATCH = 20000
+        n_total = X.shape[0]
 
-        # StandardScaler before PCA
+        # First pass: fit scaler + PCA on a subset
+        subset_size = min(30000, n_total)
+        subset_features = self.rocket.transform(X[:subset_size]).astype(np.float32)
+        _log(f"MiniRocket subset transform: {subset_size} windows → {subset_features.shape}")
+
         self.scaler = StandardScaler()
-        features_scaled = self.scaler.fit_transform(features)
+        subset_scaled = self.scaler.fit_transform(subset_features)
 
-        # PCA to embedding_dim
         self.pca = PCA(n_components=self.embedding_dim, random_state=self.random_state)
-        self.pca.fit(features_scaled)
+        self.pca.fit(subset_scaled)
         explained = self.pca.explained_variance_ratio_.cumsum()
         _log(
-            f"PCA fitted: {features.shape[1]}d → {self.embedding_dim}d, "
+            f"PCA fitted on {subset_size} windows: {subset_features.shape[1]}d → {self.embedding_dim}d, "
             f"explained variance: {explained[-1]:.2%}"
         )
+        del subset_features, subset_scaled  # free memory
 
         return self
 
