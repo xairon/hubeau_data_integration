@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hub'Eau Data Pipeline: a production data warehouse for French hydrological data using a **Medallion Architecture** (Bronze → Silver → Gold). Ingests data from Hub'Eau APIs and ERA5 climate reanalysis, transforms via dbt, serves analytics via Apache Superset.
 
-**Stack**: Dagster (orchestration), DLT (ingestion), dbt 1.7.0 (transformation), PostgreSQL 16 + TimescaleDB + PostGIS, Docker Compose
+**Stack**: Dagster (orchestration), DLT (ingestion), dbt 1.7.0 (transformation), PostgreSQL 16 + TimescaleDB + PostGIS + pgvector, Docker Compose
+
+**ML Layer**: SoftCLT (multivariate) + MiniRocket+PCA (univariate) station embeddings → pgvector → HDBSCAN clustering. See `docs/ML_PIPELINE.md` for full documentation.
 
 ## Essential Commands
 
@@ -89,6 +91,7 @@ Two custom images, communicating via GRPC (defined in `dagster_home/workspace.ya
 | Rejects | `rejects/` (3 models) | `silver_rejects` | table |
 | Gold (intermediate) | `intermediate/` (7 models) | `gold` | table (some incremental) |
 | Gold (marts) | `marts/` (14 models) | `gold` | table |
+| ML | (Python, not dbt) | `ml` | pgvector UPSERT |
 
 Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_project.yml` model configs.
 
@@ -134,10 +137,15 @@ Schedules are time-based with buffer gaps. Sensors (`sensors.py`) provide event-
 - `src/hubeau_pipeline/` - Dagster pipeline (Python)
   - `assets/bronze/` - DLT ingestion assets (one file per data source)
   - `assets/dbt_assets.py` - Bridges dbt models as Dagster assets via `@dbt_assets` decorator
-  - `jobs/` - 22 job definitions (bronze, dbt staged pipelines, bootstrap)
+  - `assets/ml_assets.py` - 12 ML assets (train/encode/cluster x 2 domains x 2 spaces)
+  - `jobs/` - 22 job definitions + 8 ML jobs (bronze, dbt staged pipelines, bootstrap, ML)
   - `sources/` - DLT source clients: `hubeau_csv_source.py` (API pagination + retry), `era5_source.py` (CADS API + NetCDF)
+  - `ml/` - ML pipeline (see `docs/ML_PIPELINE.md`)
+    - `ts2vec/` - Vendorized TS2Vec (dilated CNN encoder, contrastive learning)
+    - `softclt/` - Vendorized SoftCLT loss (soft contrastive, monkey-patches TS2Vec)
+    - `latent_space/` - Embedding pipeline (encoder, rocket_encoder, data, persistence, clustering, tuning)
   - `schedules.py` - 9 cron schedules
-  - `sensors.py` - 3 event-driven sensors
+  - `sensors.py` - 3 event-driven sensors + ML embedding sensor
   - `resources.py` - PostgreSQLResource (Pydantic-based), DLT resource
   - `io/io_managers.py` - NoOpIOManager for DLT (data goes to PostgreSQL, not filesystem)
 - `src/dbt_hubeau/` - dbt project
@@ -152,6 +160,25 @@ Schedules are time-based with buffer gaps. Sensors (`sensors.py`) provide event-
 ### CI/CD
 
 GitLab CI (`.gitlab-ci.yml`): Generates dbt documentation and deploys to GitLab Pages on `main` branch pushes.
+
+### ML Layer — Station Embeddings
+
+> Full documentation: `docs/ML_PIPELINE.md`
+
+**Two embedding spaces** per domain (piezo, hydro):
+
+| Space | Encoder | Input | GPU | What it captures |
+|-------|---------|-------|-----|-----------------|
+| **multi** | SoftCLT (TS2Vec + soft contrastive loss) | target + 3 ERA5 vars (4D) | Yes | Coupled hydro-climate dynamics |
+| **uni** | MiniRocket+PCA (aeon) | target variable only (1D) | No | Intrinsic signal shape |
+
+**Key files**: `ml/latent_space/encoder.py` (SoftCLT), `ml/latent_space/rocket_encoder.py` (MiniRocket+PCA), `ml/latent_space/data.py` (loaders), `ml/latent_space/persistence.py` (pgvector CRUD), `ml/latent_space/clustering.py` (HDBSCAN + UMAP)
+
+**Schema `ml`**: 4 embedding tables (station + window x 2 domains), `clustering_runs`, `clustering_labels`. All tables have `space` column ('multi'|'uni'). Station embeddings have HNSW cosine index for similarity search.
+
+**Pipeline**: Training (manual, GPU) → Nightly encode (sensor-driven) → HDBSCAN clustering → UMAP 2D/3D viz
+
+**12 Dagster assets** (`ml_assets.py`): 4 train + 4 encode + 4 cluster (2 domains x 2 spaces). **8 jobs** (`ml_jobs.py`).
 
 ## Important Patterns
 
@@ -178,6 +205,7 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 ## Key Constraints
 
 - Python 3.11+, dbt pinned to 1.7.0 (Dagster compatibility), DLT pinned to 0.4.12
+- **ML**: MiniRocket via `aeon` (univariate), SoftCLT via vendorized TS2Vec+softclt (multivariate). `torch` for GPU training. `pgvector` for vector storage/similarity search
 - Docker volumes are **external** (not deleted by `docker compose down -v`) - must be created first via `scripts/init_volumes.sh`
 - GDAL/GEOS required in worker for geospatial processing (`pyogrio`, `geopandas`)
 - The `timescale/timescaledb-ha:pg16` image uses Patroni - do NOT add `command:` overrides in docker-compose
@@ -206,6 +234,10 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 - **dbt daily mart runs 1h+ instead of minutes**: Check if `unique_key` is set on an `append` model — dbt 1.7.0 ignores `append` strategy when `unique_key` is present and generates `DELETE...USING` which seq-scans all hypertable chunks. Fix: remove `unique_key` from the model config
 - **Bronze daily cleanup fails with `text >= date`**: DLT stores all Bronze columns as `text`. The `_clean_recent_data()` function must cast date columns explicitly (`{}::date >= CURRENT_DATE`). If you see `operator does not exist: text >= date`, check that the `::date` cast is present
 - **Dagster sensor crash loop (trailing_unconsumed_events)**: `multi_asset_sensor` must call `context.advance_all_cursors()` on EVERY evaluation, not just when yielding a RunRequest. Without this, events accumulate to the 25-event limit and crash the daemon
+- **ML: MiniRocket OOM on large datasets**: Transform is batched (20K/batch) in `rocket_encoder.py`. If still OOM, reduce `fit_size` or `subset_size`
+- **ML: SoftCLT OOM in univariate**: SoftCLT temporal matrix scales O(T^2) — use MiniRocket+PCA for univariate instead (commit `ee3724a`)
+- **ML: No trained model error**: Run training job first (`ml_{domain}_{space}_train_job`) before encoding. Model files stored in `/var/ml/models` (external Docker volume `brgm_ml_models`)
+- **ML: SoftCLT loss monkey-patch not applied**: `_patch_softclt_loss()` must be called before TS2Vec instantiation. Both `encoder.py` fit() and load() call it
 - **DLT SchemaNotFoundError or CannotCoerceColumnException**: DLT state lives in 4 places — ALL must be cleaned for a fresh pipeline start: (1) filesystem `docker exec brgm-dlt-worker rm -rf /var/dlt/pipelines/<name>`, (2) `DELETE FROM bronze._dlt_version WHERE schema_name = '<name>'`, (3) `DELETE FROM bronze._dlt_pipeline_state WHERE pipeline_name = '<name>'`, (4) `DELETE FROM bronze._dlt_loads WHERE schema_name = '<name>'`. Cleaning only some locations causes cascading errors
 
 ## Skills Reference

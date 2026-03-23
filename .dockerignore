@@ -14,9 +14,6 @@ env/
 */.venv/
 */venv/
 
-# Benchmark results (large files)
-benchmark/results/
-
 # IDEs
 .vscode/
 .idea/
