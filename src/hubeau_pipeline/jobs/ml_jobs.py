@@ -1,12 +1,14 @@
 """
-Dagster Jobs — SoftCLT Embeddings (ML Layer)
+Dagster Jobs — ML Layer
 
-8 jobs:
+12 jobs:
 - 4 training (manual via Dagster UI, 2 domains x 2 spaces)
 - 4 nightly encode + cluster (sensor-driven, 2 domains x 2 spaces)
+- 1 Pastas IRF features (manual)
+- 3 Pastas v3: signatures, SGI, full re-fit (manual)
 """
 
-from dagster import define_asset_job, AssetSelection
+from dagster import AssetSelection, define_asset_job
 
 # Training (manual — launch from Dagster UI)
 ml_piezo_multi_train_job = define_asset_job(
@@ -50,4 +52,32 @@ ml_hydro_uni_embeddings_job = define_asset_job(
     name="ml_hydro_uni_embeddings_job",
     selection=AssetSelection.assets("ml_hydro_uni_embeddings_update", "ml_hydro_uni_clusters"),
     description="Encode + cluster hydro UNI embeddings (GPU, ~2-5min)",
+)
+
+# Pastas IRF features (manual — launch from Dagster UI)
+pastas_irf_features_job = define_asset_job(
+    name="pastas_irf_features_job",
+    selection=AssetSelection.assets("ml_piezo_pastas_irf_features"),
+    description="Fit Pastas models and extract IRF features for all piezometric stations (~15-25min)",
+)
+
+# Pastas v3: groundwater signatures (manual — launch from Dagster UI)
+pastas_signatures_job = define_asset_job(
+    name="pastas_signatures_job",
+    selection=AssetSelection.assets("ml_piezo_groundwater_signatures"),
+    description="Compute 30 groundwater signatures + 7 Dutch stats for all eligible stations (~20-30min)",
+)
+
+# Pastas v3: SGI (manual — launch from Dagster UI)
+pastas_sgi_job = define_asset_job(
+    name="pastas_sgi_job",
+    selection=AssetSelection.assets("ml_piezo_sgi"),
+    description="Compute monthly SGI for all eligible stations (~15-20min)",
+)
+
+# Pastas v3: full re-fit (manual — launch from Dagster UI)
+pastas_full_refit_job = define_asset_job(
+    name="pastas_full_refit_job",
+    selection=AssetSelection.assets("ml_piezo_pastas_full_refit"),
+    description="Re-fit Pastas: decomposition + water balance + enriched metrics (~45-75min)",
 )
