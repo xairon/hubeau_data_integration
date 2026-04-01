@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: ml
+    schema: ml
+    description: "Tables ML produites par les assets Dagster Pastas et embeddings (hors dbt)"
+    freshness: null  # Pas de freshness check — refresh manuel
+    tables:
+      - name: pastas_irf_features
+        description: "Paramètres IRF + métriques qualité + diagnostics par station piézo"
+      - name: pastas_model_timeseries
+        description: "Séries quotidiennes simulées + résidus + bilan hydrique"
+      - name: pastas_groundwater_signatures
+        description: "30 signatures hydrogéo + 7 statistiques néerlandaises par station"
+      - name: pastas_sgi
+        description: "Standardized Groundwater Index mensuel (N(0,1))"
+      - name: piezo_station_embeddings
+        description: "Embeddings 320D par station piézo (multi + uni spaces)"

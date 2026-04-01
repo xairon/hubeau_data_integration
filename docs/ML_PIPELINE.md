@@ -21,11 +21,12 @@
    - [3.3 Preprocessing](#33-preprocessing-des-données)
    - [3.4 Clustering](#34-clustering-umap--hdbscan)
 4. [Stockage PostgreSQL](#4-stockage-postgresql)
-5. [Assets & Jobs Dagster](#5-assets--jobs-dagster)
-6. [Structure des fichiers](#6-structure-des-fichiers)
-7. [Dépendances](#7-dépendances)
-8. [Commandes utiles](#8-commandes-utiles)
-9. [Historique des choix techniques](#9-historique-des-choix-techniques)
+5. [Profil station dbt](#5-profil-station-dbt--int_pastas_station_profile)
+6. [Assets & Jobs Dagster](#6-assets--jobs-dagster-pastas--embeddings)
+7. [Structure des fichiers](#7-structure-des-fichiers)
+8. [Dépendances](#8-dépendances)
+9. [Commandes utiles](#9-commandes-utiles)
+10. [Historique des choix techniques](#10-historique-des-choix-techniques)
 
 ---
 
@@ -552,9 +553,64 @@ updated_at, umap_2d_x, umap_2d_y, umap_3d_x, umap_3d_y, umap_3d_z
 
 ---
 
-## 5. Assets & Jobs Dagster
+## 5. Profil station dbt — `int_pastas_station_profile`
 
-### 5.1 Assets Pastas (4)
+**Modèle** : `src/dbt_hubeau/models/intermediate/int_pastas_station_profile.sql`
+
+**Table** : `gold.int_pastas_station_profile` (5 409 lignes, 1 row/station)
+
+Table dbt qui dénormalise et agrège **toutes les données Pastas** en une seule ligne par station piézométrique. C'est la base commune pour les dashboards Superset, les features ML, et les embeddings enrichis.
+
+### 5.1 Sources
+
+Le modèle joint 4 tables `ml.*` (déclarées comme dbt sources dans `sources_ml.yml`) :
+
+```
+ml.pastas_irf_features           ──→ IRF params + qualité + diagnostics
+ml.pastas_model_timeseries       ──→ stats résidus (agrégés) + bilan hydrique (agrégé)
+ml.pastas_groundwater_signatures ──→ 30 signatures + 7 stats NL
+ml.pastas_sgi                    ──→ SGI récent + stats 12 mois
+```
+
+### 5.2 Blocs de colonnes
+
+| Bloc | Colonnes principales | Stations | Usage |
+|------|---------------------|----------|-------|
+| **IRF Gamma** | `recharge_a`, `recharge_n`, `tmax_days`, `cutoff_95_days`, `gain`, `mean_response_time` | 5 409 | Caractérisation physique de l'aquifère |
+| **Qualité modèle** | `nash`, `kge`, `rmse`, `mae`, `qualite_modele` (EXCELLENT→MAUVAIS) | 5 409 | Filtrer les stations fiables |
+| **Diagnostics résidus** | 5 p-values + `residus_non_structures` (bool) | 5 409 | Détecter les forçages cachés |
+| **Stats résidus global** | `residual_mean`, `residual_stddev`, `residual_trend_m_per_year` | 5 409 | Drift long terme |
+| **Stats résidus 12 mois** | `residual_mean_last_12m`, `residual_trend_last_12m`, `frac_negative_last_12m` | 5 409 | Anomalie récente |
+| **Stats résidus saisonnier** | `residual_summer_bias`, `residual_winter_bias`, `residual_seasonal_amplitude` | 5 409 | Pompage irrigation |
+| **Bilan hydrique moyen** | `wb_recharge_mean`, `wb_etp_reelle_mean`, `wb_ruissellement_mean` + hiver/été | 5 409 | Composantes du cycle de l'eau |
+| **30 signatures** | `parde_seasonality`, `recession_constant`, `autocorr_time`, etc. | 3 176 | Empreinte comportementale |
+| **7 stats NL** | `gg`, `ghg`, `glg`, `gvg`, `q_ghg`, `q_glg`, `q_gvg` | 3 176 | Niveaux caractéristiques |
+| **SGI récent** | `sgi_last_value`, `sgi_classification`, `sgi_months_below_minus1`, `sgi_mean_last_12m` | 2 865 | État sécheresse |
+
+### 5.3 Colonnes dérivées
+
+Le modèle calcule aussi des colonnes dérivées directement utiles :
+
+- **`qualite_modele`** : classification Nash (EXCELLENT ≥ 0.7, BON ≥ 0.5, MOYEN ≥ 0.2, FAIBLE ≥ 0, MAUVAIS < 0)
+- **`residus_non_structures`** : `true` si Ljung-Box > 0.05 ET Runs test > 0.05 (pas de pattern caché)
+- **`residual_seasonal_amplitude`** : `summer_bias - winter_bias` (différence saisonnière des résidus)
+- **`frac_negative_last_12m`** : fraction de jours avec résidu négatif sur 12 mois (>0.7 = suspect pompage)
+- **`residual_trend_m_per_year`** : pente des résidus en m/an (`REGR_SLOPE`) — drift positif ou négatif
+- **`sgi_classification`** : SECHERESSE_EXCEPTIONNELLE / MODEREE / NORMAL / HAUTES_EAUX / HAUTES_EAUX_EXCEPT
+
+### 5.4 Rebuild
+
+```bash
+docker exec brgm-dlt-worker bash -c "cd /app/src/dbt_hubeau && dbt run --select int_pastas_station_profile"
+```
+
+Durée : ~1m45 (agrégation sur 51.7M lignes de timeseries). Matérialisé en `table` (full rebuild, pas incrémental — les sources ml.* sont rechargées en batch).
+
+---
+
+## 6. Assets & Jobs Dagster (Pastas + Embeddings)
+
+### 6.1 Assets Pastas (4)
 
 | Asset | Groupe | Dépendance | Durée | Déclenchement |
 |-------|--------|-----------|-------|---------------|
@@ -563,7 +619,7 @@ updated_at, umap_2d_x, umap_2d_y, umap_3d_x, umap_3d_y, umap_3d_z
 | `ml_piezo_groundwater_signatures` | ml_piezo | `hubeau_daily_chroniques` | ~1h15 | Manuel |
 | `ml_piezo_sgi` | ml_piezo | `hubeau_daily_chroniques` | ~16 min | Manuel |
 
-### 5.2 Jobs Pastas (4)
+### 6.2 Jobs Pastas (4)
 
 | Job | Asset exécuté |
 |-----|---------------|
@@ -582,7 +638,7 @@ pastas_irf_features_job → pastas_full_refit_job
 
 `full_refit` dépend de `irf_features` (lit les stations avec `fit_success=true`). `signatures` et `sgi` sont indépendants (lisent directement Gold).
 
-### 5.3 Assets Embeddings (12) — Désactivés
+### 6.3 Assets Embeddings (12) — Désactivés
 
 > Retirés de `all_assets` et `all_jobs` le 2026-04-01. Le code reste importable.
 
@@ -601,7 +657,7 @@ pastas_irf_features_job → pastas_full_refit_job
 | `ml_hydro_multi_clusters` | ml_hydro | multi | Clustering |
 | `ml_hydro_uni_clusters` | ml_hydro | uni | Clustering |
 
-### 5.4 Modèle versioning (Embeddings)
+### 6.4 Modèle versioning (Embeddings)
 
 - **Training** : sauvegarde dans `/var/ml/models/{domain}_{space}_{YYYYmmdd_HHMM}/`
   - SoftCLT : `model.pt` + `scaler.pkl` + `stations.json`
@@ -611,7 +667,7 @@ pastas_irf_features_job → pastas_full_refit_job
 
 ---
 
-## 6. Structure des fichiers
+## 7. Structure des fichiers
 
 ```
 src/hubeau_pipeline/
@@ -651,7 +707,7 @@ src/hubeau_pipeline/
 
 ---
 
-## 7. Dépendances
+## 8. Dépendances
 
 ### Pastas
 
@@ -681,7 +737,7 @@ src/hubeau_pipeline/
 
 ---
 
-## 8. Commandes utiles
+## 9. Commandes utiles
 
 ### Pastas (manuel via Dagster UI ou CLI)
 
@@ -801,7 +857,7 @@ ORDER BY created_at DESC LIMIT 1;
 
 ---
 
-## 9. Historique des choix techniques
+## 10. Historique des choix techniques
 
 | Date | Changement | Raison |
 |------|-----------|--------|
@@ -815,3 +871,4 @@ ORDER BY created_at DESC LIMIT 1;
 | 2026-03-31 | Pastas Signatures + SGI + Full Re-fit | Pipeline Pastas v3 complet : 30 signatures, SGI mensuel, décomposition + bilan hydrique |
 | 2026-04-01 | Embeddings désactivés du pipeline auto | Assets et jobs retirés de `all_assets`/`all_jobs`, sensor supprimé. Données en base intactes |
 | 2026-04-01 | Fix double exécution sensor chain | `run_key` basé sur `date.today()` au lieu de `storage_id` pour dédupliquer |
+| 2026-04-01 | `int_pastas_station_profile` (dbt) | Profil station complet : IRF + résidus agrégés + bilan hydrique + signatures + SGI en 1 table |
