@@ -11,28 +11,26 @@ Single sensor replaces the fragile 4-stage time-based schedule.
 Each step only starts after its prerequisite completes successfully.
 """
 
+import logging
+from datetime import date
+
 from dagster import (
+    AssetKey,
+    DagsterRunStatus,
+    DefaultSensorStatus,
+    MultiAssetSensorEvaluationContext,
+    RunRequest,
+    RunStatusSensorContext,
+    SkipReason,
     multi_asset_sensor,
     run_status_sensor,
-    MultiAssetSensorEvaluationContext,
-    RunStatusSensorContext,
-    DagsterRunStatus,
-    AssetKey,
-    RunRequest,
-    SkipReason,
-    DefaultSensorStatus,
 )
-import logging
 
 from .jobs import (
-    dbt_piezo_pipeline_daily_job,
     dbt_hydro_pipeline_daily_job,
-    dbt_shared_staging_job,
+    dbt_piezo_pipeline_daily_job,
     dbt_shared_dimensions_job,
-    ml_piezo_multi_embeddings_job,
-    ml_piezo_uni_embeddings_job,
-    ml_hydro_multi_embeddings_job,
-    ml_hydro_uni_embeddings_job,
+    dbt_shared_staging_job,
 )
 from .utils import env_true
 
@@ -81,7 +79,9 @@ def bronze_to_shared_staging_sensor(context: MultiAssetSensorEvaluationContext):
     if not materialized_assets:
         return SkipReason("No new Bronze materializations detected")
 
-    run_key = f"shared_staging_{max_storage_id}"
+    # Use date-based run_key to deduplicate: piezo and hydro materialize at
+    # different times but should only trigger ONE shared staging per day.
+    run_key = f"shared_staging_{date.today().isoformat()}"
 
     logger.info(
         f"Step 1/3: Bronze materialized ({', '.join(materialized_assets)}). "
@@ -215,76 +215,6 @@ def domain_to_dimensions_sensor(context: RunStatusSensorContext):
 
 
 # ==============================================================================
-# STEP 4: DOMAIN PIPELINES DONE → ML EMBEDDINGS (parallel with dimensions)
-# ==============================================================================
-
-@run_status_sensor(
-    run_status=DagsterRunStatus.SUCCESS,
-    monitored_jobs=[dbt_piezo_pipeline_daily_job, dbt_hydro_pipeline_daily_job],
-    request_jobs=[
-        ml_piezo_multi_embeddings_job, ml_piezo_uni_embeddings_job,
-        ml_hydro_multi_embeddings_job, ml_hydro_uni_embeddings_job,
-    ],
-    default_status=DEFAULT_SENSOR_STATUS,
-    minimum_interval_seconds=30,
-    description="Step 4: Domain pipeline done → update SoftCLT embeddings for both spaces (GPU)",
-)
-def domain_to_embeddings_sensor(context: RunStatusSensorContext):
-    """
-    Fires after each domain pipeline succeeds.
-    Piezo done → piezo multi + uni embeddings. Hydro done → hydro multi + uni embeddings.
-    Runs in parallel with domain_to_dimensions_sensor (no dependency).
-    """
-    completed_job = context.dagster_run.job_name
-    run_id = context.dagster_run.run_id
-
-    if completed_job == dbt_piezo_pipeline_daily_job.name:
-        logger.info(f"Step 4: Piezo pipeline done → launching piezo multi+uni embeddings (run {run_id})")
-        yield RunRequest(
-            run_key=f"piezo_multi_emb_{run_id}",
-            job_name=ml_piezo_multi_embeddings_job.name,
-            tags={
-                "trigger": "sensor",
-                "sensor_name": "domain_to_embeddings_sensor",
-                "parent_run_id": run_id,
-                "pipeline_chain": "step_4_piezo_multi_embeddings",
-            },
-        )
-        yield RunRequest(
-            run_key=f"piezo_uni_emb_{run_id}",
-            job_name=ml_piezo_uni_embeddings_job.name,
-            tags={
-                "trigger": "sensor",
-                "sensor_name": "domain_to_embeddings_sensor",
-                "parent_run_id": run_id,
-                "pipeline_chain": "step_4_piezo_uni_embeddings",
-            },
-        )
-    elif completed_job == dbt_hydro_pipeline_daily_job.name:
-        logger.info(f"Step 4: Hydro pipeline done → launching hydro multi+uni embeddings (run {run_id})")
-        yield RunRequest(
-            run_key=f"hydro_multi_emb_{run_id}",
-            job_name=ml_hydro_multi_embeddings_job.name,
-            tags={
-                "trigger": "sensor",
-                "sensor_name": "domain_to_embeddings_sensor",
-                "parent_run_id": run_id,
-                "pipeline_chain": "step_4_hydro_multi_embeddings",
-            },
-        )
-        yield RunRequest(
-            run_key=f"hydro_uni_emb_{run_id}",
-            job_name=ml_hydro_uni_embeddings_job.name,
-            tags={
-                "trigger": "sensor",
-                "sensor_name": "domain_to_embeddings_sensor",
-                "parent_run_id": run_id,
-                "pipeline_chain": "step_4_hydro_uni_embeddings",
-            },
-        )
-
-
-# ==============================================================================
 # EXPORTS
 # ==============================================================================
 
@@ -292,5 +222,4 @@ all_sensors = [
     bronze_to_shared_staging_sensor,      # Step 1: Bronze → shared staging
     shared_staging_to_domain_sensor,      # Step 2: staging → piezo + hydro
     domain_to_dimensions_sensor,          # Step 3: piezo + hydro → dimensions
-    domain_to_embeddings_sensor,          # Step 4: piezo/hydro → ML embeddings (parallel with step 3)
 ]

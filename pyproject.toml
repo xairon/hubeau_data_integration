@@ -89,6 +89,7 @@ dependencies = [
     "umap-learn>=0.5.0",
     "optuna>=3.0.0",
     "aeon>=1.0.0",
+    "pastas>=1.7.0",
 ]
 
 # ═══════════════════════════════════════════════════════════
@@ -176,6 +177,7 @@ worker = [
     "hdbscan>=0.8.33",
     "umap-learn>=0.5.0",
     "optuna>=3.0.0",
+    "pastas>=1.7.0",
 ]
 
 # All dependencies (for local development)

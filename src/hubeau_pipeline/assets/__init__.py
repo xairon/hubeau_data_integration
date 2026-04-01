@@ -78,6 +78,6 @@ all_ml_assets = [
     ml_piezo_pastas_full_refit,
 ]
 
-all_assets = all_bronze_assets + all_dbt_assets + all_ml_assets
+all_assets = all_bronze_assets + all_dbt_assets
 
 __all__ = ["all_assets", "all_bronze_assets", "all_dbt_assets", "all_ml_assets"]

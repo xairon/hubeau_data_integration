@@ -50,22 +50,6 @@ from .hubeau_jobs import (
     piezometry_stations_job,
 )
 
-# ML — SoftCLT Embeddings (uni + multi spaces) + Pastas IRF
-from .ml_jobs import (
-    ml_hydro_multi_embeddings_job,
-    ml_hydro_multi_train_job,
-    ml_hydro_uni_embeddings_job,
-    ml_hydro_uni_train_job,
-    ml_piezo_multi_embeddings_job,
-    ml_piezo_multi_train_job,
-    ml_piezo_uni_embeddings_job,
-    ml_piezo_uni_train_job,
-    pastas_full_refit_job,
-    pastas_irf_features_job,
-    pastas_sgi_job,
-    pastas_signatures_job,
-)
-
 # Données de référence (BDLISA + Sandre) — à lancer avant full_bootstrap ou premier dbt run
 from .reference_data_jobs import reference_data_bronze_job
 
@@ -105,19 +89,6 @@ all_jobs = [
     reference_data_bronze_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
-    # ML — SoftCLT Embeddings (uni + multi spaces) + Pastas IRF
-    ml_piezo_multi_train_job,
-    ml_piezo_uni_train_job,
-    ml_hydro_multi_train_job,
-    ml_hydro_uni_train_job,
-    ml_piezo_multi_embeddings_job,
-    ml_piezo_uni_embeddings_job,
-    ml_hydro_multi_embeddings_job,
-    ml_hydro_uni_embeddings_job,
-    pastas_irf_features_job,
-    pastas_signatures_job,
-    pastas_sgi_job,
-    pastas_full_refit_job,
 ]
 
 __all__ = [
@@ -156,19 +127,6 @@ __all__ = [
     "reference_data_bronze_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
-    # ML — SoftCLT Embeddings (uni + multi spaces) + Pastas IRF
-    "ml_piezo_multi_train_job",
-    "ml_piezo_uni_train_job",
-    "ml_hydro_multi_train_job",
-    "ml_hydro_uni_train_job",
-    "ml_piezo_multi_embeddings_job",
-    "ml_piezo_uni_embeddings_job",
-    "ml_hydro_multi_embeddings_job",
-    "ml_hydro_uni_embeddings_job",
-    "pastas_irf_features_job",
-    "pastas_signatures_job",
-    "pastas_sgi_job",
-    "pastas_full_refit_job",
     # Collections
     "all_jobs",
 ]
