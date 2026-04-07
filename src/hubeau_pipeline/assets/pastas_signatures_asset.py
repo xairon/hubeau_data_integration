@@ -1,6 +1,6 @@
 """Dagster Asset — Pastas Groundwater Signatures.
 
-Computes 31 groundwater signatures for all eligible piezometric stations
+Computes 29 groundwater signatures for all eligible piezometric stations
 from gold.hubeau_daily_chroniques using ps.stats.signatures.summary().
 
 Uses AIDA eligibility criteria: >= 10y temporal span, all 3 variables
@@ -31,7 +31,8 @@ except ImportError:
 BATCH_SIZE = 500
 N_JOBS = 8
 
-# 31 signatures from ps.stats.signatures.__all__
+# 29 signatures from ps.stats.signatures.__all__
+# Excluded: reversals_avg, reversals_cv (100% NaN — require strictly daily data)
 SIGNATURE_NAMES = [
     "cv_period_mean",
     "cv_date_min",
@@ -49,8 +50,6 @@ SIGNATURE_NAMES = [
     "mean_annual_maximum",
     "rise_rate",
     "fall_rate",
-    "reversals_avg",
-    "reversals_cv",
     "colwell_contingency",
     "colwell_constancy",
     "recession_constant",
@@ -96,8 +95,6 @@ CREATE TABLE IF NOT EXISTS ml.pastas_groundwater_signatures (
     mean_annual_maximum      DOUBLE PRECISION,
     rise_rate                DOUBLE PRECISION,
     fall_rate                DOUBLE PRECISION,
-    reversals_avg            DOUBLE PRECISION,
-    reversals_cv             DOUBLE PRECISION,
     colwell_contingency      DOUBLE PRECISION,
     colwell_constancy        DOUBLE PRECISION,
     recession_constant       DOUBLE PRECISION,
@@ -142,9 +139,9 @@ def _sanitize_value(v):
 
 
 def compute_signatures(code_bss: str, gwl: pd.Series) -> dict:
-    """Compute 31 Pastas signatures for one station.
+    """Compute 29 Pastas signatures for one station.
 
-    Returns dict with code_bss, 31 signature values (sanitized),
+    Returns dict with code_bss, 29 signature values (sanitized),
     metadata, and success flag.
     """
     if not PASTAS_AVAILABLE:
@@ -281,7 +278,7 @@ def _persist_results(pg: PostgreSQLResource, results: list[dict]) -> int:
     group_name="ml_piezo",
     deps=["hubeau_daily_chroniques"],
     description=(
-        "Compute 31 Pastas groundwater signatures "
+        "Compute 29 Pastas groundwater signatures "
         "(AIDA criteria: >= 10y span + quality filter)"
     ),
 )

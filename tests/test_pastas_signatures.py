@@ -26,7 +26,7 @@ class TestComputeSignatures:
         assert result["success"] is True
         assert "error" not in result
 
-    def test_31_signatures_present(self):
+    def test_29_signatures_present(self):
         gwl = _make_synthetic_gwl(n_days=3000)
         result = compute_signatures("TEST_001", gwl)
         assert result["success"] is True
