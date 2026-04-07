@@ -334,7 +334,7 @@ def ml_piezo_groundwater_signatures(
             )
             continue
 
-        results = Parallel(n_jobs=N_JOBS, backend="threading")(
+        results = Parallel(n_jobs=N_JOBS, backend="loky")(
             delayed(compute_signatures)(code_bss, gwl)
             for code_bss, gwl in stations.items()
         )
