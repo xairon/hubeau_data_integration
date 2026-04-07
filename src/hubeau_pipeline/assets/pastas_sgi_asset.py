@@ -1,7 +1,10 @@
 """Dagster Asset — Pastas SGI (Standardized Groundwater Index).
 
-Computes monthly SGI for all eligible piezometric stations (>= 5 years)
+Computes monthly SGI for all eligible piezometric stations
 from gold.hubeau_daily_chroniques. No Pastas model fitting required.
+
+Uses the same AIDA eligibility criteria as the IRF job: >= 10y temporal span,
+all 3 variables present, and at least one 365-day window with <= 10% NaN.
 
 SGI is a monthly time series (not daily) — normalized to N(0,1).
 """
@@ -13,6 +16,7 @@ from dagster import AssetExecutionContext, MetadataValue, asset
 from joblib import Parallel, delayed
 
 from ..resources import PostgreSQLResource
+from .pastas_assets import MIN_YEARS, _check_station_quality
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +27,6 @@ try:
 except ImportError:
     PASTAS_AVAILABLE = False
 
-MIN_DAYS = 1825  # >= 5 years for meaningful SGI
 BATCH_SIZE = 500
 N_JOBS = 8
 
@@ -58,11 +61,16 @@ def _compute_sgi_single(code_bss: str, gwl: pd.Series) -> dict:
 
 
 def _get_eligible_station_ids(pg: PostgreSQLResource) -> list[str]:
+    """Stations passing AIDA SQL pre-filter (>= 10y span, all 3 vars present)."""
+    min_days = MIN_YEARS * 365
     query = f"""
     SELECT code_bss
     FROM gold.hubeau_daily_chroniques
     GROUP BY code_bss
-    HAVING COUNT(niveau_nappe_eau) >= {MIN_DAYS}
+    HAVING MAX(date) - MIN(date) >= {min_days}
+       AND COUNT(niveau_nappe_eau) > 0
+       AND COUNT(total_precipitation) > 0
+       AND COUNT(potential_evaporation) > 0
     ORDER BY code_bss
     """
     with pg.get_connection() as conn:
@@ -71,6 +79,7 @@ def _get_eligible_station_ids(pg: PostgreSQLResource) -> list[str]:
 
 
 def _load_gwl_batch(pg: PostgreSQLResource, station_ids: list[str]) -> dict[str, pd.Series]:
+    """Load GWL series for a batch of stations, applying AIDA quality filter."""
     placeholders = ",".join(["%s"] * len(station_ids))
     query = f"""
     SELECT code_bss, date, niveau_nappe_eau
@@ -93,7 +102,8 @@ def _load_gwl_batch(pg: PostgreSQLResource, station_ids: list[str]) -> dict[str,
     stations = {}
     for code_bss, group in df.groupby("code_bss"):
         gwl = group.set_index("date")["niveau_nappe_eau"].sort_index()
-        stations[code_bss] = gwl
+        if _check_station_quality(gwl):
+            stations[code_bss] = gwl
     return stations
 
 
@@ -125,7 +135,7 @@ def _persist_sgi_batch(pg: PostgreSQLResource, results: list[dict]) -> int:
 @asset(
     group_name="ml_piezo",
     deps=["hubeau_daily_chroniques"],
-    description="Compute monthly SGI (Standardized Groundwater Index) for all eligible stations (>= 5y)",
+    description="Compute monthly SGI (Standardized Groundwater Index) — AIDA criteria: >= 10y span + quality filter",
 )
 def ml_piezo_sgi(
     context: AssetExecutionContext,
@@ -136,9 +146,9 @@ def ml_piezo_sgi(
         context.log.error("pastas not installed")
         return
 
-    context.log.info(f"Identifying eligible stations (>= {MIN_DAYS} days)...")
+    context.log.info(f"Identifying eligible stations (AIDA: >= {MIN_YEARS}y span + quality filter)...")
     all_ids = _get_eligible_station_ids(pg)
-    context.log.info(f"Found {len(all_ids)} eligible stations")
+    context.log.info(f"SQL pre-filter: {len(all_ids)} stations with >= {MIN_YEARS}y span")
 
     if not all_ids:
         context.log.warning("No eligible stations found.")
@@ -154,16 +164,19 @@ def ml_piezo_sgi(
     n_batches = (len(all_ids) + BATCH_SIZE - 1) // BATCH_SIZE
     total_success = 0
     total_fail = 0
+    total_eligible = 0
     total_rows = 0
 
     for batch_idx in range(n_batches):
         batch_ids = all_ids[batch_idx * BATCH_SIZE : (batch_idx + 1) * BATCH_SIZE]
         stations = _load_gwl_batch(pg, batch_ids)
+        n_eligible = len(stations)
+        total_eligible += n_eligible
 
-        if not stations:
+        if n_eligible == 0:
             continue
 
-        results = Parallel(n_jobs=N_JOBS, backend="loky")(
+        results = Parallel(n_jobs=N_JOBS, backend="threading")(
             delayed(_compute_sgi_single)(code_bss, gwl) for code_bss, gwl in stations.items()
         )
 
@@ -175,14 +188,20 @@ def ml_piezo_sgi(
         total_rows += n_rows
 
         context.log.info(
-            f"Batch {batch_idx + 1}/{n_batches}: " f"{n_ok}/{len(results)} success, {n_rows} rows inserted"
+            f"Batch {batch_idx + 1}/{n_batches}: "
+            f"{n_ok}/{n_eligible} success, {n_rows} rows inserted"
         )
         del stations, results
 
-    context.log.info(f"Done: {total_success} stations, {total_rows} total SGI rows")
+    n_rejected = len(all_ids) - total_eligible
+    context.log.info(
+        f"Done: {total_success}/{total_eligible} success "
+        f"({n_rejected} rejected by quality filter, {total_fail} compute failures, {total_rows} SGI rows)"
+    )
     context.add_output_metadata(
         {
-            "n_eligible": MetadataValue.int(len(all_ids)),
+            "n_stations_sql_prefilter": MetadataValue.int(len(all_ids)),
+            "n_stations_quality_filter": MetadataValue.int(total_eligible),
             "n_success": MetadataValue.int(total_success),
             "n_failure": MetadataValue.int(total_fail),
             "n_sgi_rows": MetadataValue.int(total_rows),

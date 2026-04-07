@@ -1,3 +1,36 @@
+# Pastas Groundwater Signatures Rework — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Rework `ml_piezo_groundwater_signatures` asset — remove Dutch stats, inline signature logic, align schema on Pastas `__all__`, add robustness guards.
+
+**Architecture:** Single Dagster asset calling `ps.stats.signatures.summary()` directly (no wrapper). DROP+recreate table for schema migration. Same AIDA eligibility filter as other Pastas assets.
+
+**Tech Stack:** Pastas >= 1.7.0, Dagster, PostgreSQL, joblib
+
+**Spec:** `docs/superpowers/specs/2026-04-07-pastas-signatures-rework-design.md`
+
+---
+
+## File Map
+
+| Action | File | Responsibility |
+|--------|------|---------------|
+| Rewrite | `src/hubeau_pipeline/assets/pastas_signatures_asset.py` | Asset + inline signature computation |
+| Delete | `src/hubeau_pipeline/ml/pastas_signatures.py` | No longer needed |
+| Rewrite | `tests/test_pastas_signatures.py` | Tests updated for new interface |
+| Minor edit | `src/hubeau_pipeline/assets/__init__.py` | Remove stale import path |
+
+---
+
+### Task 1: Rewrite the asset file
+
+**Files:**
+- Rewrite: `src/hubeau_pipeline/assets/pastas_signatures_asset.py`
+
+- [ ] **Step 1: Replace `pastas_signatures_asset.py` with the new implementation**
+
+```python
 """Dagster Asset — Pastas Groundwater Signatures.
 
 Computes 31 groundwater signatures for all eligible piezometric stations
@@ -153,12 +186,13 @@ def compute_signatures(code_bss: str, gwl: pd.Series) -> dict:
     if len(gwl) == 0 or gwl.isna().all():
         return _failure_result(code_bss, gwl, "empty or all-NaN series")
 
+    valid = gwl.dropna()
     base_meta = {
         "code_bss": code_bss,
         "series_start": gwl.index.min().date(),
         "series_end": gwl.index.max().date(),
         "series_length_days": (gwl.index.max() - gwl.index.min()).days,
-        "n_valid_days": int(gwl.notna().sum()),
+        "n_valid_days": len(valid),
         "pastas_version": ps.__version__,
     }
 
@@ -318,7 +352,6 @@ def ml_piezo_groundwater_signatures(
     total_fail = 0
     total_eligible = 0
     total_persisted = 0
-    all_failures = []
 
     for batch_idx in range(n_batches):
         batch_ids = all_ids[batch_idx * BATCH_SIZE : (batch_idx + 1) * BATCH_SIZE]
@@ -346,8 +379,12 @@ def ml_piezo_groundwater_signatures(
         n_persisted = _persist_results(pg, results)
         total_persisted += n_persisted
 
-        # Collect failures (log first 10 at end)
-        all_failures.extend(r for r in results if not r.get("success"))
+        # Log first failures for debugging
+        for r in results:
+            if not r.get("success"):
+                context.log.warning(
+                    "  FAIL %s: %s", r["code_bss"], r.get("error", "unknown")
+                )
 
         context.log.info(
             "Batch %d/%d: %d/%d success, %d persisted",
@@ -368,10 +405,6 @@ def ml_piezo_groundwater_signatures(
         total_fail,
         total_persisted,
     )
-
-    for f in all_failures[:10]:
-        context.log.warning("  FAIL %s: %s", f["code_bss"], f.get("error", "unknown"))
-
     context.add_output_metadata(
         {
             "n_stations_sql_prefilter": MetadataValue.int(len(all_ids)),
@@ -381,3 +414,185 @@ def ml_piezo_groundwater_signatures(
             "n_persisted": MetadataValue.int(total_persisted),
         }
     )
+```
+
+- [ ] **Step 2: Verify syntax**
+
+Run: `python -c "import ast; ast.parse(open('src/hubeau_pipeline/assets/pastas_signatures_asset.py').read()); print('OK')"`
+Expected: `OK`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/hubeau_pipeline/assets/pastas_signatures_asset.py
+git commit -m "refactor(pastas): rewrite signatures asset — remove Dutch stats, inline logic, add inf guard"
+```
+
+---
+
+### Task 2: Delete the wrapper module
+
+**Files:**
+- Delete: `src/hubeau_pipeline/ml/pastas_signatures.py`
+
+- [ ] **Step 1: Delete the wrapper**
+
+```bash
+rm src/hubeau_pipeline/ml/pastas_signatures.py
+```
+
+- [ ] **Step 2: Verify no remaining imports**
+
+Run: `grep -r "pastas_signatures" src/hubeau_pipeline/ --include="*.py"`
+
+Expected output — only references in the asset itself (no more `from ..ml.pastas_signatures`):
+```
+src/hubeau_pipeline/assets/pastas_signatures_asset.py:...  (only the asset file, no ml/ import)
+src/hubeau_pipeline/jobs/ml_jobs.py:...  (job name string, not an import)
+src/hubeau_pipeline/jobs/__init__.py:...  (job name string, not an import)
+src/hubeau_pipeline/assets/__init__.py:...  (import of the asset, not the wrapper)
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add -u src/hubeau_pipeline/ml/pastas_signatures.py
+git commit -m "refactor(pastas): delete pastas_signatures.py wrapper (logic inlined into asset)"
+```
+
+---
+
+### Task 3: Update tests
+
+**Files:**
+- Rewrite: `tests/test_pastas_signatures.py`
+
+The existing tests import from the deleted `ml.pastas_signatures` module. Rewrite to test the new `compute_signatures` function from the asset module.
+
+- [ ] **Step 1: Rewrite `tests/test_pastas_signatures.py`**
+
+```python
+"""Tests for Pastas groundwater signatures computation."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from hubeau_pipeline.assets.pastas_signatures_asset import (
+    SIGNATURE_NAMES,
+    compute_signatures,
+)
+
+
+def _make_synthetic_gwl(n_days: int = 3000, seed: int = 42) -> pd.Series:
+    """Synthetic daily GWL: sinusoidal annual cycle + noise."""
+    rng = np.random.RandomState(seed)
+    dates = pd.date_range("2015-01-01", periods=n_days, freq="D")
+    t = np.arange(n_days)
+    gwl = 50.0 + 2.0 * np.sin(2 * np.pi * t / 365) + rng.normal(0, 0.3, n_days)
+    return pd.Series(gwl, index=dates, name="gwl")
+
+
+class TestComputeSignatures:
+    def test_success_on_long_series(self):
+        gwl = _make_synthetic_gwl(n_days=3000)
+        result = compute_signatures("TEST_001", gwl)
+        assert result["code_bss"] == "TEST_001"
+        assert result["success"] is True
+        assert "error" not in result
+
+    def test_31_signatures_present(self):
+        gwl = _make_synthetic_gwl(n_days=3000)
+        result = compute_signatures("TEST_001", gwl)
+        assert result["success"] is True
+        for name in SIGNATURE_NAMES:
+            assert name in result, f"Missing signature: {name}"
+
+    def test_most_signatures_non_null(self):
+        gwl = _make_synthetic_gwl(n_days=3000)
+        result = compute_signatures("TEST_001", gwl)
+        assert result["success"] is True
+        assert result["n_signatures_computed"] >= 25
+
+    def test_no_dutch_stats(self):
+        gwl = _make_synthetic_gwl(n_days=3000)
+        result = compute_signatures("TEST_001", gwl)
+        for key in ["gg", "ghg", "glg", "gvg", "q_ghg", "q_glg", "q_gvg"]:
+            assert key not in result, f"Dutch stat {key} should not be present"
+
+    def test_metadata_fields(self):
+        gwl = _make_synthetic_gwl(n_days=3000)
+        result = compute_signatures("TEST_001", gwl)
+        assert result["series_start"] is not None
+        assert result["series_end"] is not None
+        assert result["series_length_days"] > 0
+        assert result["n_valid_days"] > 0
+        assert result["pastas_version"] is not None
+
+    def test_inf_sanitized(self):
+        """Signatures producing inf (e.g., magnitude when min~0) are replaced with None."""
+        gwl = _make_synthetic_gwl(n_days=3000)
+        result = compute_signatures("TEST_001", gwl)
+        for name in SIGNATURE_NAMES:
+            val = result[name]
+            if val is not None:
+                assert not np.isinf(val), f"{name} is inf"
+
+    def test_full_nan_returns_failure(self):
+        dates = pd.date_range("2020-01-01", periods=1000, freq="D")
+        gwl = pd.Series(np.nan, index=dates, name="gwl")
+        result = compute_signatures("NAN", gwl)
+        assert result["code_bss"] == "NAN"
+        assert result["success"] is False
+
+    def test_empty_series_returns_failure(self):
+        gwl = pd.Series(dtype=float, index=pd.DatetimeIndex([]), name="gwl")
+        result = compute_signatures("EMPTY", gwl)
+        assert result["code_bss"] == "EMPTY"
+        assert result["success"] is False
+
+    def test_short_series_does_not_crash(self):
+        gwl = _make_synthetic_gwl(n_days=300)
+        result = compute_signatures("SHORT", gwl)
+        assert result["code_bss"] == "SHORT"
+        # May succeed or fail depending on Pastas, but must not raise
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cd /home/ringuet/hubeau_data_integration && python -m pytest tests/test_pastas_signatures.py -v`
+
+Expected: All tests pass (assuming Pastas is importable in test env). If Pastas is not available locally, the tests will fail with import error — that's expected since they run inside the Docker worker.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_pastas_signatures.py
+git commit -m "test(pastas): update signature tests — new interface, no Dutch stats, inf guard"
+```
+
+---
+
+### Task 4: Clean up `__init__.py` import
+
+**Files:**
+- Verify: `src/hubeau_pipeline/assets/__init__.py`
+
+- [ ] **Step 1: Verify the import is already correct**
+
+The current import at line 39 is:
+```python
+from .pastas_signatures_asset import ml_piezo_groundwater_signatures
+```
+
+This imports from the asset file (not the deleted wrapper), so **no change is needed**. The old import from `ml.pastas_signatures` was only in the asset file itself, which was already rewritten in Task 1.
+
+- [ ] **Step 2: Verify Dagster definitions load**
+
+Run: `cd /home/ringuet/hubeau_data_integration && python -c "from hubeau_pipeline.assets import all_assets; print(f'{len(all_assets)} assets loaded OK')"`
+
+Expected: `30 assets loaded OK` (or similar count, no ImportError)
+
+- [ ] **Step 3: Final commit (if any fixup needed)**
+
+Only if step 2 reveals an issue. Otherwise skip.

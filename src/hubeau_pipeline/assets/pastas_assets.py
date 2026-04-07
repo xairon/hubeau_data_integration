@@ -251,7 +251,7 @@ def ml_piezo_pastas_irf_features(
             continue
 
         # Parallel fit within this batch
-        results = Parallel(n_jobs=N_JOBS, backend="loky")(
+        results = Parallel(n_jobs=N_JOBS, backend="threading")(
             delayed(fit_single_station)(code_bss, data["gwl"], data["precip"], data["evap"])
             for code_bss, data in stations.items()
         )

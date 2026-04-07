@@ -65,7 +65,7 @@ pastas_irf_features_job = define_asset_job(
 pastas_signatures_job = define_asset_job(
     name="pastas_signatures_job",
     selection=AssetSelection.assets("ml_piezo_groundwater_signatures"),
-    description="Compute 30 groundwater signatures + 7 Dutch stats for all eligible stations (~20-30min)",
+    description="Compute 31 Pastas groundwater signatures for all eligible stations (~20-30min)",
 )
 
 # Pastas v3: SGI (manual — launch from Dagster UI)
