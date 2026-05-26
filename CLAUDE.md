@@ -204,7 +204,7 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 
 ## Key Constraints
 
-- Python 3.11+, dbt pinned to 1.7.0 (Dagster compatibility), DLT pinned to 0.4.12
+- Python 3.11+, dbt pinned to 1.7.0 (Dagster compatibility, enforced via `require-dbt-version` in `dbt_project.yml`), DLT pinned to 0.4.12
 - **ML**: MiniRocket via `aeon` (univariate), SoftCLT via vendorized TS2Vec+softclt (multivariate). `torch` for GPU training. `pgvector` for vector storage/similarity search
 - Docker volumes are **external** (not deleted by `docker compose down -v`) - must be created first via `scripts/init_volumes.sh`
 - GDAL/GEOS required in worker for geospatial processing (`pyogrio`, `geopandas`)
@@ -239,6 +239,7 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 - **ML: No trained model error**: Run training job first (`ml_{domain}_{space}_train_job`) before encoding. Model files stored in `/var/ml/models` (external Docker volume `brgm_ml_models`)
 - **ML: SoftCLT loss monkey-patch not applied**: `_patch_softclt_loss()` must be called before TS2Vec instantiation. Both `encoder.py` fit() and load() call it
 - **DLT SchemaNotFoundError or CannotCoerceColumnException**: DLT state lives in 4 places — ALL must be cleaned for a fresh pipeline start: (1) filesystem `docker exec brgm-dlt-worker rm -rf /var/dlt/pipelines/<name>`, (2) `DELETE FROM bronze._dlt_version WHERE schema_name = '<name>'`, (3) `DELETE FROM bronze._dlt_pipeline_state WHERE pipeline_name = '<name>'`, (4) `DELETE FROM bronze._dlt_loads WHERE schema_name = '<name>'`. Cleaning only some locations causes cascading errors
+- **FK violation on `int_hydro_daily_measurements` (orphan `code_station`)**: Hub'Eau API can return obs for stations absent from its stations endpoint. `stg_hydrometry_obs_elab` only filters on `code_site` (because `code_station` is nullable, 46% of obs). The FK to stations is enforced one level down via `INNER JOIN stg_hydrometry_stations` inside `int_hydro_daily_measurements`. Self-healing: orphans are re-aggregated once Hub'Eau catches up (within 7-day lookback). Piezo is not affected — `stg_piezo_chroniques` already filters at the staging layer (`code_bss` is non-nullable)
 
 ## Skills Reference
 

@@ -4,12 +4,13 @@ config-version: 2
 
 profile: 'hubeau_pipeline'
 
+# Pin dbt: 1.7.0 est compatible Dagster ; 1.8+ introduit des breaking changes
+# (notamment dans le comportement des stratégies incrémentales sur hypertables).
+require-dbt-version: [">=1.7.0", "<1.8.0"]
+
 model-paths: ["models"]
-analysis-paths: ["analyses"]
-test-paths: ["tests"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]
-snapshot-paths: ["snapshots"]
 
 clean-targets:
   - "target"
@@ -32,9 +33,6 @@ on-run-start:
 
 models:
   hubeau_pipeline:
-    # Config par défaut pour tous les modèles
-    +materialized: view
-    
     staging:
       # Tables nettoyées (Silver Layer)
       +schema: silver
@@ -44,18 +42,13 @@ models:
     rejects:
       +schema: silver_rejects
       +materialized: table
-      
+
     intermediate:
       # Tables intermédiaires (Gold Layer)
       +schema: gold
       +materialized: table
-      
+
     marts:
       # Tables finales (Gold Layer)
       +schema: gold
       +materialized: table
-
-seeds:
-  hubeau_pipeline:
-    # Seeds dans Bronze Layer (données de référence)
-    +schema: bronze
