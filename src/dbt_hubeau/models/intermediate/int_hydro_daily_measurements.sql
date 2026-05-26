@@ -33,15 +33,22 @@ WITH observations AS (
         FROM {{ this }}
     )
     {% endif %}
+),
+
+-- Filtre les obs dont code_station n'est pas (encore) dans le référentiel stations.
+-- L'API Hub'Eau peut retourner des obs pour des stations absentes de l'endpoint stations ;
+-- self-healing : ré-agrégées quand stations rattrape (fenêtre lookback).
+valid_stations AS (
+    SELECT code_station FROM {{ ref('stg_hydrometry_stations') }}
 )
 
 SELECT
-    code_site::text AS code_site,
-    code_station::text AS code_station,
-    date_obs_elab::date AS date_obs_elab,
-    grandeur_hydro_elab::text AS grandeur_hydro_elab,
-    (AVG(resultat_obs_elab))::numeric AS resultat_obs_elab,
+    o.code_site::text AS code_site,
+    o.code_station::text AS code_station,
+    o.date_obs_elab::date AS date_obs_elab,
+    o.grandeur_hydro_elab::text AS grandeur_hydro_elab,
+    (AVG(o.resultat_obs_elab))::numeric AS resultat_obs_elab,
     COUNT(*)::integer AS nb_obs
-FROM observations
-WHERE code_station IS NOT NULL
-GROUP BY code_site, code_station, date_obs_elab, grandeur_hydro_elab
+FROM observations o
+INNER JOIN valid_stations s ON o.code_station = s.code_station
+GROUP BY o.code_site, o.code_station, o.date_obs_elab, o.grandeur_hydro_elab
