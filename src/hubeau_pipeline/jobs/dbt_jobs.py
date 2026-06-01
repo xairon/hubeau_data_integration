@@ -220,6 +220,39 @@ dbt_shared_dimensions_job = define_asset_job(
     hooks=set(),
 )
 
+# ==============================================================================
+# DAILY TRANSFORM (single job: full Silver→Gold for both domains + shared dims)
+# ==============================================================================
+
+# Builds EVERYTHING downstream of shared staging in ONE job. dbt resolves the
+# ref() DAG internally, so ordering (staging → int → daily marts → monthly →
+# yearly → station dims → carte → dim_geography/dim_date) is guaranteed without
+# any cross-job/sensor coordination.
+#
+# WHY a single job: runs are serialized globally (QueuedRunCoordinator
+# max_concurrent_runs=1), so the previous parallel piezo+hydro fan-out gave no
+# speedup, and the rejoin step relied on RunStatusSensorContext.cursor — which
+# does not exist, so it crashed on every tick. Collapsing to one job removes
+# that failure mode entirely and ensures monthly/yearly/station dimensions
+# (derniere_mesure!) and dim_date refresh on every nightly chain.
+DAILY_TRANSFORM_MODELS = PIEZO_MODELS + HYDRO_MODELS + SHARED_DIMENSION_MODELS
+
+dbt_daily_transform_job = define_asset_job(
+    name="dbt_daily_transform",
+    description=(
+        "Daily Silver→Gold transform for BOTH domains + shared dimensions, in one job. "
+        "PREREQUISITE: dbt_shared_staging_job (ERA5) must run first. "
+        "Triggered by the shared_staging_to_domain sensor. Includes monthly/yearly "
+        "aggregates, station dimensions and dim_date that the daily fast-path jobs omit."
+    ),
+    selection=build_dbt_asset_selection(
+        [hubeau_dbt_assets],
+        dbt_select=" ".join(DAILY_TRANSFORM_MODELS),
+    ).without_checks(),
+    tags={"dagster/concurrency_key": "dbt_pipeline"},
+    hooks=set(),
+)
+
 
 # ==============================================================================
 # DBT TEST JOB - Data Quality Validation

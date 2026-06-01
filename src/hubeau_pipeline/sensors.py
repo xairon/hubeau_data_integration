@@ -4,11 +4,17 @@ Dagster Sensors - Event-Driven Pipeline Orchestration
 Architecture:
   Bronze materializes → sensor detects → launches sequential dbt chain:
     1. Shared staging (ERA5) — MUST complete first
-    2. Domain pipelines (piezo + hydro in parallel) — depend on shared staging
-    3. Shared dimensions — depend on both domain pipelines
+    2. Daily transform — full Silver→Gold for both domains + shared dimensions,
+       in ONE dbt job (dbt resolves intra-job ordering via the ref() DAG)
 
-Single sensor replaces the fragile 4-stage time-based schedule.
 Each step only starts after its prerequisite completes successfully.
+
+History: a previous 3-step design fanned out to parallel piezo+hydro jobs and
+rejoined via a cursor-tracking RunStatusSensor. RunStatusSensorContext has no
+cursor, so the rejoin (step 3, dimensions) crashed on every tick and silently
+stopped refreshing monthly/yearly aggregates, station dimensions and dim_date.
+Since runs are serialized globally (max_concurrent_runs=1) the fan-out gave no
+speedup anyway, so steps 2+3 were collapsed into a single robust job.
 """
 
 import logging
@@ -27,9 +33,7 @@ from dagster import (
 )
 
 from .jobs import (
-    dbt_hydro_pipeline_daily_job,
-    dbt_piezo_pipeline_daily_job,
-    dbt_shared_dimensions_job,
+    dbt_daily_transform_job,
     dbt_shared_staging_job,
 )
 from .utils import env_true
@@ -100,118 +104,42 @@ def bronze_to_shared_staging_sensor(context: MultiAssetSensorEvaluationContext):
 
 
 # ==============================================================================
-# STEP 2: SHARED STAGING DONE → DOMAIN PIPELINES (PARALLEL)
+# STEP 2: SHARED STAGING DONE → DAILY TRANSFORM (both domains + shared dims)
 # ==============================================================================
 
 @run_status_sensor(
     run_status=DagsterRunStatus.SUCCESS,
     monitored_jobs=[dbt_shared_staging_job],
-    request_jobs=[dbt_piezo_pipeline_daily_job, dbt_hydro_pipeline_daily_job],
+    request_jobs=[dbt_daily_transform_job],
     default_status=DEFAULT_SENSOR_STATUS,
     minimum_interval_seconds=30,
-    description="Step 2/3: Shared staging done → launch piezo + hydro pipelines in parallel",
+    description="Step 2/2: Shared staging done → launch full daily transform (both domains + dimensions)",
 )
 def shared_staging_to_domain_sensor(context: RunStatusSensorContext):
     """
     Fires AFTER dbt_shared_staging_job succeeds.
-    Launches both domain pipelines in parallel (different concurrency keys).
+
+    Launches the single daily transform job, which builds the full Silver→Gold
+    pipeline for both domains plus shared dimensions in one shot. dbt resolves
+    intra-job ordering via the ref() DAG, so there is no fragile cross-job
+    coordination (and no cursor — RunStatusSensorContext does not support one).
     """
     staging_run_id = context.dagster_run.run_id
     logger.info(
-        f"Step 2/3: Shared staging completed (run {staging_run_id}). "
-        f"Launching piezo + hydro domain pipelines..."
+        f"Step 2/2: Shared staging completed (run {staging_run_id}). "
+        f"Launching daily transform (both domains + dimensions)..."
     )
 
-    # Launch both domain pipelines — they have different concurrency keys
-    # so Dagster will run them in parallel
     yield RunRequest(
-        run_key=f"piezo_daily_{staging_run_id}",
-        job_name=dbt_piezo_pipeline_daily_job.name,
+        run_key=f"daily_transform_{staging_run_id}",
+        job_name=dbt_daily_transform_job.name,
         tags={
             "trigger": "sensor",
             "sensor_name": "shared_staging_to_domain_sensor",
             "parent_run_id": staging_run_id,
-            "pipeline_chain": "step_2_piezo",
+            "pipeline_chain": "step_2_daily_transform",
         }
     )
-    yield RunRequest(
-        run_key=f"hydro_daily_{staging_run_id}",
-        job_name=dbt_hydro_pipeline_daily_job.name,
-        tags={
-            "trigger": "sensor",
-            "sensor_name": "shared_staging_to_domain_sensor",
-            "parent_run_id": staging_run_id,
-            "pipeline_chain": "step_2_hydro",
-        }
-    )
-
-
-# ==============================================================================
-# STEP 3: DOMAIN PIPELINES DONE → SHARED DIMENSIONS
-# ==============================================================================
-
-@run_status_sensor(
-    run_status=DagsterRunStatus.SUCCESS,
-    monitored_jobs=[dbt_piezo_pipeline_daily_job, dbt_hydro_pipeline_daily_job],
-    request_jobs=[dbt_shared_dimensions_job],
-    default_status=DEFAULT_SENSOR_STATUS,
-    minimum_interval_seconds=30,
-    description="Step 3/3: Both domain pipelines done → launch shared dimensions",
-)
-def domain_to_dimensions_sensor(context: RunStatusSensorContext):
-    """
-    Fires when a domain pipeline succeeds. Only launches dimensions
-    when BOTH piezo and hydro have completed for the same chain.
-
-    Uses cursor to track which domain pipelines have completed.
-    """
-    completed_run = context.dagster_run
-    completed_job = completed_run.job_name
-    parent_run_id = completed_run.tags.get("parent_run_id", "unknown")
-
-    # Track completion state in cursor: "parent_run_id:piezo|hydro|both"
-    cursor = context.cursor or ""
-
-    # Parse cursor: format is "parent_run_id:completed_domains"
-    cursor_parent, _, cursor_domains = cursor.partition(":")
-
-    if cursor_parent != parent_run_id:
-        # New chain — reset tracking
-        cursor_domains = ""
-
-    # Record which domain just completed
-    if completed_job == dbt_piezo_pipeline_daily_job.name:
-        if "piezo" not in cursor_domains:
-            cursor_domains = f"{cursor_domains},piezo" if cursor_domains else "piezo"
-    elif completed_job == dbt_hydro_pipeline_daily_job.name:
-        if "hydro" not in cursor_domains:
-            cursor_domains = f"{cursor_domains},hydro" if cursor_domains else "hydro"
-
-    context.update_cursor(f"{parent_run_id}:{cursor_domains}")
-
-    # Only launch dimensions when BOTH are done
-    if "piezo" in cursor_domains and "hydro" in cursor_domains:
-        logger.info(
-            f"Step 3/3: Both domain pipelines completed (chain {parent_run_id}). "
-            f"Launching shared dimensions..."
-        )
-        yield RunRequest(
-            run_key=f"dimensions_{parent_run_id}",
-            tags={
-                "trigger": "sensor",
-                "sensor_name": "domain_to_dimensions_sensor",
-                "parent_run_id": parent_run_id,
-                "pipeline_chain": "step_3_dimensions",
-            }
-        )
-    else:
-        missing = "hydro" if "piezo" in cursor_domains else "piezo"
-        logger.info(
-            f"Step 3/3: {completed_job} done, waiting for {missing} pipeline..."
-        )
-        return SkipReason(
-            f"{completed_job} completed, waiting for {missing} to finish"
-        )
 
 
 # ==============================================================================
@@ -220,6 +148,5 @@ def domain_to_dimensions_sensor(context: RunStatusSensorContext):
 
 all_sensors = [
     bronze_to_shared_staging_sensor,      # Step 1: Bronze → shared staging
-    shared_staging_to_domain_sensor,      # Step 2: staging → piezo + hydro
-    domain_to_dimensions_sensor,          # Step 3: piezo + hydro → dimensions
+    shared_staging_to_domain_sensor,      # Step 2: staging → daily transform
 ]

@@ -9,6 +9,8 @@ Domains:
 
 # Jobs dbt
 from .dbt_jobs import (
+    # Daily transform (single job: both domains + shared dims, sensor-driven)
+    dbt_daily_transform_job,
     dbt_docs_job,
     dbt_freshness_job,
     dbt_hydro_pipeline_daily_job,
@@ -86,6 +88,8 @@ all_jobs = [
     dbt_piezo_pipeline_job,
     dbt_hydro_pipeline_daily_job,
     dbt_hydro_pipeline_job,
+    # Jobs dbt - Daily transform (single job, sensor-driven)
+    dbt_daily_transform_job,
     # Jobs dbt - Shared dimensions (run LAST)
     dbt_shared_dimensions_job,
     # Jobs dbt - Quality & docs
@@ -129,6 +133,8 @@ __all__ = [
     "dbt_piezo_pipeline_job",
     "dbt_hydro_pipeline_daily_job",
     "dbt_hydro_pipeline_job",
+    # Jobs dbt - Daily transform (single job, sensor-driven)
+    "dbt_daily_transform_job",
     # Jobs dbt - Shared dimensions (run LAST)
     "dbt_shared_dimensions_job",
     # Jobs dbt - Quality & docs
