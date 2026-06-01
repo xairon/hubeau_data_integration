@@ -35,12 +35,24 @@ stations AS (
     {% endif %}
 ),
 
+-- Vraies dates de mesure (date quotidienne réelle, PAS le bucket mensuel),
+-- toutes grandeurs confondues. derniere_mesure = dernier relevé réel (ex. hier).
+real_dates AS (
+    SELECT
+        code_station,
+        MIN(date) AS premiere_mesure,
+        MAX(date) AS derniere_mesure
+    FROM {{ ref('hydro_daily_chroniques') }}
+    {% if is_incremental() %}
+    WHERE code_station IN (SELECT code_station FROM recent_stations)
+    {% endif %}
+    GROUP BY code_station
+),
+
 monthly_stats AS (
     SELECT
         code_station,
         grandeur_hydro_elab,
-        MIN(mois) AS premiere_mesure,
-        MAX(mois) AS derniere_mesure,
         SUM(nb_jours_mesures) AS nb_jours_total,
         COUNT(*) AS nb_mois_total,
         AVG(resultat_moyen) AS resultat_moyen_global,
@@ -120,8 +132,8 @@ metadata AS (
 SELECT
     m.*,
     pg.grandeur_hydro_elab AS grandeur_hydro_principale,
-    sg.premiere_mesure,
-    sg.derniere_mesure,
+    rd.premiere_mesure,
+    rd.derniere_mesure,
     sg.nb_jours_total,
     sg.nb_mois_total,
     sg.resultat_moyen_global,
@@ -133,6 +145,7 @@ SELECT
     da.classification_resultat_dern_annee,
     da.percentile_resultat_dern_annee
 FROM metadata m
+LEFT JOIN real_dates rd ON m.code_station = rd.code_station
 LEFT JOIN primary_grandeur pg ON m.code_station = pg.code_station
 LEFT JOIN stats_globales sg
     ON m.code_station = sg.code_station

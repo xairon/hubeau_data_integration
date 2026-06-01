@@ -34,14 +34,24 @@ stations AS (
     {% endif %}
 ),
 
+-- Vraies dates de mesure (date quotidienne réelle, PAS le bucket mensuel).
+-- derniere_mesure doit refléter le dernier relevé réel (ex. hier), pas MAX(mois).
+real_dates AS (
+    SELECT
+        code_bss,
+        MIN(date) AS premiere_mesure,
+        MAX(date) AS derniere_mesure
+    FROM {{ ref('hubeau_daily_chroniques') }}
+    {% if is_incremental() %}
+    WHERE code_bss IN (SELECT code_bss FROM recent_stations)
+    {% endif %}
+    GROUP BY code_bss
+),
+
 -- Stats globales par station (toute la période)
 stats_globales AS (
     SELECT
         code_bss,
-        
-        -- Période couverte
-        MIN(mois) AS premiere_mesure,
-        MAX(mois) AS derniere_mesure,
         SUM(nb_jours_mesures) AS nb_mesures_total,
         COUNT(*) AS nb_mois_total,
         
@@ -126,8 +136,8 @@ SELECT
     s.nb_mesures_piezo AS nb_mesures_source,
     sg.nb_mesures_total,
     sg.nb_mois_total,
-    sg.premiere_mesure,
-    sg.derniere_mesure,
+    rd.premiere_mesure,
+    rd.derniere_mesure,
     
     -- Statistiques piézométriques globales
     sg.niveau_moyen_global,
@@ -180,6 +190,7 @@ SELECT
     CURRENT_TIMESTAMP AS date_calcul
 
 FROM stations s
+LEFT JOIN real_dates rd ON s.code_bss = rd.code_bss
 LEFT JOIN stats_globales sg ON s.code_bss = sg.code_bss
 LEFT JOIN tendance_recente t ON s.code_bss = t.code_bss
 LEFT JOIN derniere_annee da ON s.code_bss = da.code_bss
