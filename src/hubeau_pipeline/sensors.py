@@ -2,10 +2,11 @@
 Dagster Sensors - Event-Driven Pipeline Orchestration
 
 Architecture:
-  Bronze materializes → sensor detects → launches sequential dbt chain:
+  Bronze materializes → sensor detects → launches sequential chain:
     1. Shared staging (ERA5) — MUST complete first
     2. Daily transform — full Silver→Gold for both domains + shared dimensions,
        in ONE dbt job (dbt resolves intra-job ordering via the ref() DAG)
+    3. Current index — compute per-station IPS/SSFI after daily transform
 
 Each step only starts after its prerequisite completes successfully.
 
@@ -35,6 +36,7 @@ from dagster import (
 from .jobs import (
     dbt_daily_transform_job,
     dbt_shared_staging_job,
+    station_current_index_job,
 )
 from .utils import env_true
 
@@ -143,10 +145,34 @@ def shared_staging_to_domain_sensor(context: RunStatusSensorContext):
 
 
 # ==============================================================================
+# STEP 3: DAILY TRANSFORM DONE → CURRENT STANDARDIZED INDEX (IPS/SSFI)
+# ==============================================================================
+
+@run_status_sensor(
+    run_status=DagsterRunStatus.SUCCESS,
+    monitored_jobs=[dbt_daily_transform_job],
+    request_jobs=[station_current_index_job],
+    default_status=DEFAULT_SENSOR_STATUS,
+    minimum_interval_seconds=30,
+    description="Step 3/3: daily transform done → compute current standardized index (IPS/SSFI)",
+)
+def transform_to_index_sensor(context: RunStatusSensorContext):
+    yield RunRequest(
+        run_key=f"current_index_{context.dagster_run.run_id}",
+        tags={
+            "trigger": "sensor",
+            "sensor_name": "transform_to_index_sensor",
+            "pipeline_chain": "step_3_index",
+        },
+    )
+
+
+# ==============================================================================
 # EXPORTS
 # ==============================================================================
 
 all_sensors = [
     bronze_to_shared_staging_sensor,      # Step 1: Bronze → shared staging
     shared_staging_to_domain_sensor,      # Step 2: staging → daily transform
+    transform_to_index_sensor,            # Step 3: daily transform → current index
 ]

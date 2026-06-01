@@ -27,6 +27,8 @@ from .dbt_jobs import (
     dbt_silver_gold_pipeline_job,
     # Quality & docs
     dbt_test_job,
+    # Indices (station current standardized index, triggered after daily transform)
+    station_current_index_job,
 )
 
 # Jobs ERA5
@@ -90,6 +92,8 @@ all_jobs = [
     dbt_hydro_pipeline_job,
     # Jobs dbt - Daily transform (single job, sensor-driven)
     dbt_daily_transform_job,
+    # Jobs indices - station current standardized index
+    station_current_index_job,
     # Jobs dbt - Shared dimensions (run LAST)
     dbt_shared_dimensions_job,
     # Jobs dbt - Quality & docs
@@ -135,6 +139,8 @@ __all__ = [
     "dbt_hydro_pipeline_job",
     # Jobs dbt - Daily transform (single job, sensor-driven)
     "dbt_daily_transform_job",
+    # Jobs indices - station current standardized index
+    "station_current_index_job",
     # Jobs dbt - Shared dimensions (run LAST)
     "dbt_shared_dimensions_job",
     # Jobs dbt - Quality & docs

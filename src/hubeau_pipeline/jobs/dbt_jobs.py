@@ -1,4 +1,4 @@
-from dagster import In, Out, define_asset_job, job, op
+from dagster import AssetSelection, In, Out, define_asset_job, job, op
 from dagster_dbt import DbtCliResource, build_dbt_asset_selection
 
 from ..assets.dbt_assets import hubeau_dbt_assets
@@ -251,6 +251,13 @@ dbt_daily_transform_job = define_asset_job(
     ).without_checks(),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
     hooks=set(),
+)
+
+station_current_index_job = define_asset_job(
+    name="station_current_index_refresh",
+    description="Compute per-station current standardized index (IPS/SSFI) after the daily transform.",
+    selection=AssetSelection.assets("station_current_index"),
+    tags={"dagster/concurrency_key": "dbt_pipeline"},
 )
 
 
