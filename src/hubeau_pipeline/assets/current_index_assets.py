@@ -28,8 +28,12 @@ def station_current_index(context: AssetExecutionContext, pg: PostgreSQLResource
     for domain, table, code_col, value_col, index_name, classify_fn in _DOMAINS:
         with pg.get_connection() as conn:
             df = pd.read_sql(
+                # Guard against Hub'Eau positive sentinels (~1e9 l/s) that would
+                # corrupt the SSFI gamma fit; harmless for piezo m NGF levels.
                 f"SELECT {code_col} AS code, mois, {value_col} AS val "
-                f"FROM {table} WHERE {value_col} IS NOT NULL ORDER BY {code_col}, mois",
+                f"FROM {table} WHERE {value_col} IS NOT NULL "
+                f"AND {value_col} < 1e8 AND {value_col} > -1e4 "
+                f"ORDER BY {code_col}, mois",
                 conn,
             )
         rows = []
