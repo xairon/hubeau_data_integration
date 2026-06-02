@@ -39,10 +39,15 @@ WITH source AS (
 ),
 
 deduplicated AS (
-    SELECT DISTINCT ON ({{ cast_silver_numeric('latitude') }}, {{ cast_silver_numeric('longitude') }}, {{ cast_silver_timestamp('time') }})
+    -- Normalisation de précision : ERA5-Land est une grille à 0.1°, mais le backfill
+    -- historique et l'incrémental quotidien écrivent les coords à des précisions
+    -- flottantes différentes (ex. 48.1 vs 48.09999999999995). On arrondit à 0.1° pour
+    -- fusionner ces variantes en un seul point de grille (sinon doublons en aval →
+    -- mapping station→grille qui rate l'historique). cf. mémoire era5-coordinate-precision-bug.
+    SELECT DISTINCT ON (ROUND({{ cast_silver_numeric('latitude') }}, 1), ROUND({{ cast_silver_numeric('longitude') }}, 1), {{ cast_silver_timestamp('time') }})
         -- Champs castés explicitement (gère NULL / chaîne vide / littéral 'NULL')
-        {{ cast_silver_numeric('latitude') }} AS latitude,
-        {{ cast_silver_numeric('longitude') }} AS longitude,
+        ROUND({{ cast_silver_numeric('latitude') }}, 1) AS latitude,
+        ROUND({{ cast_silver_numeric('longitude') }}, 1) AS longitude,
         {{ cast_silver_numeric('temperature_2m') }} AS temperature_2m,
         {{ cast_silver_numeric('total_precipitation') }} AS total_precipitation,
         {{ cast_silver_numeric('potential_evaporation') }} AS potential_evaporation,
@@ -50,7 +55,7 @@ deduplicated AS (
         source_file_id,
         created_at
     FROM source
-    ORDER BY {{ cast_silver_numeric('latitude') }}, {{ cast_silver_numeric('longitude') }}, {{ cast_silver_timestamp('time') }}, created_at DESC NULLS LAST
+    ORDER BY ROUND({{ cast_silver_numeric('latitude') }}, 1), ROUND({{ cast_silver_numeric('longitude') }}, 1), {{ cast_silver_timestamp('time') }}, created_at DESC NULLS LAST
 )
 
 SELECT 

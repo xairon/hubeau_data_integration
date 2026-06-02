@@ -35,23 +35,28 @@ WITH all_station_grid_points AS (
 ),
 
 filtered_era5 AS (
-    SELECT
-        e.latitude::numeric AS latitude,
-        e.longitude::numeric AS longitude,
+    -- Arrondi 0.1° à la lecture de silver : agrège les variantes flottantes d'une même
+    -- cellule (48.1 historique + 48.09999999999995 incrémental) sous une seule coord,
+    -- de sorte que les stations récupèrent tout l'historique. DISTINCT ON protège la PK
+    -- au cas où deux variantes partageraient une date. cf. mémoire era5-coordinate-precision-bug.
+    SELECT DISTINCT ON (ROUND(e.latitude::numeric, 1), ROUND(e.longitude::numeric, 1), e.time::date)
+        ROUND(e.latitude::numeric, 1) AS latitude,
+        ROUND(e.longitude::numeric, 1) AS longitude,
         e.time::date AS era5_date,
         e.temperature_2m::numeric AS temperature_2m,
         e.total_precipitation::numeric AS total_precipitation,
         e.potential_evaporation::numeric AS potential_evaporation
     FROM {{ ref('stg_era5_timeseries') }} e
     INNER JOIN all_station_grid_points g
-        ON e.latitude = g.latitude
-        AND e.longitude = g.longitude
+        ON ROUND(e.latitude::numeric, 1) = g.latitude
+        AND ROUND(e.longitude::numeric, 1) = g.longitude
     WHERE e.temperature_2m IS NOT NULL
       AND e.total_precipitation IS NOT NULL
       AND e.potential_evaporation IS NOT NULL
     {% if is_incremental() %}
       AND e.time > (SELECT COALESCE(MAX(era5_date), '1900-01-01'::date) FROM {{ this }})
     {% endif %}
+    ORDER BY ROUND(e.latitude::numeric, 1), ROUND(e.longitude::numeric, 1), e.time::date
 )
 
 SELECT * FROM filtered_era5
