@@ -97,9 +97,10 @@ def _select_reference_window(series, ref_period=REF_PERIOD, min_years=MIN_YEARS)
         return win, f"{lo}-01-01", f"{hi}-12-31", "normale", int(win.index.year.nunique())
 
     # Best decade-aligned 30-yr window with the most years, requiring >= min_years
-    best = None
     first_decade = (int(series.index.year.min()) // 10) * 10
-    for start in range(first_decade, 2001, 10):
+    last_decade = (int(series.index.year.max()) // 10) * 10
+    best = None
+    for start in range(first_decade, last_decade + 1, 10):
         w = series[(series.index.year >= start) & (series.index.year <= start + 29)]
         ny = w.index.year.nunique()
         if ny >= min_years and (best is None or ny > best[4]):
@@ -125,6 +126,11 @@ def compute_reference_grid(months, values, ref_period=REF_PERIOD,
     Returns dict: {grid: {month: [99 floats]}, baseline_start, baseline_end, flag, n_years}.
     Months with < min_per_month observations are linearly interpolated from neighbours;
     if none available, that month maps to None.
+
+    Note on thin records: if no calendar month has >= min_per_month observations, every
+    month maps to None (insufficient data for a reference — those stations correctly get
+    no IPS). The flag still reflects the window chosen (typically "provisoire").
+    Do NOT fabricate a grid in this case.
     """
     series = pd.Series(values, index=pd.to_datetime(months), dtype=float).dropna()
     if positive_only:
