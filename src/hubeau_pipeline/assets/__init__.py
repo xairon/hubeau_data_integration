@@ -38,6 +38,7 @@ from .pastas_refit_asset import ml_piezo_pastas_full_refit
 from .pastas_sgi_asset import ml_piezo_sgi
 from .pastas_signatures_asset import ml_piezo_groundwater_signatures
 from .current_index_assets import station_current_index
+from .monthly_index_assets import fct_monthly_index
 from .reference_stats_assets import station_reference_stats
 
 all_bronze_assets = [
@@ -80,7 +81,7 @@ all_ml_assets = [
     ml_piezo_pastas_full_refit,
 ]
 
-all_indices_assets = [station_reference_stats, station_current_index]
+all_indices_assets = [station_reference_stats, station_current_index, fct_monthly_index]
 
 all_assets = all_bronze_assets + all_dbt_assets + all_ml_assets + all_indices_assets
 
