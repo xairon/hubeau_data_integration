@@ -10,7 +10,7 @@
       {'columns': ['code_departement']}
     ],
     pre_hook = [
-      "{{ hypertable_delete('date', '30 days') }}"
+      "{{ hypertable_delete('date', var('daily_recompute_window_days', '30') ~ ' days') }}"
     ],
     post_hook = [
       "{{ add_primary_key(['code_station', 'date', 'grandeur_hydro_elab']) }}",
@@ -24,11 +24,14 @@
 -- Filtrage des valeurs nulles : fait en silver (stg_hydrometry_obs_elab, stg_era5_timeseries)
 -- INCREMENTAL: pre-hook DELETE + append (pas de DELETE...USING qui scanne tous les chunks).
 -- La fenêtre de re-calcul est synchronisée avec le pre-hook hypertable_delete.
+-- Backfill : surcharger la fenêtre avec --vars '{"daily_recompute_window_days": "250"}'.
+
+{% set window_days = var('daily_recompute_window_days', '30') %}
 
 WITH measurements AS (
     SELECT * FROM {{ ref('int_hydro_daily_measurements') }}
     {% if is_incremental() %}
-    WHERE date_obs_elab >= CURRENT_DATE - INTERVAL '30 days'
+    WHERE date_obs_elab >= CURRENT_DATE - INTERVAL '{{ window_days }} days'
     {% endif %}
 ),
 
@@ -39,7 +42,7 @@ mapping AS (
 era5_filtered AS (
     SELECT * FROM {{ ref('int_era5_for_all_stations') }}
     {% if is_incremental() %}
-    WHERE era5_date >= CURRENT_DATE - INTERVAL '30 days'
+    WHERE era5_date >= CURRENT_DATE - INTERVAL '{{ window_days }} days'
     {% endif %}
 ),
 
