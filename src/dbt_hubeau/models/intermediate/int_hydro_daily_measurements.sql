@@ -4,7 +4,7 @@
     unique_key = ['code_station', 'date_obs_elab', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
     incremental_predicates = [
-      time_range_delete_predicate('date_obs_elab', '30 days')
+      time_range_delete_predicate('date_obs_elab', var('daily_recompute_window_days', '30') ~ ' days')
     ],
     indexes = [
       {'columns': ['code_site']},
