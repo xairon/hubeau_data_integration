@@ -38,6 +38,7 @@ from .era5_jobs import (
 )
 
 # Full Bootstrap Job (Complete population with partition iteration)
+from .completeness_job import data_completeness_job
 from .full_bootstrap_job import full_bootstrap_job
 from .hubeau_jobs import (
     all_chroniques_job,
@@ -105,6 +106,8 @@ all_jobs = [
     reference_data_bronze_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
+    # Qualité - détection de trous d'ingestion
+    data_completeness_job,
     # ML / Pastas
     pastas_irf_features_job,
     pastas_signatures_job,
@@ -152,6 +155,8 @@ __all__ = [
     "reference_data_bronze_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
+    # Qualité - détection de trous d'ingestion
+    "data_completeness_job",
     # ML / Pastas
     "pastas_irf_features_job",
     "pastas_signatures_job",

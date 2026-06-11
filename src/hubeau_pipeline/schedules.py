@@ -24,6 +24,7 @@ from datetime import datetime
 from .jobs import (
     daily_piezometry_bronze_job,
     daily_hydrometry_bronze_job,
+    data_completeness_job,
     era5_weekly_job,
     reference_data_bronze_job,
     dbt_docs_job,
@@ -101,6 +102,18 @@ weekly_dbt_docs_schedule = ScheduleDefinition(
 
 
 # ==============================================================================
+# WEEKLY SCHEDULE - Data Completeness Check
+# ==============================================================================
+
+weekly_completeness_schedule = ScheduleDefinition(
+    job=data_completeness_job,
+    cron_schedule="0 6 * * 1",  # Lundi 6h00 UTC, après les ingestions de 4h
+    default_status=DEFAULT_SCHEDULE_STATUS,
+    description="Weekly: detect missing/partial months in silver chroniques and gold monthly index",
+)
+
+
+# ==============================================================================
 # EXPORTS
 # ==============================================================================
 
@@ -112,4 +125,6 @@ all_schedules = [
     # Maintenance
     weekly_dbt_docs_schedule,
     monthly_reference_data_schedule,
+    # Qualité
+    weekly_completeness_schedule,
 ]
