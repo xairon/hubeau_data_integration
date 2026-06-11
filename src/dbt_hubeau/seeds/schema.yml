@@ -5,4 +5,29 @@
 # Les modèles dbt lisent ces tables via source('staging', 'bdlisa_entites_raw') et source('staging', 'ref_*_eh').
 version: 2
 
-seeds: []
+seeds:
+  - name: ref_stations_meteeau_bsn
+    description: >
+      Réseau officiel des piézomètres utilisés par la carte MétéEAU Nappes du BRGM
+      (couche WFS indicateur_bsn:view_ponctual_indicator_details, snapshot du 2026-06-10,
+      450 stations). Sert à comparer/filtrer nos indicateurs sur le même réseau que le
+      bulletin officiel. Les colonnes derniere_classe/dernier_ips sont l'indicateur BRGM
+      au moment du snapshot (classe 1=très bas … 7=très haut), pas une donnée vivante.
+    config:
+      schema: gold
+    columns:
+      - name: code_bss
+        description: Code BSS ancien format (identifier MétéEAU)
+        tests: [unique, not_null]
+      - name: code_bss_nouveau
+        description: Code BSS nouveau format (alt_identifier)
+      - name: longitude
+        description: Longitude WGS84
+      - name: latitude
+        description: Latitude WGS84
+      - name: derniere_classe
+        description: Classe BRGM 1-7 au snapshot (référentiel ultimatum MétéEAU)
+      - name: dernier_ips
+        description: Valeur IPS BRGM au snapshot
+      - name: derniere_date_calcul
+        description: Date du dernier calcul BRGM au snapshot
