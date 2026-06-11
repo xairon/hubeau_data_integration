@@ -200,13 +200,14 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                     return 0
                 
                 # Compter les lignes existantes pour cette année
+                # DLT stocke les colonnes bronze en text : cast ::date obligatoire
                 cur.execute(
                     sql.SQL("""
                         SELECT COUNT(*)
                         FROM {}.{}
                         WHERE {} IS NOT NULL
-                          AND {} >= %s::date
-                          AND {} < (%s::date + INTERVAL '1 year')
+                          AND {}::date >= %s::date
+                          AND {}::date < (%s::date + INTERVAL '1 year')
                     """).format(
                         sql.Identifier(schema),
                         sql.Identifier(table_name),
@@ -229,8 +230,8 @@ def _clean_partition_data(table_name: str, schema: str, year: str, date_column: 
                     sql.SQL("""
                         DELETE FROM {}.{}
                         WHERE {} IS NOT NULL
-                          AND {} >= %s::date
-                          AND {} < (%s::date + INTERVAL '1 year')
+                          AND {}::date >= %s::date
+                          AND {}::date < (%s::date + INTERVAL '1 year')
                     """).format(
                         sql.Identifier(schema),
                         sql.Identifier(table_name),
