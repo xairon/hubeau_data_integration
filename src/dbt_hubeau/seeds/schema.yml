@@ -13,6 +13,9 @@ seeds:
       450 stations). Sert à comparer/filtrer nos indicateurs sur le même réseau que le
       bulletin officiel. Les colonnes derniere_classe/dernier_ips sont l'indicateur BRGM
       au moment du snapshot (classe 1=très bas … 7=très haut), pas une donnée vivante.
+      NB : 431 stations sont des piézomètres (code BSS, à joindre sur dim_piezo_stations) ;
+      les 19 restantes sont des sources karstiques/résurgences suivies en débit, dont le
+      code est un code hydrométrique (à joindre sur dim_hydro_stations.code_station).
     config:
       schema: gold
     columns:
