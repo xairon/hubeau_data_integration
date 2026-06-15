@@ -60,6 +60,8 @@ PIEZO_MODELS = [
     "stg_piezo_stations",
     "stg_piezo_chroniques",
     "stg_tme_entites",
+    # Rejects (Silver) - audit des lignes ecartees
+    "stg_piezo_chroniques_rejected",
     # Intermediate (Gold)
     "int_daily_measurements",
     "int_station_era5_mapping",
@@ -138,10 +140,26 @@ dbt_daily_transform_job = define_asset_job(
     hooks=set(),
 )
 
+# Nightly (sensor-driven apres dbt_daily_transform_job) : reconstruit le snapshot
+# courant ET re-score tout l'historique mensuel contre la baseline de reference fixe.
+# Les deux lisent gold.station_reference_stats (rebuilt chaque semaine, cf. ci-dessous).
 station_current_index_job = define_asset_job(
-    name="station_current_index_refresh",
-    description="Compute per-station current standardized index (IPS/SSFI) after the daily transform.",
-    selection=AssetSelection.assets("station_current_index"),
+    name="station_index_refresh",
+    description=(
+        "Rebuild gold.fct_monthly_index + gold.station_current_index (IPS/SSFI) apres le "
+        "daily transform. Lit la baseline fixe gold.station_reference_stats."
+    ),
+    selection=AssetSelection.assets("fct_monthly_index", "station_current_index"),
+    tags={"dagster/concurrency_key": "dbt_pipeline"},
+)
+
+# Hebdomadaire (schedule) : recalcule la baseline de reference pluriannuelle (grilles
+# de quantiles). Lourde et lentement variable -> ne tourne PAS chaque nuit. En amont
+# des deux assets d'indice ci-dessus.
+station_reference_stats_job = define_asset_job(
+    name="station_reference_stats_refresh",
+    description="Recompute the fixed reference baseline gold.station_reference_stats (weekly).",
+    selection=AssetSelection.assets("station_reference_stats"),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
 )
 

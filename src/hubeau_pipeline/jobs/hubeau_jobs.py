@@ -56,35 +56,6 @@ hydrometry_chroniques_job = define_asset_job(
 
 
 # ====================================
-# JOBS GLOBAUX
-# ====================================
-
-all_stations_job = define_asset_job(
-    name="all_stations_bronze",
-    description="Bronze: ALL stations (FULL load)",
-    selection=AssetSelection.groups(
-        "piezometry_stations",
-        "hydrometry_sites",
-        "hydrometry_stations",
-    ),
-    tags={"dagster/concurrency_key": "all_stations_bronze"},
-    hooks=set(),
-)
-
-all_chroniques_job = define_asset_job(
-    name="all_chroniques_bronze",
-    description="Bronze: ALL chroniques (partitioned: year)",
-    selection=AssetSelection.groups(
-        "piezometry_chroniques",
-        "hydrometry_chroniques",
-    ),
-    partitions_def=MODE_PARTITIONS,
-    tags={"dagster/concurrency_key": "all_chroniques_bronze"},
-    hooks=set(),
-)
-
-
-# ====================================
 # JOBS DAILY (incremental)
 # ====================================
 

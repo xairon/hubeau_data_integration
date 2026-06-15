@@ -8,8 +8,9 @@ is triggered by SENSORS (event-driven) after Bronze materializes:
 Schedule Timeline (UTC):
 - 3h00: ERA5 Smart Update (Bronze)
 - 4h00: Hub'Eau Bronze (piezo + hydro in parallel) → triggers sensor chain
-- 1er du mois 2h00: Reference data (BDLISA + Sandre)
+- 1er du mois 2h00: Reference data (BDLISA TME)
 - Dimanche 5h00: dbt documentation generation
+- Dimanche 7h00: IPS reference baseline (station_reference_stats)
 """
 
 from dagster import (
@@ -27,6 +28,7 @@ from .jobs import (
     data_completeness_job,
     era5_weekly_job,
     reference_data_bronze_job,
+    station_reference_stats_job,
     dbt_docs_job,
 )
 from .utils import env_true
@@ -85,7 +87,7 @@ monthly_reference_data_schedule = ScheduleDefinition(
     job=reference_data_bronze_job,
     cron_schedule="0 2 1 * *",  # 1er du mois à 2h00 UTC
     default_status=DEFAULT_SCHEDULE_STATUS,
-    description="Monthly: BDLISA + Sandre nomenclatures (ref_*_eh)",
+    description="Monthly: BDLISA TME hydrogeo entities",
 )
 
 
@@ -114,6 +116,21 @@ weekly_completeness_schedule = ScheduleDefinition(
 
 
 # ==============================================================================
+# WEEKLY SCHEDULE - IPS reference baseline (station_reference_stats)
+# ==============================================================================
+# Baseline pluriannuelle (grilles de quantiles) lente à varier : recalcul hebdo
+# suffit. fct_monthly_index + station_current_index (qui la lisent) sont, eux,
+# reconstruits chaque nuit par la chaîne sensor (station_current_index_job).
+
+weekly_reference_stats_schedule = ScheduleDefinition(
+    job=station_reference_stats_job,
+    cron_schedule="0 7 * * 0",  # Dimanche 7h00 UTC
+    default_status=DEFAULT_SCHEDULE_STATUS,
+    description="Weekly: recompute IPS reference baseline gold.station_reference_stats",
+)
+
+
+# ==============================================================================
 # EXPORTS
 # ==============================================================================
 
@@ -127,4 +144,6 @@ all_schedules = [
     monthly_reference_data_schedule,
     # Qualité
     weekly_completeness_schedule,
+    # Indices - baseline IPS hebdomadaire
+    weekly_reference_stats_schedule,
 ]

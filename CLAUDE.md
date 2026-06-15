@@ -68,8 +68,8 @@ Entry point: `src/hubeau_pipeline/__init__.py` → exports `defs` from `definiti
 
 `definitions.py` assembles a single `Definitions()` object:
 - **assets** = `all_assets` (14 bronze DLT assets + 1 `hubeau_dbt_assets` which auto-discovers all dbt models from the manifest)
-- **jobs** = `all_jobs` (22 jobs from `jobs/__init__.py`)
-- **schedules** = `all_schedules` (9 schedules, controlled by `DAGSTER_ENABLE_SCHEDULES` env var)
+- **jobs** = `all_jobs` (from `jobs/__init__.py`)
+- **schedules** = `all_schedules` (7 schedules, controlled by `DAGSTER_ENABLE_SCHEDULES` env var)
 - **sensors** = `all_sensors` (3 sensors, controlled by `DAGSTER_ENABLE_SENSORS` env var)
 - **resources** = `pg` (PostgreSQLResource), `dlt` (DagsterDltResource), `dbt` (DbtCliResource), `noop_io_manager` (NoOpIOManager for DLT assets that write directly to PostgreSQL)
 
@@ -97,7 +97,7 @@ Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_projec
 - **Piezometry**: Groundwater level stations + chroniques (year-partitioned 1967-present)
 - **Hydrometry**: River flow sites → stations → observations (year-partitioned 2000-present)
 - **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid
-- **Reference**: TME hydrogeo entities, SANDRE nomenclatures, geographic referentials (regions, departments, hydrological zones)
+- **Reference**: TME hydrogeo entities (BDLISA)
 
 ### Pipeline Flow
 
@@ -109,19 +109,23 @@ Bronze (DLT assets) → Silver (dbt staging/) → Gold (dbt intermediate/ → ma
 
 The spatial join between stations and ERA5 grid is done in `int_station_era5_mapping` (KNN nearest grid point). This model is incremental with special rebuild logic via `recompute_station_era5_mapping` var.
 
-### 4-Stage Daily Schedule (UTC)
+### Daily Orchestration (UTC)
 
+**Schedules drive INGESTION only** (Bronze):
 ```
-3h00  ERA5 Smart Update (Bronze)
-4h00  Hub'Eau Bronze: piezometry + hydrometry (parallel)
-5h00  dbt Stage 1: shared staging (ERA5 timeseries + grid points)
-6h30  dbt Stage 2: domain pipelines (piezo + hydro, parallel)
-8h00  dbt Stage 3: shared dimensions (dim_date, dim_geography)
+3h00  ERA5 Smart Update         (era5_weekly_job)
+4h00  Hub'Eau Bronze piezo+hydro (daily_piezometry_bronze_job + daily_hydrometry_bronze_job)
 ```
 
-Monthly (1st, 2h00): Reference data refresh. Weekly (Sunday, 5h00): dbt docs generation.
+**Sensors drive the whole dbt + index chain** (event-driven, `sensors.py`) — NO time-based dbt schedules:
+```
+Bronze materializes
+  → bronze_to_shared_staging_sensor  → dbt_shared_staging_job   (ERA5 partagé: 3 modèles)
+  → shared_staging_to_domain_sensor  → dbt_daily_transform_job  (piezo+hydro+dims, UN seul job)
+  → transform_to_index_sensor        → station_index_refresh    (fct_monthly_index + station_current_index)
+```
 
-Schedules are time-based with buffer gaps. Sensors (`sensors.py`) provide event-driven alternative: `bronze_to_silver_sensor` triggers dbt when Bronze chroniques materialize (5 min cooldown).
+**Other schedules**: Monthly (1st, 2h00) reference data (TME). Weekly — dbt docs (Sun 5h), IPS baseline `station_reference_stats` (Sun 7h), completeness check (Mon 6h).
 
 ### Bootstrap
 

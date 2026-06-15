@@ -12,10 +12,6 @@ from .bronze import (
     piezometry_chroniques_daily_raw,  # Daily
     piezometry_chroniques_raw,
     piezometry_stations_raw,
-    referentiel_departements,  # Geographic reference: departements
-    referentiel_regions,  # Geographic reference: regions
-    referentiel_zones_hydro,  # Geographic reference: zones hydro
-    sandre_nomenclatures_eh,  # Sandre nomenclatures
     tme_entites_hydrogeo,  # Attributs TME (TME.csv) — enrichit stg_tme_entites
 )
 from .dbt_assets import hubeau_dbt_assets
@@ -34,10 +30,6 @@ all_bronze_assets = [
     era5_france_timeseries_historical,
     era5_weekly_update,
     tme_entites_hydrogeo,
-    sandre_nomenclatures_eh,
-    referentiel_regions,
-    referentiel_departements,
-    referentiel_zones_hydro,
 ]
 
 # dbt assets replace the manual aggregation assets

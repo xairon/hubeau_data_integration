@@ -23,14 +23,8 @@ from hubeau_pipeline.assets.bronze.era5_assets import (
     ERA5_PARTITIONS_DEF,
 )
 
-# Reference Data: TME, nomenclatures, geographic refs
+# Reference Data: TME hydrogeo entities (BDLISA)
 from hubeau_pipeline.assets.bronze.tme_entites_assets import tme_entites_hydrogeo
-from hubeau_pipeline.assets.bronze.sandre_nomenclatures_assets import sandre_nomenclatures_eh
-from hubeau_pipeline.assets.bronze.referentiel_geo_assets import (
-    referentiel_regions,
-    referentiel_departements,
-    referentiel_zones_hydro,
-)
 
 __all__ = [
     # Hub'Eau Historical
@@ -45,12 +39,8 @@ __all__ = [
     # ERA5
     "era5_france_timeseries_historical",
     "era5_weekly_update",
-    # Reference Data - ALL reference assets
+    # Reference Data
     "tme_entites_hydrogeo",
-    "sandre_nomenclatures_eh",
-    "referentiel_regions",
-    "referentiel_departements",
-    "referentiel_zones_hydro",
     # Configs
     "MODE_PARTITIONS",
     "ERA5_PARTITIONS_DEF",

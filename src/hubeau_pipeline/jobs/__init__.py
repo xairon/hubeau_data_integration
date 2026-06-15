@@ -20,8 +20,10 @@ from .dbt_jobs import (
     dbt_silver_gold_pipeline_job,
     # Quality & docs
     dbt_test_job,
-    # Indices (station current standardized index, triggered after daily transform)
+    # Indices nocturnes (sensor) : fct_monthly_index + station_current_index
     station_current_index_job,
+    # Indice baseline (schedule hebdo) : station_reference_stats
+    station_reference_stats_job,
 )
 
 # Jobs ERA5
@@ -34,9 +36,6 @@ from .era5_jobs import (
 from .completeness_job import data_completeness_job
 from .full_bootstrap_job import full_bootstrap_job
 from .hubeau_jobs import (
-    all_chroniques_job,
-    # Jobs GLOBAUX
-    all_stations_job,
     daily_hydrometry_bronze_job,
     # Jobs DAILY (incremental)
     daily_piezometry_bronze_job,
@@ -48,7 +47,7 @@ from .hubeau_jobs import (
     piezometry_stations_job,
 )
 
-# Données de référence (BDLISA + Sandre) — à lancer avant full_bootstrap ou premier dbt run
+# Données de référence (BDLISA / TME) — à lancer avant full_bootstrap ou premier dbt run
 from .reference_data_jobs import reference_data_bronze_job
 
 all_jobs = [
@@ -58,9 +57,6 @@ all_jobs = [
     # Jobs CHRONIQUES (partitioned)
     piezometry_chroniques_job,
     hydrometry_chroniques_job,
-    # Jobs GLOBAUX
-    all_stations_job,
-    all_chroniques_job,
     # Jobs DAILY (incremental)
     daily_piezometry_bronze_job,
     daily_hydrometry_bronze_job,
@@ -73,14 +69,15 @@ all_jobs = [
     dbt_shared_staging_job,
     # Jobs dbt - Daily transform (single job, sensor-driven)
     dbt_daily_transform_job,
-    # Jobs indices - station current standardized index
+    # Jobs indices - nocturne (monthly + current) + baseline hebdo
     station_current_index_job,
+    station_reference_stats_job,
     # Jobs dbt - Quality & docs
     dbt_test_job,
     dbt_freshness_job,
     dbt_quality_job,
     dbt_docs_job,
-    # Données de référence (BDLISA + Sandre)
+    # Données de référence (BDLISA / TME)
     reference_data_bronze_job,
     # Full Bootstrap (complete population)
     full_bootstrap_job,
@@ -95,9 +92,6 @@ __all__ = [
     # Jobs CHRONIQUES (partitioned)
     "piezometry_chroniques_job",
     "hydrometry_chroniques_job",
-    # Jobs GLOBAUX
-    "all_stations_job",
-    "all_chroniques_job",
     # Jobs DAILY (incremental)
     "daily_piezometry_bronze_job",
     "daily_hydrometry_bronze_job",
@@ -110,14 +104,15 @@ __all__ = [
     "dbt_shared_staging_job",
     # Jobs dbt - Daily transform (single job, sensor-driven)
     "dbt_daily_transform_job",
-    # Jobs indices - station current standardized index
+    # Jobs indices
     "station_current_index_job",
+    "station_reference_stats_job",
     # Jobs dbt - Quality & docs
     "dbt_test_job",
     "dbt_freshness_job",
     "dbt_quality_job",
     "dbt_docs_job",
-    # Données de référence (BDLISA + Sandre)
+    # Données de référence (BDLISA / TME)
     "reference_data_bronze_job",
     # Full Bootstrap (complete population)
     "full_bootstrap_job",
