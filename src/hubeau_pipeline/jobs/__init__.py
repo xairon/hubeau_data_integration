@@ -13,14 +13,7 @@ from .dbt_jobs import (
     dbt_daily_transform_job,
     dbt_docs_job,
     dbt_freshness_job,
-    dbt_hydro_pipeline_daily_job,
-    dbt_hydro_pipeline_job,
-    # Domain-specific pipelines (can run in parallel after shared staging)
-    dbt_piezo_pipeline_daily_job,
-    dbt_piezo_pipeline_job,
     dbt_quality_job,
-    # Shared dimensions (run LAST after domain pipelines)
-    dbt_shared_dimensions_job,
     # Shared staging (run FIRST)
     dbt_shared_staging_job,
     # Full pipeline (bootstrap/full refresh)
@@ -78,17 +71,10 @@ all_jobs = [
     dbt_silver_gold_pipeline_job,
     # Jobs dbt - Shared staging (run FIRST)
     dbt_shared_staging_job,
-    # Jobs dbt - Domain-specific pipelines (parallel)
-    dbt_piezo_pipeline_daily_job,
-    dbt_piezo_pipeline_job,
-    dbt_hydro_pipeline_daily_job,
-    dbt_hydro_pipeline_job,
     # Jobs dbt - Daily transform (single job, sensor-driven)
     dbt_daily_transform_job,
     # Jobs indices - station current standardized index
     station_current_index_job,
-    # Jobs dbt - Shared dimensions (run LAST)
-    dbt_shared_dimensions_job,
     # Jobs dbt - Quality & docs
     dbt_test_job,
     dbt_freshness_job,
@@ -122,17 +108,10 @@ __all__ = [
     "dbt_silver_gold_pipeline_job",
     # Jobs dbt - Shared staging (run FIRST)
     "dbt_shared_staging_job",
-    # Jobs dbt - Domain-specific pipelines (parallel)
-    "dbt_piezo_pipeline_daily_job",
-    "dbt_piezo_pipeline_job",
-    "dbt_hydro_pipeline_daily_job",
-    "dbt_hydro_pipeline_job",
     # Jobs dbt - Daily transform (single job, sensor-driven)
     "dbt_daily_transform_job",
     # Jobs indices - station current standardized index
     "station_current_index_job",
-    # Jobs dbt - Shared dimensions (run LAST)
-    "dbt_shared_dimensions_job",
     # Jobs dbt - Quality & docs
     "dbt_test_job",
     "dbt_freshness_job",

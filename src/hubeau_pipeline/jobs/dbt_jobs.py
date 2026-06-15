@@ -72,57 +72,7 @@ PIEZO_MODELS = [
 ]
 
 # ==============================================================================
-# PIEZOMETRY DAILY PIPELINE (Streaming-optimized)
-# ==============================================================================
-
-# Daily piezo models: staging -> intermediate -> daily mart only
-# Excludes monthly/yearly aggregates, trends and dimensions to keep runtime short
-PIEZO_DAILY_MODELS = [
-    # Staging (Silver) - piezo specific
-    "stg_piezo_stations",
-    "stg_piezo_chroniques",
-    "stg_tme_entites",
-    # Intermediate (Gold)
-    "int_daily_measurements",
-    "int_station_era5_mapping",
-    # Daily mart (incremental) - only the fast-path models
-    "hubeau_daily_chroniques",
-]
-
-dbt_piezo_pipeline_daily_job = define_asset_job(
-    name="dbt_piezo_pipeline_daily",
-    description=(
-        "Run DAILY dbt transformation for PIEZOMETRY (streaming-optimized). "
-        "PREREQUISITE: Run dbt_shared_staging_job first. "
-        "Excludes monthly/yearly aggregates and dimensions to keep runtime short."
-    ),
-    selection=build_dbt_asset_selection(
-        [hubeau_dbt_assets],
-        dbt_select=" ".join(PIEZO_DAILY_MODELS),
-    ).without_checks(),
-    tags={"dagster/concurrency_key": "dbt_piezo", "domain": "piezo", "frequency": "daily"},
-    hooks=set(),
-)
-
-dbt_piezo_pipeline_job = define_asset_job(
-    name="dbt_piezo_pipeline",
-    description=(
-        "Run dbt transformation for PIEZOMETRY domain only. "
-        "PREREQUISITE: Run dbt_shared_staging_job first. "
-        "Can run IN PARALLEL with dbt_hydro_pipeline. "
-        "Does NOT include shared dimensions - run dbt_shared_dimensions_job after."
-    ),
-    selection=build_dbt_asset_selection(
-        [hubeau_dbt_assets],
-        dbt_select=" ".join(PIEZO_MODELS),
-    ).without_checks(),
-    # Different concurrency key allows parallel execution with hydro
-    tags={"dagster/concurrency_key": "dbt_piezo", "domain": "piezo"},
-    hooks=set(),
-)
-
-# ==============================================================================
-# HYDROMETRY PIPELINE (Domain-specific - can run in parallel with piezo)
+# HYDROMETRY PIPELINE (Domain-specific)
 # ==============================================================================
 
 # Hydro models: staging -> intermediate -> marts
@@ -147,78 +97,13 @@ HYDRO_MODELS = [
 ]
 
 # ==============================================================================
-# HYDROMETRY DAILY PIPELINE (Streaming-optimized)
-# ==============================================================================
-
-# Daily hydro models: staging -> intermediate -> daily mart only
-# Excludes monthly/yearly aggregates, trends and dimensions to keep runtime short
-HYDRO_DAILY_MODELS = [
-    # Staging (Silver) - hydro specific
-    "stg_hydrometry_sites",
-    "stg_hydrometry_stations",
-    "stg_hydrometry_obs_elab",
-    # Intermediate (Gold)
-    "int_hydro_daily_measurements",
-    "int_hydro_station_era5_mapping",
-    # Daily mart (incremental) - only the fast-path models
-    "hydro_daily_chroniques",
-]
-
-dbt_hydro_pipeline_daily_job = define_asset_job(
-    name="dbt_hydro_pipeline_daily",
-    description=(
-        "Run DAILY dbt transformation for HYDROMETRY (streaming-optimized). "
-        "PREREQUISITE: Run dbt_shared_staging_job first. "
-        "Includes daily facts + incremental marts."
-    ),
-    selection=build_dbt_asset_selection(
-        [hubeau_dbt_assets],
-        dbt_select=" ".join(HYDRO_DAILY_MODELS),
-    ).without_checks(),
-    tags={"dagster/concurrency_key": "dbt_hydro", "domain": "hydro", "frequency": "daily"},
-    hooks=set(),
-)
-
-dbt_hydro_pipeline_job = define_asset_job(
-    name="dbt_hydro_pipeline",
-    description=(
-        "Run dbt transformation for HYDROMETRY domain only. "
-        "PREREQUISITE: Run dbt_shared_staging_job first. "
-        "Can run IN PARALLEL with dbt_piezo_pipeline. "
-        "Does NOT include shared dimensions - run dbt_shared_dimensions_job after."
-    ),
-    selection=build_dbt_asset_selection(
-        [hubeau_dbt_assets],
-        dbt_select=" ".join(HYDRO_MODELS),
-    ).without_checks(),
-    # Different concurrency key allows parallel execution with piezo
-    tags={"dagster/concurrency_key": "dbt_hydro", "domain": "hydro"},
-    hooks=set(),
-)
-
-# ==============================================================================
-# SHARED DIMENSIONS (Run LAST - after domain pipelines)
+# SHARED DIMENSIONS (used by dbt_daily_transform_job)
 # ==============================================================================
 
 SHARED_DIMENSION_MODELS = [
     "dim_geography",  # Depends on stg_piezo_stations + stg_hydrometry_sites
     "dim_date",       # Depends on hubeau_daily_chroniques + hydro_daily_chroniques
 ]
-
-dbt_shared_dimensions_job = define_asset_job(
-    name="dbt_shared_dimensions",
-    description=(
-        "Build shared dimension tables (dim_geography, dim_date). "
-        "IMPORTANT: Run this AFTER both dbt_piezo_pipeline and dbt_hydro_pipeline have completed, "
-        "as dim_date depends on both fact tables."
-    ),
-    selection=build_dbt_asset_selection(
-        [hubeau_dbt_assets],
-        dbt_select=" ".join(SHARED_DIMENSION_MODELS),
-    ).without_checks(),
-    tags={"dagster/concurrency_key": "dbt_pipeline"},
-    hooks=set(),
-)
 
 # ==============================================================================
 # DAILY TRANSFORM (single job: full Silver→Gold for both domains + shared dims)
