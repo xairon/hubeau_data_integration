@@ -55,14 +55,6 @@ from .hubeau_jobs import (
     piezometry_stations_job,
 )
 
-# Jobs ML / Pastas
-from .ml_jobs import (
-    pastas_full_refit_job,
-    pastas_irf_features_job,
-    pastas_sgi_job,
-    pastas_signatures_job,
-)
-
 # Données de référence (BDLISA + Sandre) — à lancer avant full_bootstrap ou premier dbt run
 from .reference_data_jobs import reference_data_bronze_job
 
@@ -108,11 +100,6 @@ all_jobs = [
     full_bootstrap_job,
     # Qualité - détection de trous d'ingestion
     data_completeness_job,
-    # ML / Pastas
-    pastas_irf_features_job,
-    pastas_signatures_job,
-    pastas_sgi_job,
-    pastas_full_refit_job,
 ]
 
 __all__ = [
@@ -157,11 +144,6 @@ __all__ = [
     "full_bootstrap_job",
     # Qualité - détection de trous d'ingestion
     "data_completeness_job",
-    # ML / Pastas
-    "pastas_irf_features_job",
-    "pastas_signatures_job",
-    "pastas_sgi_job",
-    "pastas_full_refit_job",
     # Collections
     "all_jobs",
 ]

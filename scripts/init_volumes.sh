@@ -38,7 +38,6 @@ echo ""
 create_volume_if_not_exists "brgm_postgres_data" "Base de données PostgreSQL/TimescaleDB"
 create_volume_if_not_exists "brgm_dagster_pg_data" "Métadonnées Dagster"
 create_volume_if_not_exists "brgm_cloudbeaver_data" "Configuration CloudBeaver"
-create_volume_if_not_exists "brgm_ml_models" "Modèles SoftCLT (weights + scalers)"
 
 echo ""
 echo -e "${GREEN}✅ Tous les volumes sont prêts!${NC}"

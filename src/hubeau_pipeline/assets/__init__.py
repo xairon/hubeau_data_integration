@@ -19,24 +19,6 @@ from .bronze import (
     tme_entites_hydrogeo,  # Attributs TME (TME.csv) — enrichit stg_tme_entites
 )
 from .dbt_assets import hubeau_dbt_assets
-from .ml_assets import (
-    ml_hydro_multi_clusters,
-    ml_hydro_multi_embeddings_update,
-    ml_hydro_multi_model_train,
-    ml_hydro_uni_clusters,
-    ml_hydro_uni_embeddings_update,
-    ml_hydro_uni_model_train,
-    ml_piezo_multi_clusters,
-    ml_piezo_multi_embeddings_update,
-    ml_piezo_multi_model_train,
-    ml_piezo_uni_clusters,
-    ml_piezo_uni_embeddings_update,
-    ml_piezo_uni_model_train,
-)
-from .pastas_assets import ml_piezo_pastas_irf_features
-from .pastas_refit_asset import ml_piezo_pastas_full_refit
-from .pastas_sgi_asset import ml_piezo_sgi
-from .pastas_signatures_asset import ml_piezo_groundwater_signatures
 from .current_index_assets import station_current_index
 from .monthly_index_assets import fct_monthly_index
 from .reference_stats_assets import station_reference_stats
@@ -61,28 +43,8 @@ all_bronze_assets = [
 # dbt assets replace the manual aggregation assets
 all_dbt_assets = [hubeau_dbt_assets]
 
-# ML — SoftCLT Embeddings (uni + multi spaces)
-all_ml_assets = [
-    ml_piezo_multi_model_train,
-    ml_piezo_uni_model_train,
-    ml_hydro_multi_model_train,
-    ml_hydro_uni_model_train,
-    ml_piezo_multi_embeddings_update,
-    ml_piezo_uni_embeddings_update,
-    ml_hydro_multi_embeddings_update,
-    ml_hydro_uni_embeddings_update,
-    ml_piezo_multi_clusters,
-    ml_piezo_uni_clusters,
-    ml_hydro_multi_clusters,
-    ml_hydro_uni_clusters,
-    ml_piezo_pastas_irf_features,
-    ml_piezo_groundwater_signatures,
-    ml_piezo_sgi,
-    ml_piezo_pastas_full_refit,
-]
-
 all_indices_assets = [station_reference_stats, station_current_index, fct_monthly_index]
 
-all_assets = all_bronze_assets + all_dbt_assets + all_ml_assets + all_indices_assets
+all_assets = all_bronze_assets + all_dbt_assets + all_indices_assets
 
-__all__ = ["all_assets", "all_bronze_assets", "all_dbt_assets", "all_ml_assets", "all_indices_assets"]
+__all__ = ["all_assets", "all_bronze_assets", "all_dbt_assets", "all_indices_assets"]

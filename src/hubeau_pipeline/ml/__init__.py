@@ -1,1 +1,1 @@
-# ML module — SoftCLT embeddings for hydrological time series
+# ml module — IPS standardized index (station level / SSFI) computation

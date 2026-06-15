@@ -127,8 +127,6 @@ services:
       - ./configs:/app/configs
       - ./scripts:/app/scripts
       - ./dagster_home:/app/dagster_home
-      # ML models persistence (trained SoftCLT weights + scalers)
-      - ml_models:/var/ml/models
     command: [ "dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline.definitions" ]
     ports:
       - "49505:8080"   # dbt docs serve (lancer manuellement: docker exec -it brgm-dlt-worker dbt docs serve --port 8080)
@@ -374,6 +372,3 @@ volumes:
   cloudbeaver_data:
     external: true
     name: brgm_cloudbeaver_data
-  ml_models:
-    external: true
-    name: brgm_ml_models
