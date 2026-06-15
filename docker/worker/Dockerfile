@@ -33,20 +33,12 @@ COPY src /app/src
 # Use /app/tmp for build temp files (avoids /tmp quota on fuse-overlayfs)
 ENV TMPDIR=/app/tmp
 
-# Install PyTorch with CUDA 12.1 (separate layer — large ~2.5GB download)
-RUN mkdir -p /app/tmp && \
-    uv pip install --no-cache --system torch --index-url https://download.pytorch.org/whl/cu121 && \
-    rm -rf /app/tmp/*
-
-# Install hdbscan separately (needs to compile C extensions, temp space)
-RUN uv pip install --no-cache --system "hdbscan>=0.8.33" && rm -rf /app/tmp/*
-
 # Install dependencies using uv (100x faster than pip!)
 # --no-cache: Don't cache packages (smaller image)
 # --system: Install to system Python (not venv)
 # -e: Editable install (symlink to /app/src for hot reload)
 # .[worker]: Install with worker extra dependencies
-RUN uv pip install --no-cache --system -e ".[worker]" && rm -rf /app/tmp
+RUN mkdir -p /app/tmp && uv pip install --no-cache --system -e ".[worker]" && rm -rf /app/tmp
 
 # Reset TMPDIR to default
 ENV TMPDIR=/tmp
