@@ -412,30 +412,31 @@ def load_all_chroniques_sequential(context: OpExecutionContext) -> Nothing:
 
 @op(ins={"chroniques": In(Nothing)}, out=Out(Nothing))
 def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
-    """Load ALL ERA5 data SEQUENTIALLY (1990-present, 2-year chunks)."""
-    # Fix: Import direct function, not asset
-    from ..assets.bronze.era5_assets import process_era5_range_to_timeseries
-    
+    """Load ALL ERA5 data SEQUENTIALLY (1990-present), chunked by ERA5_YEARS_PER_CHUNK."""
+    # Import direct function + chunk size (source unique de vérité, partagée avec
+    # ERA5_PARTITIONS_DEF utilisé par l'asset weekly/historique).
+    from ..assets.bronze.era5_assets import ERA5_YEARS_PER_CHUNK, process_era5_range_to_timeseries
+
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
-    context.log.info("🌤️  STEP 3/5: Loading ALL ERA5 data (SEQUENTIAL, 2-year chunks)...")
+    context.log.info(f"🌤️  STEP 3/5: Loading ALL ERA5 data (SEQUENTIAL, {ERA5_YEARS_PER_CHUNK}-year chunks)...")
     context.log.info(f"🌤️  Period: {START_YEAR} → {_get_current_year()}")
     context.log.info("🌤️  ═══════════════════════════════════════════════════════════")
     
     current_year = _get_current_year()
     year = START_YEAR
     while year <= current_year:
-        chunk_end = min(year + 1, current_year)  # 2-year chunk
-        
+        chunk_end = min(year + ERA5_YEARS_PER_CHUNK - 1, current_year)
+
         start_date = datetime(year, 1, 1)
         end_date = datetime(chunk_end, 12, 31)
         file_id = f"era5_bootstrap_{year}_{chunk_end}"
-        
+
         context.log.info(f"  🌤️  Loading ERA5 {year}-{chunk_end}...")
         job_name = "era5"
         partition_key = f"{year}-{chunk_end}"
         if _should_skip_partition(job_name, partition_key):
             context.log.info(f"  ↪️  Skipping era5 {partition_key} (already completed)")
-            year += 2
+            year += ERA5_YEARS_PER_CHUNK
             continue
         with get_db_connection() as conn:
             _mark_partition_start(conn, job_name, partition_key)
@@ -455,8 +456,8 @@ def load_all_era5_sequential(context: OpExecutionContext) -> Nothing:
         
         # Rate limit: wait between chunks (longer for ERA5)
         time.sleep(DELAY_BETWEEN_PARTITIONS * 2)
-        
-        year += 2  # Move to next 2-year chunk
+
+        year += ERA5_YEARS_PER_CHUNK  # Next chunk (granularité partagée avec ERA5_PARTITIONS_DEF)
     
     context.log.info("🌤️  ERA5 loading complete!")
 

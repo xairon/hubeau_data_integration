@@ -751,6 +751,13 @@ def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Di
     """
     Piezometry chroniques - Daily incremental load (last 7 days).
     Used by scheduled daily pipeline.
+
+    ⚠️ ÉCRIT LA MÊME TABLE que l'asset partitionné `piezometry_chroniques_raw`
+    (bronze.piezometry_chroniques_raw). Cet asset nettoie/recharge seulement les
+    7 derniers jours ; le partitionné nettoie/recharge une année entière. Si un
+    rechargement de la partition de l'année courante tourne APRÈS ce daily, il
+    re-fetch la même donnée depuis l'API (pas de perte). Les doublons d'overlap
+    sont dédoublonnés en Silver (`stg_piezo_chroniques`).
     """
     context.log.info("📅 [DAILY] Chargement incrémental piézométrie")
 
@@ -794,6 +801,13 @@ def hydrometry_obs_daily_raw(context: AssetExecutionContext) -> Output[Dict[str,
     """
     Hydrometry observations - Daily incremental load (last 7 days).
     Used by scheduled daily pipeline.
+
+    ⚠️ ÉCRIT LA MÊME TABLE que l'asset partitionné `hydrometry_obs_elab_raw`
+    (bronze.hydrometry_obs_elab_raw). Cet asset nettoie/recharge seulement les
+    7 derniers jours ; le partitionné nettoie/recharge une année entière. Si un
+    rechargement de la partition de l'année courante tourne APRÈS ce daily, il
+    re-fetch la même donnée depuis l'API (pas de perte). Les doublons d'overlap
+    sont dédoublonnés en Silver (`stg_hydrometry_obs_elab`).
     """
     context.log.info("📅 [DAILY] Chargement incrémental hydrométrie")
 
