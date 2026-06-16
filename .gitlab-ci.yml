@@ -5,6 +5,49 @@ variables:
   # Évite les prompts interactifs pendant l'installation
   DEBIAN_FRONTEND: noninteractive
 
+stages:
+  - build
+  - deploy
+
+# ============================================================================
+# BUILD : images custom SANDBOX → GitLab Container Registry (via kaniko)
+# ----------------------------------------------------------------------------
+# kaniko ne nécessite pas de Docker privilégié (compatible runners verrouillés).
+# Les images sont poussées sur $CI_REGISTRY_IMAGE avec le tag "sandbox".
+# Le compose docker-compose.sandbox.yml les référence via REGISTRY_PREFIX.
+# ============================================================================
+.kaniko:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [ "" ]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "feat/sandbox-deploy"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+build_worker:
+  extends: .kaniko
+  script:
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/docker/worker/Dockerfile" --destination "$CI_REGISTRY_IMAGE/hubeau-worker:sandbox"
+
+build_orchestrator:
+  extends: .kaniko
+  script:
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/docker/orchestrator/Dockerfile" --destination "$CI_REGISTRY_IMAGE/hubeau-orchestrator:sandbox"
+
+build_postgres:
+  extends: .kaniko
+  script:
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/docker/sandbox/postgres.Dockerfile" --destination "$CI_REGISTRY_IMAGE/hubeau-postgres-sandbox:sandbox"
+
+build_superset:
+  extends: .kaniko
+  script:
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/docker/sandbox/superset.Dockerfile" --destination "$CI_REGISTRY_IMAGE/hubeau-superset-sandbox:sandbox"
+
 pages:
   stage: deploy
   script:

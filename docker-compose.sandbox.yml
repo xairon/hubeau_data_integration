@@ -1,20 +1,22 @@
 # Hub'Eau Pipeline — Variante SANDBOX (POC) pour déploiement Portainer/GitOps
 # ----------------------------------------------------------------------------
-# Différences avec docker-compose.yml (prod) :
-#   1. AUCUN bind mount            → Portainer mutualisé les interdit ("forbidden
-#                                     properties"). Tous les fichiers de config
-#                                     (init.sql, config Superset, dagster_home) sont
-#                                     INTÉGRÉS dans des images buildées depuis le Git.
-#   2. Volumes NOMMÉS              → Portainer les crée tout seul (pas d'init_volumes.sh).
-#   3. Stack monitoring RETIRÉ     → pas de prometheus/grafana/cadvisor/exporter.
-#   4. Réservation GPU RETIRÉE     → plus aucune dépendance CUDA.
-#   5. postgres_tuning + cloudbeaver RETIRÉS → reposaient sur des bind mounts ;
-#      inutiles pour un POC (Adminer suffit pour inspecter la base).
+# Le Portainer mutualisé interdit AUSSI bien les bind mounts QUE le `build:`
+# dans un stack ("forbidden properties"). Ce compose n'utilise donc NI l'un NI
+# l'autre : les 4 images custom sont pré-buildées par la CI GitLab et poussées
+# sur le GitLab Container Registry ; ici on ne fait que les RÉFÉRENCER par tag.
 #
-# Comme il n'y a aucun bind mount, NE PAS activer "relative path volumes" dans
-# Portainer, et NE PAS renseigner de "local filesystem path".
+# Pré-requis (voir docs/deploy-sandbox.md) :
+#   - la CI a buildé/poussé les images (.gitlab-ci.yml, stage build)
+#   - REGISTRY_PREFIX = chemin registry du projet (= CI_REGISTRY_IMAGE),
+#     ex. registry.scm.univ-tours.fr/ringuet/hubeau_data_integration
+#   - Portainer a un registre déclaré avec un deploy token (pour pull le privé)
 #
-# Déploiement : voir docs/deploy-sandbox.md
+# Autres différences avec la prod :
+#   - AUCUN bind mount (configs intégrées dans les images custom)
+#   - volumes NOMMÉS (pas d'init_volumes.sh)
+#   - monitoring + GPU + postgres_tuning + cloudbeaver retirés (POC)
+#
+# Dans Portainer : NE PAS activer "relative path volumes" (pas de bind mount).
 # Données : aucune reprise — bootstrap propre via full_bootstrap_job.
 
 services:
@@ -39,10 +41,7 @@ services:
   # Image custom : init.sql intégré (pas de bind mount). ATTENTION: pas de
   # "command:" sur l'image HA (bypass entrypoint Patroni).
   postgres:
-    build:
-      context: .
-      dockerfile: docker/sandbox/postgres.Dockerfile
-    image: hubeau-postgres-sandbox:latest
+    image: ${REGISTRY_PREFIX}/hubeau-postgres-sandbox:${IMAGE_TAG:-sandbox}
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: ${PG_DB:-postgres}
@@ -64,10 +63,7 @@ services:
   # Image custom worker : src/configs/dagster_home intégrés (pas de bind mount).
   # NB: plus de bloc deploy.resources.devices nvidia — aucune dépendance GPU.
   dlt_worker:
-    build:
-      context: .
-      dockerfile: docker/worker/Dockerfile
-    image: hubeau-worker:latest
+    image: ${REGISTRY_PREFIX}/hubeau-worker:${IMAGE_TAG:-sandbox}
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,10 +116,7 @@ services:
   # ---- Dagster Web UI (NO USER CODE, GRPC → worker) ------------------------
   # Image orchestrator : dagster_home (workspace.yaml + dagster.yaml) intégré.
   dagster_webserver:
-    build:
-      context: .
-      dockerfile: docker/orchestrator/Dockerfile
-    image: hubeau-orchestrator:latest
+    image: ${REGISTRY_PREFIX}/hubeau-orchestrator:${IMAGE_TAG:-sandbox}
     depends_on:
       dagster_postgres:
         condition: service_healthy
@@ -150,7 +143,7 @@ services:
 
   # ---- Dagster Daemon (schedules + sensors + run queue) --------------------
   dagster_daemon:
-    image: hubeau-orchestrator:latest
+    image: ${REGISTRY_PREFIX}/hubeau-orchestrator:${IMAGE_TAG:-sandbox}
     depends_on:
       dagster_postgres:
         condition: service_healthy
@@ -198,10 +191,7 @@ services:
   # ---- Superset (BI) -------------------------------------------------------
   # Image custom : superset_config.py + docker-init.sh + datasources.yaml intégrés.
   superset:
-    build:
-      context: .
-      dockerfile: docker/sandbox/superset.Dockerfile
-    image: hubeau-superset-sandbox:latest
+    image: ${REGISTRY_PREFIX}/hubeau-superset-sandbox:${IMAGE_TAG:-sandbox}
     depends_on:
       postgres:
         condition: service_healthy

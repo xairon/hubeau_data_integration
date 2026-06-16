@@ -11,13 +11,15 @@ avec rechargement complet des données (pas de migration : `full_bootstrap_job`)
 | **Données** | bootstrap from scratch (Hub'Eau + ERA5) |
 | **CI/CD** | GitOps Portainer (auto-redeploy sur push `main`) |
 
-> Différences avec la prod : **aucun bind mount** (interdits par le Portainer
-> mutualisé → toutes les configs sont intégrées dans des images buildées depuis le
-> Git), volumes nommés (pas d'`init_volumes.sh`), pas de stack monitoring, pas de
-> réservation GPU, `postgres_tuning`/`cloudbeaver` retirés, `mem_limit` réduits.
+> Le Portainer mutualisé interdit **les bind mounts ET le `build:` dans un stack**
+> ("forbidden properties"). Ce déploiement n'utilise donc ni l'un ni l'autre :
+> les 4 images custom sont **pré-buildées par la CI GitLab** et poussées sur le
+> **GitLab Container Registry** ; le compose ne fait que les référencer par tag.
 >
-> ⚠️ Comme il n'y a aucun bind mount : **ne PAS activer « relative path volumes »**
-> dans Portainer et **ne PAS renseigner de « local filesystem path »**.
+> Autres différences avec la prod : volumes nommés (pas d'`init_volumes.sh`), pas
+> de monitoring, pas de GPU, `postgres_tuning`/`cloudbeaver` retirés, `mem_limit` réduits.
+>
+> ⚠️ Dans Portainer : **ne PAS activer « relative path volumes »** (aucun bind mount).
 
 ---
 
@@ -33,7 +35,35 @@ avec rechargement complet des données (pas de migration : `full_bootstrap_job`)
 
 ---
 
-## 1. Créer le stack dans Portainer (depuis Git)
+## 1. Builder & pousser les images (CI GitLab → Container Registry)
+
+Les images sont buildées par la CI, pas par Portainer.
+
+1. **Activer le registry** : GitLab → *Settings → General → Visibility* → s'assurer
+   que **Container Registry** est activé. Le chemin s'affiche dans *Deploy → Container Registry*
+   (= la variable `CI_REGISTRY_IMAGE`), ex. `registry.scm.univ-tours.fr/ringuet/hubeau_data_integration`.
+   **Note ce chemin** : c'est le `REGISTRY_PREFIX` de l'étape 3.
+2. **Lancer le pipeline** : un push sur `feat/sandbox-deploy` (déjà fait) déclenche le
+   stage `build` (`.gitlab-ci.yml`) qui build et pousse 4 images via kaniko :
+   - `hubeau-worker:sandbox`
+   - `hubeau-orchestrator:sandbox`
+   - `hubeau-postgres-sandbox:sandbox` (TimescaleDB + `init.sql` intégré)
+   - `hubeau-superset-sandbox:sandbox` (configs Superset intégrées)
+
+   Suivre dans GitLab → *Build → Pipelines*. Le job `build_worker` est le plus long (~2 GB, GDAL + dbt).
+3. **Vérifier** : GitLab → *Deploy → Container Registry* doit lister les 4 images taguées `sandbox`.
+
+## 2. Déclarer le registry dans Portainer (pour pull le privé)
+
+Le registry est privé → Portainer a besoin d'un identifiant pour le pull :
+
+1. GitLab → *Settings → Repository → Deploy tokens* → créer un token avec le scope
+   **`read_registry`** (note le username + token générés).
+2. Portainer → *Registries* → **Add registry** → type **Custom registry** :
+   - URL : le **host** du registry (ex. `registry.scm.univ-tours.fr`)
+   - Username / Password : le deploy token de l'étape 1.
+
+## 3. Créer le stack dans Portainer (compose depuis Git)
 
 Portainer → *Stacks* → **Add stack** → méthode **Repository** :
 
@@ -44,33 +74,32 @@ Portainer → *Stacks* → **Add stack** → méthode **Repository** :
 | Repository reference | `refs/heads/feat/sandbox-deploy` (ou `main` une fois mergé) |
 | Compose path | `docker-compose.sandbox.yml` |
 | Authentication | token GitLab si repo privé |
+| Relative path volumes | **décoché** (aucun bind mount) |
 
-Dans **Environment variables**, renseigner les clés de `.env.sandbox.example`
-(au minimum `DAGSTER_PG_PASSWORD`, `PG_PASSWORD`, `POSTGIS_PASSWORD`,
-`COPERNICUS_API_KEY`, `SUPERSET_SECRET_KEY`, `SUPERSET_ADMIN_PASSWORD`).
+Dans **Environment variables** (Advanced mode → coller le `.env.sandbox`), au minimum :
+`REGISTRY_PREFIX` (le chemin de l'étape 1), `DAGSTER_PG_PASSWORD`, `PG_PASSWORD`,
+`POSTGIS_PASSWORD`, `COPERNICUS_API_KEY`, `SUPERSET_SECRET_KEY`, `SUPERSET_ADMIN_PASSWORD`.
 
-> Portainer **build 4 images** depuis le contexte Git (aucun registry requis) :
-> `hubeau-worker`, `hubeau-orchestrator`, `hubeau-postgres-sandbox` (TimescaleDB +
-> `init.sql` intégré) et `hubeau-superset-sandbox` (configs Superset intégrées).
-> Les 2 volumes (`postgres_data`, `dagster_pg_data`) sont créés automatiquement,
-> préfixés par le nom du stack.
+> Le compose ne contient **ni `build:` ni bind mount** → uniquement des `image:`
+> (4 custom depuis le registry + postgres/redis/adminer publics) et 2 volumes nommés.
 
-Cliquer **Deploy the stack**. Premier build ≈ quelques minutes (image worker ~2 GB).
+Cliquer **Deploy the stack**. Portainer pull les images (pas de build) → démarrage en 1-2 min.
 
 ---
 
-## 2. Activer le CI/CD (GitOps)
+## 4. CI/CD (auto-rebuild + redeploy)
 
-Deux options Portainer Business, au choix :
+Le flux complet à chaque push : **CI rebuild les images** (stage `build`, tag `sandbox`
+écrasé) → **Portainer re-pull et redéploie**. Deux façons de déclencher le redeploy :
 
 ### Option A — Polling (le plus simple)
-Dans le stack → **GitOps updates** → *Enable* → mécanisme **Polling**, intervalle ex. `5m`.
-Portainer re-tire `main` et redéploie (rebuild des images si Dockerfile change) à chaque
-changement détecté. Zéro config côté GitLab.
+Dans le stack → **GitOps updates** → *Enable* → **Polling** `5m` + cocher
+**Re-pull image** (sinon Portainer garde l'ancienne image au même tag). Portainer
+détecte le nouveau commit, re-pull les images `:sandbox` fraîches et redéploie.
 
-### Option B — Webhook (déploiement à la demande / piloté par la CI)
-1. Stack → **GitOps updates** → *Enable* → mécanisme **Webhook** → copier l'URL générée.
-2. Ajouter un job de déploiement dans `.gitlab-ci.yml` (déclenché sur `main`) :
+### Option B — Webhook (piloté par la CI, après le build)
+1. Stack → **GitOps updates** → *Enable* → **Webhook** → copier l'URL.
+2. Ajouter un job dans `.gitlab-ci.yml` (stage `deploy`, donc **après** le build) :
 
 ```yaml
 deploy_sandbox:
@@ -79,23 +108,18 @@ deploy_sandbox:
   script:
     - curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "feat/sandbox-deploy"'
 ```
 
-3. Dans GitLab → *Settings → CI/CD → Variables*, créer `PORTAINER_WEBHOOK_URL`
-   (masquée/protégée) = l'URL du webhook.
+3. GitLab → *Settings → CI/CD → Variables* → `PORTAINER_WEBHOOK_URL` (masquée).
 
-> Le job `pages` existant (génération dbt docs) reste inchangé ; `deploy_sandbox`
-> s'ajoute à côté dans le stage `deploy`.
-
-À chaque push sur `main` : GitLab appelle le webhook → Portainer re-tire le repo,
-rebuild et redéploie le stack. **Le code applicatif (`src/`, `configs/`, `dagster_home/`)
-est monté en volume** → un simple redéploiement suffit ; pensez juste à recharger la
-*code location* Dagster (étape 4) après un changement de code Python.
+> Comme le code est **intégré dans les images** (plus de bind mount), un changement
+> de code Python n'est pris en compte qu'après **rebuild de l'image worker** par la CI.
+> Après le redeploy, pense à **Reload definitions** dans Dagster (étape 6).
 
 ---
 
-## 3. Lancer le bootstrap initial
+## 5. Lancer le bootstrap initial
 
 Une fois le stack *healthy* :
 
@@ -112,13 +136,13 @@ Restartable : l'état est persisté dans `ops.bootstrap_state`. En cas d'échec 
 
 ---
 
-## 4. Après un changement de code (rappel)
+## 6. Après un changement de code (rappel)
 
-Le worker hot-reload le code monté en volume, mais Dagster ne recharge pas les
-définitions tout seul :
+Le code est **intégré dans l'image worker** (plus de hot reload par volume) :
 
-1. Redéploiement Portainer (auto via GitOps) → conteneurs recréés avec le repo à jour.
-2. Dagster UI → **Reload definitions** sur la code location `hubeau_pipeline`
+1. Push → la CI **rebuild** `hubeau-worker:sandbox`.
+2. Portainer **re-pull + redéploie** (GitOps, étape 4).
+3. Dagster UI → **Reload definitions** sur la code location `hubeau_pipeline`
    (ou GraphQL `reloadRepositoryLocation`).
 
 ---
