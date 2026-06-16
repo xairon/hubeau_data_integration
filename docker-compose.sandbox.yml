@@ -21,7 +21,6 @@ services:
   # ---- Métadonnées Dagster -------------------------------------------------
   dagster_postgres:
     image: postgres:16-alpine
-    container_name: brgm-dagster-postgres
     environment:
       POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD}
       POSTGRES_DB: dagster
@@ -44,7 +43,6 @@ services:
       context: .
       dockerfile: docker/sandbox/postgres.Dockerfile
     image: hubeau-postgres-sandbox:latest
-    container_name: brgm-postgres
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: ${PG_DB:-postgres}
@@ -59,7 +57,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    shm_size: 5g            # requis pour shared_buffers (défaut Docker=64MB → crash)
     mem_limit: 24G          # POC : plafond réduit vs 48G en prod
     restart: unless-stopped
 
@@ -71,7 +68,6 @@ services:
       context: .
       dockerfile: docker/worker/Dockerfile
     image: hubeau-worker:latest
-    container_name: brgm-dlt-worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,7 +124,6 @@ services:
       context: .
       dockerfile: docker/orchestrator/Dockerfile
     image: hubeau-orchestrator:latest
-    container_name: brgm-dagster-webserver
     depends_on:
       dagster_postgres:
         condition: service_healthy
@@ -156,7 +151,6 @@ services:
   # ---- Dagster Daemon (schedules + sensors + run queue) --------------------
   dagster_daemon:
     image: hubeau-orchestrator:latest
-    container_name: brgm-dagster-daemon
     depends_on:
       dagster_postgres:
         condition: service_healthy
@@ -182,7 +176,6 @@ services:
   # ---- Adminer (admin DB léger, zéro config) -------------------------------
   adminer:
     image: adminer:4.8.1
-    container_name: brgm-adminer
     restart: unless-stopped
     depends_on:
       - postgres
@@ -193,7 +186,6 @@ services:
   # ---- Redis (cache Superset) ----------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: brgm-redis
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
@@ -210,7 +202,6 @@ services:
       context: .
       dockerfile: docker/sandbox/superset.Dockerfile
     image: hubeau-superset-sandbox:latest
-    container_name: brgm-superset
     depends_on:
       postgres:
         condition: service_healthy
