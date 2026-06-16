@@ -1,14 +1,21 @@
 # Hub'Eau Pipeline — Variante SANDBOX (POC) pour déploiement Portainer/GitOps
 # ----------------------------------------------------------------------------
 # Différences avec docker-compose.yml (prod) :
-#   1. Volumes NOMMÉS non-externes  → Portainer les crée tout seul (pas de init_volumes.sh)
-#   2. Stack monitoring RETIRÉ      → pas de prometheus/grafana/cadvisor/docker_names/exporter
-#                                      (supprime la dépendance à XDG_RUNTIME_DIR/docker.sock)
-#   3. Réservation GPU RETIRÉE      → plus aucune dépendance CUDA dans le worker (embeddings supprimés)
-#   4. mem_limit assouplis          → ce sandbox est mutualisé, on ne réserve pas 48 G
+#   1. AUCUN bind mount            → Portainer mutualisé les interdit ("forbidden
+#                                     properties"). Tous les fichiers de config
+#                                     (init.sql, config Superset, dagster_home) sont
+#                                     INTÉGRÉS dans des images buildées depuis le Git.
+#   2. Volumes NOMMÉS              → Portainer les crée tout seul (pas d'init_volumes.sh).
+#   3. Stack monitoring RETIRÉ     → pas de prometheus/grafana/cadvisor/exporter.
+#   4. Réservation GPU RETIRÉE     → plus aucune dépendance CUDA.
+#   5. postgres_tuning + cloudbeaver RETIRÉS → reposaient sur des bind mounts ;
+#      inutiles pour un POC (Adminer suffit pour inspecter la base).
+#
+# Comme il n'y a aucun bind mount, NE PAS activer "relative path volumes" dans
+# Portainer, et NE PAS renseigner de "local filesystem path".
 #
 # Déploiement : voir docs/deploy-sandbox.md
-# Données : aucune reprise — on repart d'un bootstrap propre (full_bootstrap_job).
+# Données : aucune reprise — bootstrap propre via full_bootstrap_job.
 
 services:
   # ---- Métadonnées Dagster -------------------------------------------------
@@ -30,9 +37,13 @@ services:
     restart: unless-stopped
 
   # ---- Base Hub'Eau (PostGIS + TimescaleDB) --------------------------------
-  # ATTENTION: Ne PAS ajouter de "command:" sur l'image HA (bypass entrypoint Patroni)
+  # Image custom : init.sql intégré (pas de bind mount). ATTENTION: pas de
+  # "command:" sur l'image HA (bypass entrypoint Patroni).
   postgres:
-    image: timescale/timescaledb-ha:pg16
+    build:
+      context: .
+      dockerfile: docker/sandbox/postgres.Dockerfile
+    image: hubeau-postgres-sandbox:latest
     container_name: brgm-postgres
     environment:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
@@ -40,7 +51,6 @@ services:
       POSTGRES_USER: ${PG_USER:-postgres}
     volumes:
       - postgres_data:/home/postgres/pgdata
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "49502:5432"
     healthcheck:
@@ -49,29 +59,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    shm_size: 5g            # requis pour shared_buffers=4GB (défaut Docker=64MB → crash)
+    shm_size: 5g            # requis pour shared_buffers (défaut Docker=64MB → crash)
     mem_limit: 24G          # POC : plafond réduit vs 48G en prod
     restart: unless-stopped
 
-  # Tuning PG via Patroni REST API (one-shot après healthy)
-  postgres_tuning:
-    image: python:3-alpine
-    container_name: brgm-postgres-tuning
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGUSER: ${PG_USER:-postgres}
-      PGPASSWORD: ${PG_PASSWORD}
-      PGDATABASE: ${PG_DB:-postgres}
-    volumes:
-      - ./docker/postgres/apply-tuning.py:/app/apply-tuning.py:ro
-    command: ["python", "/app/apply-tuning.py"]
-    restart: "no"
-
   # ---- Worker (exécution pipeline via GRPC) --------------------------------
+  # Image custom worker : src/configs/dagster_home intégrés (pas de bind mount).
   # NB: plus de bloc deploy.resources.devices nvidia — aucune dépendance GPU.
   dlt_worker:
     build:
@@ -104,7 +97,6 @@ services:
       POSTGIS_USER: ${POSTGIS_USER:-postgres}
       POSTGIS_PASSWORD: ${POSTGIS_PASSWORD}
       HUBEAU_SCHEMA: ${HUBEAU_SCHEMA:-hubeau}
-      HUBEAU_SCHEMA_DIR: /app/scripts/schema
       DESTINATION__POSTGRES__CREDENTIALS__DATABASE: ${PG_DB:-postgres}
       DESTINATION__POSTGRES__CREDENTIALS__USERNAME: ${PG_USER:-postgres}
       DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: ${PG_PASSWORD}
@@ -117,14 +109,7 @@ services:
       # POC : restreindre la portée du bootstrap (allowlist job_name:partition_key)
       BOOTSTRAP_PARTITIONS: ${BOOTSTRAP_PARTITIONS:-}
       BOOTSTRAP_CONTINUE_ON_ERROR: ${BOOTSTRAP_CONTINUE_ON_ERROR:-false}
-    volumes:
-      - ./src:/app/src
-      - ./configs:/app/configs
-      - ./scripts:/app/scripts
-      - ./dagster_home:/app/dagster_home
     command: [ "dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline.definitions" ]
-    ports:
-      - "49505:8080"   # dbt docs serve (manuel)
     expose:
       - "4000"
     healthcheck:
@@ -137,6 +122,7 @@ services:
     restart: unless-stopped
 
   # ---- Dagster Web UI (NO USER CODE, GRPC → worker) ------------------------
+  # Image orchestrator : dagster_home (workspace.yaml + dagster.yaml) intégré.
   dagster_webserver:
     build:
       context: .
@@ -155,8 +141,6 @@ services:
       DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
       DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
-    volumes:
-      - ./dagster_home:/app/dagster_home
     command: [ "dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster_home/workspace.yaml" ]
     ports:
       - "49500:3000"
@@ -185,8 +169,6 @@ services:
       DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
       DAGSTER_PG_USER: ${DAGSTER_PG_USER:-postgres}
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
-    volumes:
-      - ./dagster_home:/app/dagster_home
     command: [ "dagster-daemon", "run", "-w", "/app/dagster_home/workspace.yaml" ]
     healthcheck:
       test: [ "CMD-SHELL", "dagster-daemon liveness-check || exit 1" ]
@@ -197,7 +179,7 @@ services:
     mem_limit: 2G
     restart: unless-stopped
 
-  # ---- Adminer (admin DB léger) --------------------------------------------
+  # ---- Adminer (admin DB léger, zéro config) -------------------------------
   adminer:
     image: adminer:4.8.1
     container_name: brgm-adminer
@@ -206,8 +188,6 @@ services:
       - postgres
     ports:
       - "49501:8080"
-    volumes:
-      - ./docker/adminer/adminer.css:/var/www/html/adminer.css:ro
     mem_limit: 256M
 
   # ---- Redis (cache Superset) ----------------------------------------------
@@ -223,24 +203,13 @@ services:
       start_period: 10s
     mem_limit: 256M
 
-  # ---- CloudBeaver (client SQL web) ----------------------------------------
-  cloudbeaver:
-    image: dbeaver/cloudbeaver:24.3.0
-    container_name: brgm-cloudbeaver
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "49503:8978"
-    volumes:
-      - cloudbeaver_data:/opt/cloudbeaver/workspace
-      - ./docker/cloudbeaver/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/data-sources.json
-    mem_limit: 1G
-    restart: unless-stopped
-
   # ---- Superset (BI) -------------------------------------------------------
+  # Image custom : superset_config.py + docker-init.sh + datasources.yaml intégrés.
   superset:
-    image: apache/superset:4.0.0
+    build:
+      context: .
+      dockerfile: docker/sandbox/superset.Dockerfile
+    image: hubeau-superset-sandbox:latest
     container_name: brgm-superset
     depends_on:
       postgres:
@@ -256,10 +225,6 @@ services:
       SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
       SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
       SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@hubeau.com}
-    volumes:
-      - ./docker/superset/superset_config.py:/app/superset_config.py
-      - ./docker/superset/docker-init.sh:/app/docker-init.sh
-      - ./docker/superset/datasources.yaml:/app/datasources.yaml
     ports:
       - "49504:8088"
     entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
@@ -273,4 +238,3 @@ services:
 volumes:
   postgres_data:
   dagster_pg_data:
-  cloudbeaver_data:

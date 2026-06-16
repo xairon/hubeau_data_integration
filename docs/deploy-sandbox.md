@@ -11,9 +11,13 @@ avec rechargement complet des données (pas de migration : `full_bootstrap_job`)
 | **Données** | bootstrap from scratch (Hub'Eau + ERA5) |
 | **CI/CD** | GitOps Portainer (auto-redeploy sur push `main`) |
 
-> Différences avec la prod : volumes nommés (pas d'`init_volumes.sh`), pas de stack
-> monitoring (supprime la contrainte `XDG_RUNTIME_DIR`), pas de réservation GPU,
-> `mem_limit` réduits car serveur mutualisé.
+> Différences avec la prod : **aucun bind mount** (interdits par le Portainer
+> mutualisé → toutes les configs sont intégrées dans des images buildées depuis le
+> Git), volumes nommés (pas d'`init_volumes.sh`), pas de stack monitoring, pas de
+> réservation GPU, `postgres_tuning`/`cloudbeaver` retirés, `mem_limit` réduits.
+>
+> ⚠️ Comme il n'y a aucun bind mount : **ne PAS activer « relative path volumes »**
+> dans Portainer et **ne PAS renseigner de « local filesystem path »**.
 
 ---
 
@@ -37,7 +41,7 @@ Portainer → *Stacks* → **Add stack** → méthode **Repository** :
 |---|---|
 | Name | `hubeau-sandbox` |
 | Repository URL | URL GitLab du repo |
-| Repository reference | `refs/heads/main` |
+| Repository reference | `refs/heads/feat/sandbox-deploy` (ou `main` une fois mergé) |
 | Compose path | `docker-compose.sandbox.yml` |
 | Authentication | token GitLab si repo privé |
 
@@ -45,10 +49,11 @@ Dans **Environment variables**, renseigner les clés de `.env.sandbox.example`
 (au minimum `DAGSTER_PG_PASSWORD`, `PG_PASSWORD`, `POSTGIS_PASSWORD`,
 `COPERNICUS_API_KEY`, `SUPERSET_SECRET_KEY`, `SUPERSET_ADMIN_PASSWORD`).
 
-> Portainer **build** les images `hubeau-worker` et `hubeau-orchestrator` directement
-> sur le serveur depuis le contexte Git — aucun registry requis.
-> Les 3 volumes (`postgres_data`, `dagster_pg_data`, `cloudbeaver_data`) sont créés
-> automatiquement, préfixés par le nom du stack.
+> Portainer **build 4 images** depuis le contexte Git (aucun registry requis) :
+> `hubeau-worker`, `hubeau-orchestrator`, `hubeau-postgres-sandbox` (TimescaleDB +
+> `init.sql` intégré) et `hubeau-superset-sandbox` (configs Superset intégrées).
+> Les 2 volumes (`postgres_data`, `dagster_pg_data`) sont créés automatiquement,
+> préfixés par le nom du stack.
 
 Cliquer **Deploy the stack**. Premier build ≈ quelques minutes (image worker ~2 GB).
 

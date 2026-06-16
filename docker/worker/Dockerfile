@@ -61,6 +61,13 @@ RUN cd /app/src/dbt_hubeau && \
 ENV PYTHONPATH=/app/src:/app
 ENV DAGSTER_HOME=/app/dagster_home
 
+# Bake a clean DAGSTER_HOME config (dagster.yaml + workspace.yaml) so the worker
+# has its instance/storage config even without a volume mount (e.g. Portainer
+# deploys where bind mounts are forbidden). In the standard compose, the
+# ./dagster_home volume mount overrides this — harmless. Heavy runtime state
+# (storage/, history/, logs/) is excluded via .dockerignore.
+COPY docker/orchestrator/dagster_home /app/dagster_home
+
 # Healthcheck (GRPC API)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 4000)); s.close()" || exit 1
