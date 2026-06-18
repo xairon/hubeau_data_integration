@@ -17,7 +17,8 @@ ERA5 API ──────┘
 | `bronze` | DLT + assets Dagster | Tables brutes (`*_raw`) + TME (`tme_entites_hydrogeo`) |
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `silver_rejects` | dbt rejects | Lignes filtrées (exceptions) avec `rejection_reason` — audit, qualité |
-| `gold` | dbt intermediate + marts | Tables transformées (`int_*` + marts) |
+| `gold` | dbt (intermediate + marts) + assets Dagster (`indices`) + seeds dbt | Tables transformées (`int_*` + marts), indices standardisés (réf. fixe) et référentiels |
+| `ml` | assets Dagster / scripts Pastas | Features modèles Pastas (`pastas_irf_features`, …) consommées par certains marts gold |
 
 ## 🔥 Optimisations TimescaleDB
 
@@ -147,6 +148,7 @@ Tables transformées et prêtes pour l'analyse.
 | `int_era5_for_all_stations` | ERA5 filtré pour les points de grille utilisés par toutes les stations (piézo + hydro) | `silver.stg_era5_timeseries` + mappings |
 | `int_hydro_daily_measurements` | Mesures quotidiennes agrégées (hydrométrie) | `silver.stg_hydrometry_obs_elab` |
 | `int_hydro_station_era5_mapping` | Mapping stations hydrométriques → grille ERA5 | `silver.stg_hydrometry_stations` |
+| `int_pastas_station_profile` | Profil Pastas par station (IRF, résidus, SGI) — voir section dédiée plus bas | `ml.pastas_irf_features` |
 
 **Détails** :
 - `int_daily_measurements` : Agrégation par `code_bss` et `date_mesure` (AVG)
@@ -299,6 +301,126 @@ Dimension géographique consolidée depuis les stations piézo et hydro :
 - `code_commune`, `nom_commune`
 - `code_departement`, `nom_departement`
 - `code_region`, `nom_region`
+
+---
+
+## Tables Gold — Indices standardisés (assets Dagster, groupe `indices`)
+
+Ces tables **ne sont pas produites par dbt** mais par des **assets Dagster** Python
+(`src/hubeau_pipeline/assets/*_index_assets.py`, `reference_stats_assets.py`, groupe
+`indices`). Toute la méthode scientifique est centralisée dans un seul module pur
+`src/hubeau_pipeline/ml/indices.py` (fonctions `compute_reference_grid`,
+`grid_to_zscore`, `classify_value`).
+
+### Objectif
+
+Fournir l'**indice piézométrique/hydrologique standardisé** (IPS/SPLI pour les nappes,
+SSFI pour les débits) — la position du niveau d'un mois donné par rapport à sa
+**normale saisonnière**, exprimée en z-score et classée en 7 classes BSH/Météo-France.
+C'est la donnée affichée par l'app (Observatoire, carte, fiche station, secteurs) et le
+bulletin « Météo des nappes ». **L'app ne recalcule plus ces indices : elle lit ces
+tables.**
+
+### Méthodologie (commune aux 3 tables)
+
+| Étape | Détail |
+|-------|--------|
+| **Référence** | Fenêtre **fixe** `REF_PERIOD = (1991, 2020)` (normale climatologique WMO/BRGM). Pas de fenêtre glissante. |
+| **Repli par station** | Échelle de qualité via `_select_reference_window` : `normale` (1991–2020, ≥15 ans) → `adaptee` (meilleure fenêtre 30 ans alignée décennie, ≥15 ans) → `provisoire` (historique complet, <15 ans). Le `flag` porte cette qualité. |
+| **Grille** | Par mois calendaire (1–12) : percentiles empiriques 1→99 (`PCTL_GRID`) sur les valeurs de la fenêtre. Mois à `< MIN_PER_MONTH = 10` obs → interpolé depuis le mois voisin (circulaire) ; aucun mois exploitable → grille `NULL` ⇒ indice `UNKNOWN` (**jamais de grille fabriquée**). |
+| **Z-score** | `grid_to_zscore` : rang-percentile de la valeur dans la grille → `clip(0.001, 0.999)` → `norm.ppf` → arrondi 3 décimales. CDF empirique projetée sur la loi normale standard. |
+| **Classes (7)** | Seuils z `[-1.75, -1.28, -0.84, 0.84, 1.28, 1.75]` → `EXTREMEMENT_BAS, TRES_BAS, BAS, NORMAL, HAUT, TRES_HAUT, EXTREMEMENT_HAUT` (+ `UNKNOWN`). Équivalents en percentiles : `[4.01, 10.03, 20.05, 79.95, 89.97, 95.99]`. |
+| **Source piézo** | `gold.fct_monthly_chroniques.niveau_moyen` (m NGF), par `code_bss`. |
+| **Source hydro** | `gold.fct_monthly_hydro.resultat_moyen` (débit), par `code_station`, `positive_only=true` (débits ≤ 0 écartés). |
+
+> ⚠️ **Cohérence cross-repo** : la même fonction `compute_reference_grid` est utilisée
+> par les 3 assets, et son portage `dashboard/utils/reference.py` (`value_to_zscore`)
+> dans `time-serie-explo` est **identique** (même grille, mêmes clips, mêmes seuils).
+> Entrepôt et app ne peuvent donc pas diverger sur la méthode.
+
+#### `station_reference_stats`
+
+**Granularité** : (type, station, mois calendaire) — 12 lignes par station.
+**Objectif** : la **grille de référence fixe** réutilisable (normale saisonnière figée).
+**Asset** : `station_reference_stats` — **pas de recalcul nocturne**, rematérialisé
+seulement à chaque décennie (1991–2020 → 2001–2030 en 2031).
+
+| Colonne | Type | Description |
+|---------|------|-------------|
+| `type` | text | `piezo` / `hydro` |
+| `code` | text | `code_bss` (piézo) ou `code_station` (hydro) |
+| `month` | int | Mois calendaire 1–12 |
+| `quantile_grid` | jsonb | 99 percentiles (m NGF ou débit), `NULL` si insuffisant |
+| `baseline_start` / `baseline_end` | date | Bornes de la fenêtre de référence retenue |
+| `flag` | text | `normale` / `adaptee` / `provisoire` |
+| `n_years` | int | Nb d'années de la fenêtre |
+| `computed_at` | timestamptz | Horodatage |
+
+PK `(type, code, month)`. **Source** : `gold.fct_monthly_chroniques` + `gold.fct_monthly_hydro`.
+
+#### `fct_monthly_index`
+
+**Granularité** : (type, station, mois) — **série mensuelle complète, 1967 → mois courant**.
+**Objectif** : l'**historique standardisé** d'une station (courbe SPLI/IPS ou SSFI, timeline secteurs).
+**Asset** : `fct_monthly_index` (deps `station_reference_stats`) — **nocturne**. Re-score
+chaque mois de l'historique contre la grille fixe.
+
+| Colonne | Type | Description |
+|---------|------|-------------|
+| `type` | text | `piezo` / `hydro` |
+| `code` | text | Code station |
+| `month` | date | 1er du mois |
+| `z` | double | Indice standardisé (z-score), `NULL` si pas de grille |
+| `index_class` | text | Une des 7 classes (ou `UNKNOWN`) |
+| `flag` | text | Qualité de la référence (`normale`/`adaptee`/`provisoire`) |
+| `computed_at` | timestamptz | Horodatage |
+
+PK `(type, code, month)`, index `(type, month)`. **Source** : mêmes faits mensuels.
+**Consommée par l'app** : timeline secteurs, situation passée (`observatory_situation.py`,
+`observatory_common.py`). *(Les endpoints fiche station `/spli` et `/ssfi` recalculent
+encore à la volée et devraient à terme lire cette table.)*
+
+#### `station_current_index`
+
+**Granularité** : (type, station) — **1 ligne par station = dernier mois disponible**.
+**Objectif** : l'indice **courant** pour la carte et les listes (état « aujourd'hui »).
+**Asset** : `station_current_index` (deps `station_reference_stats`) — **nocturne**.
+Classe uniquement le dernier mois.
+
+| Colonne | Type | Description |
+|---------|------|-------------|
+| `code` / `type` | text | Station + domaine |
+| `index_name` | text | `IPS` (piézo) ou `SSFI` (hydro) |
+| `index_value` | double | z-score du dernier mois |
+| `index_class` | text | Classe 7 niveaux (ou `UNKNOWN`) |
+| `ref_month` | date | Mois classé |
+| `baseline_start` / `baseline_end` | date | Fenêtre de référence utilisée |
+| `computed_at` | timestamptz | Horodatage |
+
+PK `(type, code)`, index sur `index_class`. **Source** : mêmes faits mensuels.
+**Consommée par l'app** : carte, RightDrawer, KPI, liste Observatoire (`index_class`).
+
+---
+
+## Tables Gold — Référentiels & profils complémentaires
+
+#### `ref_stations_meteeau_bsn` (seed dbt)
+
+**Objectif** : réseau **officiel MétéEAU Nappes** du bulletin BRGM (450 indicateurs
+ponctuels : 431 piézomètres + 19 sources karstiques suivies en débit). Permet de
+restreindre l'agrégation par secteurs au réseau officiel (`network=meteeau`) pour coller
+aux cartes BRGM. **Source** : `src/dbt_hubeau/seeds/ref_stations_meteeau_bsn.csv` (seed,
+pas de calcul). Colonnes : `code_bss`, `code_bss_nouveau`, … **Consommée par l'app** :
+`observatory_situation.py::_official_codes()`.
+
+#### `int_pastas_station_profile` (dbt intermediate)
+
+**Granularité** : 1 ligne par station piézométrique.
+**Objectif** : profil **Pastas** complet par station (base dashboards, embeddings, ML) :
+paramètres IRF, qualité du modèle, diagnostics et statistiques des résidus
+(global / 12 derniers mois / saisonnier), bilan hydrique moyen, signatures hydrogéo, SGI récent.
+**Source** : `ml.pastas_irf_features` (schéma `ml`, features produites par les modèles
+Pastas), filtré sur `fit_success = true`. Matérialisé en table.
 
 ---
 
