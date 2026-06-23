@@ -9,11 +9,17 @@ sources:
       error_after: {count: 7, period: day}
     tables:
       - name: era5_france_timeseries
-        description: Données météo ERA5 brutes (timeseries)
+        description: Données météo ERA5-Land brutes (timeseries)
+        # Le dataset CADS `reanalysis-era5-land` a une latence de publication INHÉRENTE
+        # de ~2-3 semaines. La donnée la plus récente est donc normalement à ~J-21 ;
+        # ce n'est PAS un retard d'ingestion (le job s'auto-rattrape dès que CADS publie).
+        # Seuils calés pour ne sonner qu'en cas de VRAI blocage (ingestion arrêtée),
+        # pas sur la latence normale du dataset. loaded_at_field = `time` (date donnée),
+        # le seul signal pertinent ici (created_at non rafraîchi par les MERGE).
         freshness:
-          warn_after: {count: 14, period: day}  # ERA5 updated weekly
-          error_after: {count: 21, period: day}
-        loaded_at_field: "time"  # Column in table (not valid_time)
+          warn_after: {count: 30, period: day}
+          error_after: {count: 60, period: day}
+        loaded_at_field: "time"
       - name: piezometry_stations_raw
         description: Métadonnées des stations piézométriques
         freshness: null  # Static reference data
