@@ -19,10 +19,12 @@ sources:
         freshness: null  # Static reference data
       - name: piezometry_chroniques_raw
         description: Mesures piézométriques brutes
+        # Freshness = recence d'INGESTION (pas la date de la donnee). Les colonnes Bronze
+        # sont en text (DLT) ; _dlt_load_id encode l'epoch du chargement -> to_timestamp.
         freshness:
           warn_after: {count: 3, period: day}
           error_after: {count: 7, period: day}
-        loaded_at_field: "date_mesure"
+        loaded_at_field: "to_timestamp(_dlt_load_id::double precision)"
       - name: hydrometry_sites_raw
         description: Sites hydrométriques bruts
         freshness: null  # Static reference data
@@ -31,10 +33,11 @@ sources:
         freshness: null  # Static reference data
       - name: hydrometry_obs_elab_raw
         description: Observations hydrométriques élaborées brutes
+        # Freshness = recence d'INGESTION via _dlt_load_id (epoch text) -> to_timestamp.
         freshness:
           warn_after: {count: 3, period: day}
           error_after: {count: 7, period: day}
-        loaded_at_field: "date_obs_elab"
+        loaded_at_field: "to_timestamp(_dlt_load_id::double precision)"
       # Référentiel TME (entités hydrogéologiques)
       - name: tme_entites_hydrogeo
         description: Attributs TME (niveau, etat, nature, milieu, theme, origine) depuis TME.csv local ou ZIP national
