@@ -22,10 +22,11 @@ models:
           - not_null
       
       - name: niveau_nappe_eau
-        description: "Niveau piézométrique moyen journalier (m NGF)"
-        tests:
-          - not_null
-      
+        description: >
+          Niveau piézométrique moyen journalier (m NGF). NULLABLE : certaines stations
+          ne mesurent que profondeur_nappe (sans niveau NGF). Le staging garde les lignes
+          ayant niveau OU profondeur — donc niveau peut être NULL par conception.
+
       - name: temperature_2m
         description: "Température moyenne à 2m en °C (NULL si ERA5 absent pour cette date)"
         tests:
@@ -68,9 +69,9 @@ models:
       # Test dbt_utils.unique_combination_of_columns retiré : full-scan coûteux/OOM-prone
       # sur l'hypertable (cf. même décision sur ERA5).
 
-      # Nombre minimum de lignes (sanity check)
+      # Sanity : au moins une mesure présente (niveau OU profondeur) sur données récentes.
       - dbt_utils.expression_is_true:
-          expression: "niveau_nappe_eau IS NOT NULL"
+          expression: "niveau_nappe_eau IS NOT NULL OR profondeur_nappe IS NOT NULL"
           config:
             severity: warn
             where: "date >= CURRENT_DATE - INTERVAL '30 days'"
@@ -85,8 +86,9 @@ models:
         tests:
           - not_null
       - name: niveau_moyen
-        tests:
-          - not_null
+        description: >
+          Niveau moyen mensuel (m NGF). NULLABLE : stations à profondeur seule (sans niveau NGF),
+          cf. niveau_nappe_eau de hubeau_daily_chroniques.
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:

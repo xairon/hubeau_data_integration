@@ -1,4 +1,4 @@
-from dagster import AssetSelection, In, Nothing, Out, define_asset_job, job, op
+from dagster import AssetSelection, define_asset_job, job, op
 from dagster_dbt import DbtCliResource, build_dbt_asset_selection
 
 from ..assets.dbt_assets import hubeau_dbt_assets
@@ -59,24 +59,15 @@ station_reference_stats_job = define_asset_job(
 
 
 # ==============================================================================
-# DBT QUALITY JOB — source freshness THEN data-quality tests (sequential)
+# DBT QUALITY JOB — data-quality tests (schema.yml)
 # ==============================================================================
+# Runs `dbt test` only. NOT `dbt source freshness`: the piezo/hydro sources use a
+# text `loaded_at_field` (date_mesure/date_obs_elab) so freshness raises a DB error,
+# and ERA5 legitimately lags — coupling it as a hard gate blocked the tests. Source
+# arrival/coverage is monitored separately by data_completeness_job (weekly).
 
 @op(
     required_resource_keys={"dbt"},
-    out=Out(Nothing),
-    description="Check source data freshness (thresholds in sources.yml)",
-)
-def run_dbt_source_freshness(context):
-    context.log.info("📅 Checking source freshness...")
-    dbt: DbtCliResource = context.resources.dbt
-    dbt.cli(["source", "freshness"], raise_on_error=True, context=context).wait()
-    context.log.info("✅ Source freshness check completed")
-
-
-@op(
-    required_resource_keys={"dbt"},
-    ins={"after": In(Nothing)},
     description="Run dbt test (schema.yml data-quality tests). Failing rows persisted to dbt_audit.",
 )
 def run_dbt_tests(context):
@@ -87,11 +78,11 @@ def run_dbt_tests(context):
 
 
 @job(
-    description="Data quality: source freshness then dbt tests (sequential). Run nightly after dbt_transform.",
+    description="Data quality: dbt tests (schema.yml). Nightly after dbt_transform; fails loud on violations.",
     tags={"dagster/concurrency_key": "dbt_pipeline"},
 )
 def dbt_quality_job():
-    run_dbt_tests(after=run_dbt_source_freshness())
+    run_dbt_tests()
 
 
 # ==============================================================================
