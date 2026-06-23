@@ -119,13 +119,16 @@ The spatial join between stations and ERA5 grid is done in `int_station_era5_map
 4h00  Hub'Eau Bronze piezo+hydro (daily_piezometry_bronze_job + daily_hydrometry_bronze_job)
 ```
 
-**Sensors drive the whole dbt + index chain** (event-driven, `sensors.py`) — NO time-based dbt schedules:
+**Sensors drive the whole dbt + index + quality chain** (event-driven, `sensors.py`) — NO time-based dbt schedules:
 ```
 Bronze materializes
-  → bronze_to_shared_staging_sensor  → dbt_shared_staging_job   (ERA5 partagé: 3 modèles)
-  → shared_staging_to_domain_sensor  → dbt_daily_transform_job  (piezo+hydro+dims, UN seul job)
-  → transform_to_index_sensor        → station_index_refresh    (fct_monthly_index + station_current_index)
+  → bronze_to_transform_sensor    → dbt_transform_job       (ALL dbt models, incremental; dbt ref() DAG orders them)
+      ├ transform_to_index_sensor   → station_index_refresh   (fct_monthly_index + station_current_index)
+      └ transform_to_quality_sensor → dbt_quality_job         (source freshness + dbt tests, non-blocking alerting)
 ```
+The two post-transform sensors fire in parallel on `dbt_transform_job` SUCCESS. A failing
+dbt test fails the quality run (visible/alertable) but does NOT block the data refresh.
+`dbt_transform_job` uses `.without_checks()` (tests run in the quality job, not inline).
 
 **Other schedules**: Monthly (1st, 2h00) reference data (TME). Weekly — dbt docs (Sun 5h), IPS baseline `station_reference_stats` (Sun 7h), completeness check (Mon 6h).
 

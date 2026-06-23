@@ -1,21 +1,21 @@
 """
 Dagster Sensors - Event-Driven Pipeline Orchestration
 
-Architecture:
-  Bronze materializes → sensor detects → launches sequential chain:
-    1. Shared staging (ERA5) — MUST complete first
-    2. Daily transform — full Silver→Gold for both domains + shared dimensions,
-       in ONE dbt job (dbt resolves intra-job ordering via the ref() DAG)
-    3. Current index — compute per-station IPS/SSFI after daily transform
+Chain:
+  Bronze materializes
+    → bronze_to_transform_sensor    → dbt_transform_job (ALL models, incremental)
+    → transform_to_index_sensor     → station_index_refresh (IPS/SSFI)
+    → transform_to_quality_sensor    → dbt_quality_job (freshness + tests)
 
-Each step only starts after its prerequisite completes successfully.
+The two post-transform sensors fire in parallel on dbt_transform_job SUCCESS:
+the index refresh (data) and the quality checks (non-blocking — a failing test
+surfaces as a failed run, it does NOT block the data refresh).
 
-History: a previous 3-step design fanned out to parallel piezo+hydro jobs and
-rejoined via a cursor-tracking RunStatusSensor. RunStatusSensorContext has no
-cursor, so the rejoin (step 3, dimensions) crashed on every tick and silently
-stopped refreshing monthly/yearly aggregates, station dimensions and dim_date.
-Since runs are serialized globally (max_concurrent_runs=1) the fan-out gave no
-speedup anyway, so steps 2+3 were collapsed into a single robust job.
+History: an earlier design split the transform into shared_staging → daily_transform
+with a cursor-tracking RunStatusSensor rejoin. RunStatusSensorContext has no cursor,
+so the rejoin crashed every tick and silently stopped refreshing aggregates/dimensions.
+Runs are serialized globally (max_concurrent_runs=1), so the split gave no speedup —
+it is now a single dbt_transform_job and the chain is robust.
 """
 
 import logging
@@ -34,8 +34,8 @@ from dagster import (
 )
 
 from .jobs import (
-    dbt_daily_transform_job,
-    dbt_shared_staging_job,
+    dbt_quality_job,
+    dbt_transform_job,
     station_current_index_job,
 )
 from .utils import env_true
@@ -51,7 +51,7 @@ DEFAULT_SENSOR_STATUS = (
 
 
 # ==============================================================================
-# STEP 1: BRONZE → SHARED STAGING
+# STEP 1: BRONZE → DBT TRANSFORM (all models)
 # ==============================================================================
 
 @multi_asset_sensor(
@@ -59,24 +59,19 @@ DEFAULT_SENSOR_STATUS = (
         AssetKey("piezometry_chroniques_daily_raw"),
         AssetKey("hydrometry_obs_daily_raw"),
     ],
-    job=dbt_shared_staging_job,
+    job=dbt_transform_job,
     minimum_interval_seconds=300,  # 5 min cooldown
     default_status=DEFAULT_SENSOR_STATUS,
-    description="Step 1/3: Bronze materializes → launch shared ERA5 staging",
+    description="Step 1/2: Bronze materializes → launch full dbt transform (all models)",
 )
-def bronze_to_shared_staging_sensor(context: MultiAssetSensorEvaluationContext):
-    """
-    Watches Bronze chroniques and triggers shared staging (ERA5).
-    This is the entry point of the event-driven chain.
-    """
+def bronze_to_transform_sensor(context: MultiAssetSensorEvaluationContext):
+    """Entry point: watches Bronze daily chroniques, launches the full dbt transform."""
     asset_events = context.latest_materialization_records_by_key()
 
     materialized_assets = []
-    max_storage_id = 0
     for asset_key, record in asset_events.items():
         if record is not None:
             materialized_assets.append(asset_key.to_user_string())
-            max_storage_id = max(max_storage_id, record.storage_id)
 
     # Always advance all cursors to prevent trailing_unconsumed_events overflow.
     # Must be called whether we yield a RunRequest or skip.
@@ -85,76 +80,34 @@ def bronze_to_shared_staging_sensor(context: MultiAssetSensorEvaluationContext):
     if not materialized_assets:
         return SkipReason("No new Bronze materializations detected")
 
-    # Use date-based run_key to deduplicate: piezo and hydro materialize at
-    # different times but should only trigger ONE shared staging per day.
-    run_key = f"shared_staging_{date.today().isoformat()}"
-
+    # Date-based run_key: piezo and hydro materialize at different times but should
+    # only trigger ONE transform per day.
     logger.info(
-        f"Step 1/3: Bronze materialized ({', '.join(materialized_assets)}). "
-        f"Launching shared staging..."
+        f"Step 1/2: Bronze materialized ({', '.join(materialized_assets)}). "
+        f"Launching dbt transform..."
     )
-
     yield RunRequest(
-        run_key=run_key,
+        run_key=f"dbt_transform_{date.today().isoformat()}",
         tags={
             "trigger": "sensor",
-            "sensor_name": "bronze_to_shared_staging_sensor",
+            "sensor_name": "bronze_to_transform_sensor",
             "triggered_by_assets": ",".join(materialized_assets),
-            "pipeline_chain": "step_1_shared_staging",
-        }
+            "pipeline_chain": "step_1_transform",
+        },
     )
 
 
 # ==============================================================================
-# STEP 2: SHARED STAGING DONE → DAILY TRANSFORM (both domains + shared dims)
+# STEP 2a: TRANSFORM DONE → CURRENT STANDARDIZED INDEX (IPS/SSFI)
 # ==============================================================================
 
 @run_status_sensor(
     run_status=DagsterRunStatus.SUCCESS,
-    monitored_jobs=[dbt_shared_staging_job],
-    request_jobs=[dbt_daily_transform_job],
-    default_status=DEFAULT_SENSOR_STATUS,
-    minimum_interval_seconds=30,
-    description="Step 2/2: Shared staging done → launch full daily transform (both domains + dimensions)",
-)
-def shared_staging_to_domain_sensor(context: RunStatusSensorContext):
-    """
-    Fires AFTER dbt_shared_staging_job succeeds.
-
-    Launches the single daily transform job, which builds the full Silver→Gold
-    pipeline for both domains plus shared dimensions in one shot. dbt resolves
-    intra-job ordering via the ref() DAG, so there is no fragile cross-job
-    coordination (and no cursor — RunStatusSensorContext does not support one).
-    """
-    staging_run_id = context.dagster_run.run_id
-    logger.info(
-        f"Step 2/2: Shared staging completed (run {staging_run_id}). "
-        f"Launching daily transform (both domains + dimensions)..."
-    )
-
-    yield RunRequest(
-        run_key=f"daily_transform_{staging_run_id}",
-        job_name=dbt_daily_transform_job.name,
-        tags={
-            "trigger": "sensor",
-            "sensor_name": "shared_staging_to_domain_sensor",
-            "parent_run_id": staging_run_id,
-            "pipeline_chain": "step_2_daily_transform",
-        }
-    )
-
-
-# ==============================================================================
-# STEP 3: DAILY TRANSFORM DONE → CURRENT STANDARDIZED INDEX (IPS/SSFI)
-# ==============================================================================
-
-@run_status_sensor(
-    run_status=DagsterRunStatus.SUCCESS,
-    monitored_jobs=[dbt_daily_transform_job],
+    monitored_jobs=[dbt_transform_job],
     request_jobs=[station_current_index_job],
     default_status=DEFAULT_SENSOR_STATUS,
     minimum_interval_seconds=30,
-    description="Step 3/3: daily transform done → compute current standardized index (IPS/SSFI)",
+    description="Step 2/2: transform done → compute current standardized index (IPS/SSFI)",
 )
 def transform_to_index_sensor(context: RunStatusSensorContext):
     yield RunRequest(
@@ -162,7 +115,30 @@ def transform_to_index_sensor(context: RunStatusSensorContext):
         tags={
             "trigger": "sensor",
             "sensor_name": "transform_to_index_sensor",
-            "pipeline_chain": "step_3_index",
+            "pipeline_chain": "step_2_index",
+        },
+    )
+
+
+# ==============================================================================
+# STEP 2b: TRANSFORM DONE → DATA QUALITY (freshness + dbt tests), non-blocking
+# ==============================================================================
+
+@run_status_sensor(
+    run_status=DagsterRunStatus.SUCCESS,
+    monitored_jobs=[dbt_transform_job],
+    request_jobs=[dbt_quality_job],
+    default_status=DEFAULT_SENSOR_STATUS,
+    minimum_interval_seconds=30,
+    description="Step 2/2: transform done → run source freshness + dbt tests (non-blocking alerting)",
+)
+def transform_to_quality_sensor(context: RunStatusSensorContext):
+    yield RunRequest(
+        run_key=f"quality_{context.dagster_run.run_id}",
+        tags={
+            "trigger": "sensor",
+            "sensor_name": "transform_to_quality_sensor",
+            "pipeline_chain": "step_2_quality",
         },
     )
 
@@ -172,7 +148,7 @@ def transform_to_index_sensor(context: RunStatusSensorContext):
 # ==============================================================================
 
 all_sensors = [
-    bronze_to_shared_staging_sensor,      # Step 1: Bronze → shared staging
-    shared_staging_to_domain_sensor,      # Step 2: staging → daily transform
-    transform_to_index_sensor,            # Step 3: daily transform → current index
+    bronze_to_transform_sensor,    # Step 1: Bronze → dbt transform (all models)
+    transform_to_index_sensor,     # Step 2a: transform → current index
+    transform_to_quality_sensor,   # Step 2b: transform → quality (tests + freshness)
 ]

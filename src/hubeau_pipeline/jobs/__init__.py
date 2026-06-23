@@ -9,21 +9,11 @@ Domains:
 
 # Jobs dbt
 from .dbt_jobs import (
-    # Daily transform (single job: both domains + shared dims, sensor-driven)
-    dbt_daily_transform_job,
-    dbt_docs_job,
-    dbt_freshness_job,
-    dbt_quality_job,
-    # Shared staging (run FIRST)
-    dbt_shared_staging_job,
-    # Full pipeline (bootstrap/full refresh)
-    dbt_silver_gold_pipeline_job,
-    # Quality & docs
-    dbt_test_job,
-    # Indices nocturnes (sensor) : fct_monthly_index + station_current_index
-    station_current_index_job,
-    # Indice baseline (schedule hebdo) : station_reference_stats
-    station_reference_stats_job,
+    dbt_transform_job,            # ALL models, incremental (nightly via sensor + manual full refresh)
+    dbt_quality_job,              # source freshness + dbt tests (nightly via sensor)
+    dbt_docs_job,                 # docs generation (weekly schedule)
+    station_current_index_job,    # IPS/SSFI nightly: fct_monthly_index + station_current_index (sensor)
+    station_reference_stats_job,  # IPS baseline weekly (schedule)
 )
 
 # Jobs ERA5
@@ -51,75 +41,47 @@ from .hubeau_jobs import (
 from .reference_data_jobs import reference_data_bronze_job
 
 all_jobs = [
-    # Jobs STATIONS (no partitions)
+    # --- Ingestion Bronze (manuelle / backfill) ---
     piezometry_stations_job,
     hydrometry_stations_job,
-    # Jobs CHRONIQUES (partitioned)
-    piezometry_chroniques_job,
-    hydrometry_chroniques_job,
-    # Jobs DAILY (incremental)
+    piezometry_chroniques_job,      # partitioned
+    hydrometry_chroniques_job,      # partitioned
+    # --- Ingestion Bronze (daily, schedulée) ---
     daily_piezometry_bronze_job,
     daily_hydrometry_bronze_job,
-    # Jobs ERA5
-    era5_meteo_job,
-    era5_weekly_job,
-    # Jobs dbt - Full pipeline (bootstrap/full refresh)
-    dbt_silver_gold_pipeline_job,
-    # Jobs dbt - Shared staging (run FIRST)
-    dbt_shared_staging_job,
-    # Jobs dbt - Daily transform (single job, sensor-driven)
-    dbt_daily_transform_job,
-    # Jobs indices - nocturne (monthly + current) + baseline hebdo
-    station_current_index_job,
-    station_reference_stats_job,
-    # Jobs dbt - Quality & docs
-    dbt_test_job,
-    dbt_freshness_job,
-    dbt_quality_job,
-    dbt_docs_job,
-    # Données de référence (BDLISA / TME)
+    era5_meteo_job,                 # historique (manuel/bootstrap)
+    era5_weekly_job,                # quotidien (schedule)
+    # --- Transformation dbt ---
+    dbt_transform_job,              # all models, nightly via sensor + manuel
+    dbt_quality_job,                # tests + freshness, nightly via sensor
+    dbt_docs_job,                   # docs, weekly schedule
+    # --- Indices IPS/SSFI ---
+    station_current_index_job,      # nightly via sensor
+    station_reference_stats_job,    # baseline weekly via schedule
+    # --- Référence (BDLISA / TME) ---
     reference_data_bronze_job,
-    # Full Bootstrap (complete population)
+    # --- Bootstrap complet (one-shot) ---
     full_bootstrap_job,
-    # Qualité - détection de trous d'ingestion
+    # --- Qualité : détection de trous d'ingestion (weekly schedule) ---
     data_completeness_job,
 ]
 
 __all__ = [
-    # Jobs STATIONS (no partitions)
     "piezometry_stations_job",
     "hydrometry_stations_job",
-    # Jobs CHRONIQUES (partitioned)
     "piezometry_chroniques_job",
     "hydrometry_chroniques_job",
-    # Jobs DAILY (incremental)
     "daily_piezometry_bronze_job",
     "daily_hydrometry_bronze_job",
-    # Jobs ERA5
     "era5_meteo_job",
     "era5_weekly_job",
-    # Jobs dbt - Full pipeline (bootstrap/full refresh)
-    "dbt_silver_gold_pipeline_job",
-    # Jobs dbt - Shared staging (run FIRST)
-    "dbt_shared_staging_job",
-    # Jobs dbt - Daily transform (single job, sensor-driven)
-    "dbt_daily_transform_job",
-    # Jobs indices
-    "station_current_index_job",
-    "station_reference_stats_job",
-    # Jobs dbt - Quality & docs
-    "dbt_test_job",
-    "dbt_freshness_job",
+    "dbt_transform_job",
     "dbt_quality_job",
     "dbt_docs_job",
-    # Données de référence (BDLISA / TME)
+    "station_current_index_job",
+    "station_reference_stats_job",
     "reference_data_bronze_job",
-    # Full Bootstrap (complete population)
     "full_bootstrap_job",
-    # Qualité - détection de trous d'ingestion
     "data_completeness_job",
-    # Collections
     "all_jobs",
 ]
-
-
