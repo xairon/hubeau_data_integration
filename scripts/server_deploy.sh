@@ -44,7 +44,7 @@ echo "ATTENTION: Ceci va supprimer toutes les données existantes!"
 read -p "Continuer? (y/N) " -n 1 -r
 echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    docker volume rm postgres_data dagster_pg_data cloudbeaver_data 2>/dev/null || echo "Volumes anciens déjà supprimés ou inexistants"
+    docker volume rm postgres_data dagster_pg_data 2>/dev/null || echo "Volumes anciens déjà supprimés ou inexistants"
     echo "✅ Anciens volumes supprimés"
 else
     echo "❌ Annulé par l'utilisateur"

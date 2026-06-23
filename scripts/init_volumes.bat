@@ -20,10 +20,6 @@ set "volume_name=brgm_dagster_pg_data"
 set "description=Métadonnées Dagster"
 call :create_volume
 
-set "volume_name=brgm_cloudbeaver_data"
-set "description=Configuration CloudBeaver"
-call :create_volume
-
 echo.
 echo ✅ Tous les volumes sont prêts!
 echo.
@@ -34,7 +30,7 @@ echo 🚀 Vous pouvez maintenant lancer: docker compose up -d
 echo.
 echo ⚠️  IMPORTANT - Protection des données:
 echo    - Les volumes NE SERONT PAS supprimés par 'docker compose down -v'
-echo    - Pour supprimer les volumes: docker volume rm brgm_postgres_data brgm_dagster_pg_data brgm_cloudbeaver_data
+echo    - Pour supprimer les volumes: docker volume rm brgm_postgres_data brgm_dagster_pg_data
 echo    - Backup recommandé: docker exec brgm-postgres pg_dump -U postgres postgres ^> backup.sql
 echo.
 goto :eof

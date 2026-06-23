@@ -56,7 +56,9 @@ mypy src/                        # Type check (lenient: ignore_missing_imports=t
 ```
 
 ### Testing
-There are **no Python unit tests**. Data quality is managed entirely through dbt tests (not_null, unique, relationships, accepted_range) defined in `schema.yml` files. Run via `docker exec brgm-dlt-worker dbt test`.
+Python unit tests are **minimal**: a few pure-logic tests under `tests/` (`test_indices.py`, `test_monthly_index.py`) covering the IPS/SSFI classification. `tests/test_indices.py::GOLDEN_Z_TO_CLASS` is a **cross-repo sync contract** — the same golden table exists in the junon repo (`time-serie-explo/tests/test_drought_classification_contract.py`) so the duplicated IPS math can't drift silently. Run (cov plugin not always installed): `PYTHONPATH=src python3 -m pytest tests/ -o addopts=""`.
+
+Data quality is otherwise managed through dbt tests (not_null, unique, relationships, accepted_values, accepted_range) defined in `schema.yml` files. Run via `docker exec brgm-dlt-worker dbt test`. Failing rows are persisted to the `dbt_audit` schema (`+store_failures`).
 
 pytest config exists in `pyproject.toml` (testpaths=`tests/`) but no test files are present.
 
@@ -152,7 +154,7 @@ Bronze materializes
   - `profiles.yml` - PostgreSQL connection (env var templated)
   - `packages.yml` - depends on `dbt_utils`
 - `configs/` - YAML configs for API endpoints (`hubeau/`), ERA5 parameters (`era5/`), BDLISA (`bdlisa/`)
-- `docker/` - Dockerfiles, init SQL, monitoring (Grafana dashboards, Prometheus), Superset config
+- `docker/` - Dockerfiles, init SQL (`postgres/init.sql`), Superset config, Adminer, sandbox image variants
 - `dagster_home/` - Dagster metadata, `workspace.yaml` (GRPC connection to worker)
 
 ### CI/CD
@@ -195,11 +197,10 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 | Dagster UI | http://localhost:49500 | Pipeline orchestration |
 | PostgreSQL | localhost:49502 | Direct DB access |
 | Adminer | http://localhost:49501 | Lightweight DB admin |
-| CloudBeaver | http://localhost:49503 | Advanced SQL client |
 | Superset | http://localhost:49504 | BI dashboards |
 | dbt docs | http://localhost:49505 | Manual: `docker exec brgm-dlt-worker dbt docs serve --port 8080` |
-| Grafana | http://localhost:49507 | Monitoring (admin/admin) |
-| Prometheus | http://localhost:49508 | Metrics |
+
+> The monitoring stack (Grafana/Prometheus/cAdvisor/postgres_exporter) and CloudBeaver were removed to slim the stack. Remaining services: postgres, dagster (webserver/daemon/postgres), dlt_worker, adminer, redis, superset, postgres_tuning.
 
 ## Common Issues
 
@@ -208,7 +209,7 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 - **ERA5 CDS timeouts**: Retry (built-in backoff). Check [CDS Status](https://cds.climate.copernicus.eu/) if persistent
 - **Bronze duplicates**: Expected from 7-day overlap window. Silver layer deduplicates automatically. Note: the `*_daily_raw` assets and the year-partitioned `*_chroniques_raw`/`*_obs_elab_raw` assets write the SAME Bronze table — daily cleans 7 days, partition cleans a full year; reloading the current-year partition re-fetches from the API (no loss), and Silver dedups any overlap
 - **Worker won't start**: Check `docker compose logs dlt_worker`. Common: port conflict, stale image (`docker compose build --no-cache dlt_worker`)
-- **Phantom hypertables (table is hypertable but shouldn't be)**: The event trigger `timescaledb_ddl_command_end` has been **DISABLED** (2026-03-06) to prevent dbt's `ALTER TABLE RENAME` from re-applying hypertable metadata. This is the permanent fix. If somehow re-enabled: `ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;`. Manual cleanup: `DROP TABLE schema.table CASCADE` then `dbt run --select model_name` (NOT `--full-refresh`). Clean orphaned policies: `SELECT delete_job(id) FROM _timescaledb_config.bgw_job WHERE ...`
+- **Phantom hypertables (table is hypertable but shouldn't be)**: The event trigger `timescaledb_ddl_command_end` is **DISABLED** to prevent dbt's `ALTER TABLE RENAME` from re-applying hypertable metadata. This is the permanent fix, now **versioned in `docker/postgres/init.sql`** so every from-scratch deploy reproduces it (idempotent DO block; verified on a fresh `timescaledb-ha` container). If somehow re-enabled: `ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;`. Manual cleanup: `DROP TABLE schema.table CASCADE` then `dbt run --select model_name` (NOT `--full-refresh`). Clean orphaned policies: `SELECT delete_job(id) FROM _timescaledb_config.bgw_job WHERE ...`
 - **dbt daily mart runs 1h+ instead of minutes**: Check if `unique_key` is set on an `append` model — dbt 1.7.0 ignores `append` strategy when `unique_key` is present and generates `DELETE...USING` which seq-scans all hypertable chunks. Fix: remove `unique_key` from the model config
 - **Bronze daily cleanup fails with `text >= date`**: DLT stores all Bronze columns as `text`. The `_clean_recent_data()` function must cast date columns explicitly (`{}::date >= CURRENT_DATE`). If you see `operator does not exist: text >= date`, check that the `::date` cast is present
 - **Dagster sensor crash loop (trailing_unconsumed_events)**: `multi_asset_sensor` must call `context.advance_all_cursors()` on EVERY evaluation, not just when yielding a RunRequest. Without this, events accumulate to the 25-event limit and crash the daemon

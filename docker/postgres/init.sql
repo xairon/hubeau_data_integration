@@ -10,6 +10,26 @@ CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 -- (évite "tuple decompression limit exceeded" sur stg_piezo_chroniques et autres modèles incrémentaux)
 ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0;
 
+-- ============================================================================
+-- FIX PERMANENT — phantom hypertables (versionné pour déploiement from-scratch)
+-- ----------------------------------------------------------------------------
+-- Le trigger `timescaledb_ddl_command_end` (créé par l'extension timescaledb)
+-- intercepte les `ALTER TABLE ... RENAME` que dbt génère pour CHAQUE
+-- matérialisation `table` (pattern rename/swap) et ré-applique les métadonnées
+-- hypertable -> phantom hypertables sur staging/intermediate à chaque `dbt build`.
+-- On le désactive dès l'init. Les conversions explicites (post_hook
+-- convert_to_hypertable des daily marts) restent fonctionnelles.
+-- Idempotent. Historiquement appliqué à la main (2026-03-06) ; désormais
+-- garanti sur tout déploiement neuf. Voir CLAUDE.md "Phantom hypertables".
+-- ============================================================================
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'timescaledb_ddl_command_end') THEN
+        ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;
+        RAISE NOTICE 'Disabled event trigger timescaledb_ddl_command_end (phantom hypertable fix)';
+    END IF;
+END $$;
+
 -- Enable PostGIS (geospatial support)
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS postgis_topology;
