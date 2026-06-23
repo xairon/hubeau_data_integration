@@ -1,0 +1,112 @@
+version: 2
+
+# ==============================================================================
+# Tables d'indices IPS / SSFI (Gold)
+# ------------------------------------------------------------------------------
+# Ces tables sont PRODUITES par des assets Dagster/Python (ml/indices.py +
+# *_index_assets.py / *_persistence.py), PAS par dbt. Elles sont déclarées ici
+# comme `sources` uniquement pour bénéficier des tests qualité dbt (`dbt test`)
+# sur la sortie la plus exposée du pipeline (le "niveau" d'une station).
+# dbt ne les construit ni ne les rafraîchit.
+# Lancer : dbt test --select source:gold_ips
+# ==============================================================================
+
+sources:
+  - name: gold_ips
+    schema: gold
+    description: >
+      Indices standardisés par station : IPS (piézométrie) et SSFI (hydrométrie),
+      classification 7 classes + UNKNOWN. Produits hors dbt (Dagster/scipy).
+    tables:
+      - name: station_current_index
+        description: "Indice courant par station (IPS piézo / SSFI hydro). Rafraîchi chaque nuit."
+        loaded_at_field: computed_at
+        freshness:
+          # Alerte si l'asset nocturne d'indices ne tourne plus
+          warn_after: {count: 2, period: day}
+          error_after: {count: 4, period: day}
+        columns:
+          - name: code
+            description: "Code station (code_bss piézo / code_station hydro)"
+            tests:
+              - not_null
+          - name: type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['piezo', 'hydro']
+          - name: index_name
+            tests:
+              - accepted_values:
+                  values: ['IPS', 'SSFI']
+          - name: index_class
+            description: "Classe standardisée (7 classes + UNKNOWN)"
+            tests:
+              - accepted_values:
+                  values: ['UNKNOWN', 'EXTREMEMENT_BAS', 'TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT', 'EXTREMEMENT_HAUT']
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns:
+                - type
+                - code
+
+      - name: fct_monthly_index
+        description: "Indice mensuel standardisé (z-score -> classe) par station."
+        freshness: null
+        columns:
+          - name: code
+            tests:
+              - not_null
+          - name: type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['piezo', 'hydro']
+          - name: month
+            tests:
+              - not_null
+          - name: index_class
+            tests:
+              - accepted_values:
+                  values: ['UNKNOWN', 'EXTREMEMENT_BAS', 'TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT', 'EXTREMEMENT_HAUT']
+          - name: flag
+            description: "Qualité de la baseline mensuelle"
+            tests:
+              - accepted_values:
+                  values: ['normale', 'provisoire', 'adaptee']
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns:
+                - type
+                - code
+                - month
+
+      - name: station_reference_stats
+        description: "Statistiques de référence pluriannuelles (quantiles mensuels) par station."
+        freshness: null
+        columns:
+          - name: code
+            tests:
+              - not_null
+          - name: type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['piezo', 'hydro']
+          - name: month
+            description: "Mois calendaire (1-12)"
+            tests:
+              - not_null
+              - dbt_utils.accepted_range:
+                  min_value: 1
+                  max_value: 12
+          - name: flag
+            tests:
+              - accepted_values:
+                  values: ['normale', 'provisoire', 'adaptee']
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns:
+                - type
+                - code
+                - month

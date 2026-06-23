@@ -64,12 +64,10 @@ models:
                 severity: warn
     
     tests:
-      # Unicité station + date
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - code_bss
-            - date
-      
+      # Unicité (code_bss, date) garantie par la PK PostgreSQL (post_hook add_primary_key).
+      # Test dbt_utils.unique_combination_of_columns retiré : full-scan coûteux/OOM-prone
+      # sur l'hypertable (cf. même décision sur ERA5).
+
       # Nombre minimum de lignes (sanity check)
       - dbt_utils.expression_is_true:
           expression: "niveau_nappe_eau IS NOT NULL"
@@ -212,11 +210,8 @@ models:
                 where: "station_longitude IS NOT NULL"
 
     tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - code_station
-            - date
-            - grandeur_hydro_elab
+      # Unicité (code_station, date, grandeur_hydro_elab) garantie par la PK PostgreSQL
+      # (post_hook add_primary_key). Test dbt_utils retiré : full-scan coûteux sur l'hypertable.
 
       # Sanity check: données récentes non vides
       - dbt_utils.expression_is_true:
