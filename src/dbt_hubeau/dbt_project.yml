@@ -33,6 +33,12 @@ on-run-start:
 
 models:
   hubeau_pipeline:
+    # Pousse descriptions/colonnes des schema.yml en commentaires PostgreSQL
+    # -> visibles dans CloudBeaver / Adminer / Superset (pas seulement dbt docs).
+    # Appliqué au prochain `dbt run` de chaque modèle.
+    +persist_docs:
+      relation: true
+      columns: true
     staging:
       # Tables nettoyées (Silver Layer)
       +schema: silver
