@@ -1,11 +1,27 @@
 version: 2
 
 models:
+  - name: stg_piezo_chroniques_rejected
+    description: "Lignes rejetées par stg_piezo_chroniques (mesure/clé nulle, ou station absente de stg_piezo_stations). Trace pour audit et qualité."
+    columns:
+      - name: rejection_reason
+        description: "Code du motif de rejet"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['DATE_MESURE_NULL', 'CODE_BSS_NULL', 'AUCUNE_MESURE', 'STATION_INEXISTANTE', 'OTHER']
+      - name: _dlt_id
+        description: "Identifiant unique de la ligne (bronze) pour déduplication incrémentale"
+
   - name: stg_hydrometry_stations_rejected
     description: "Lignes rejetées par stg_hydrometry_stations (code_site absent des sites, ou code_station/coords nulles). Trace pour audit et qualité."
     columns:
       - name: rejection_reason
-        description: "Code du motif de rejet (CODE_SITE_NOT_IN_SITES, CODE_STATION_NULL, COORDS_NULL, OTHER)"
+        description: "Code du motif de rejet"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['CODE_STATION_NULL', 'CODE_SITE_NOT_IN_SITES', 'COORDS_NULL', 'OTHER']
       - name: _dlt_id
         description: "Identifiant unique de la ligne (bronze) pour déduplication incrémentale"
 
@@ -13,6 +29,10 @@ models:
     description: "Lignes rejetées par stg_hydrometry_obs_elab (date/code_site/grandeur/résultat nuls ou invalides, ou code_site absent des sites). Trace pour audit et qualité."
     columns:
       - name: rejection_reason
-        description: "Code du motif de rejet (CODE_SITE_NOT_IN_SITES, DATE_OBS_ELAB_NULL, CODE_SITE_NULL, GRANDEUR_HYDRO_NULL, RESULTAT_OBS_NULL, OTHER)"
+        description: "Code du motif de rejet"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['CODE_SITE_NULL', 'CODE_SITE_NOT_IN_SITES', 'DATE_OBS_ELAB_NULL', 'GRANDEUR_HYDRO_NULL', 'RESULTAT_OBS_NULL', 'OTHER']
       - name: _dlt_id
         description: "Identifiant unique de la ligne (bronze) pour déduplication incrémentale"
