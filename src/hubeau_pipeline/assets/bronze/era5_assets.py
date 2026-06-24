@@ -219,19 +219,24 @@ def process_era5_range_to_timeseries(
 
         client = cdsapi.Client(url=config['credentials']['cds_api_url'], key=cds_api_key)
         
-        # Build request - FIXED: proper enumeration of years and months
-        # Generate all years in range
-        years = list(range(start_date.year, end_date.year + 1))
-        
-        # Generate all months in range (for multi-year spans, we need all 12 months)
-        if start_date.year == end_date.year:
-            months = list(range(start_date.month, end_date.month + 1))
-        else:
-            # Multi-year: request all months (CDS will filter by actual data)
-            months = list(range(1, 13))
-        
-        days_list = list(range(1, 32))
-        
+        # Build request from the EXACT dates of the [start_date, end_date] window.
+        # IMPORTANT: ne PAS utiliser un day=[1..31] figé. Le CADS met en cache par
+        # signature de requête ; une requête identique chaque jour retombe sur un
+        # artefact en cache PÉRIMÉ et gèle l'ingestion (bug diagnostiqué 2026-06-24 :
+        # entrepôt bloqué au 2 juin alors que le CADS servait jusqu'au 19). En dérivant
+        # year/month/day de la fenêtre réelle, la signature change quand end_date
+        # (= now - lag) avance → nouvelle clé de cache → données fraîches.
+        # Pour le chargement historique (année pleine) cela redonne mois 1-12 / jours 1-31.
+        _window_dates = []
+        _d = start_date
+        while _d <= end_date:
+            _window_dates.append(_d)
+            _d += timedelta(days=1)
+        years = sorted({d.year for d in _window_dates})
+        months = sorted({d.month for d in _window_dates})
+        days_list = sorted({d.day for d in _window_dates})
+
+        _time_cfg = config['extraction']['temporal_config']['time']
         request_params = {
             'product_type': 'reanalysis',
             'data_format': 'netcdf',
@@ -239,7 +244,8 @@ def process_era5_range_to_timeseries(
             'year': [str(y) for y in years],
             'month': [f'{m:02d}' for m in months],
             'day': [f'{d:02d}' for d in days_list],
-            'time': config['extraction']['temporal_config']['time'],
+            # time en LISTE (format API correct ; le string "00:00" ciblait aussi un cache périmé)
+            'time': _time_cfg if isinstance(_time_cfg, list) else [_time_cfg],
             'area': config['resource']['area'],
         }
         
