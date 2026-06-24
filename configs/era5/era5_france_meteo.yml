@@ -31,8 +31,8 @@ extraction:
     time: "00:00"  # Uniquement 00:00 UTC (données veille 23:00 UTC)
     days: "all"    # Tous les jours du mois
 
-  # Résolution spatiale
-  grid_resolution: 0.25  # 0.25° (~25km)
+  # Résolution spatiale (métadonnée only — NON envoyé au CADS ; ERA5-Land servi en 0.1° natif)
+  grid_resolution: 0.1  # 0.1° (~9km) — ERA5-Land natif
 
   # ⚠️ CHUNKING: 2 ans par requête (limite API Copernicus)
   chunking:
