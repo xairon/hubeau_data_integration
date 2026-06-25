@@ -227,15 +227,6 @@ Table dimensionnelle enrichie :
 - Niveau d'alerte : `NORMAL`, `VIGILANCE`, `ALERTE`
 - Qualité de tendance : `FIABLE`, `INDICATIVE`, `FAIBLE`, `NON_CALCULEE`
 
-#### `stations_piezo_carte`
-
-**Granularité** : Station
-
-Mart "prêt carte" (une ligne par station, prêt à cartographier) :
-- Géométrie PostGIS
-- Libellés TME enrichis
-- Indicateurs d'alerte et tendance
-
 ### Marts (Hydrométrie)
 
 #### `hydro_daily_chroniques`
@@ -272,14 +263,6 @@ Table dimensionnelle enrichie :
 - Géométrie PostGIS
 - Statut station (`ACTIVE` / `FERMEE`)
 - Statistiques globales et indicateurs (grandeur principale)
-
-#### `stations_hydro_carte`
-
-**Granularité** : Station
-
-Mart "prêt carte" (une ligne par station, prêt à cartographier) :
-- Géométrie PostGIS
-- Indicateurs hydrométriques principaux
 
 ### Dimensions transverses
 

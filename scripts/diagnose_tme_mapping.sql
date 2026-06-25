@@ -1,4 +1,4 @@
--- Diagnostic jointure TME (libellés BDLISA) dans int_station_era5_mapping / stations_piezo_carte
+-- Diagnostic jointure TME (libellés BDLISA) dans int_station_era5_mapping
 -- Exécuter après un run dbt (ex. dbt_silver_gold_pipeline).
 -- Schéma gold pour intermediate/marts (dbt_project.yml).
 

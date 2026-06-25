@@ -90,7 +90,7 @@ Two custom images, communicating via GRPC (defined in `dagster_home/workspace.ya
 | Silver | `staging/` (7 models) | `silver` | table |
 | Rejects | `rejects/` (3 models) | `silver_rejects` | table |
 | Gold (intermediate) | `intermediate/` (6 models) | `gold` | table (some incremental) |
-| Gold (marts) | `marts/` (14 models) | `gold` | table |
+| Gold (marts) | `marts/` (10 models) | `gold` | table |
 
 Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_project.yml` model configs.
 

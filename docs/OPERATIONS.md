@@ -195,7 +195,7 @@ Puis `docker compose restart dlt_worker`. Ce réglage est normalement déjà dan
 
 ### Libellés TME NULL dans les tables Gold
 
-**Symptômes** : `libelle_eh`, `code_eh` NULL dans `stations_piezo_carte` ou `int_station_era5_mapping`
+**Symptômes** : `libelle_eh`, `code_eh` NULL dans `hubeau_daily_chroniques` ou `int_station_era5_mapping`
 **Cause** : Le mapping incrémental ne recalcule pas les lignes existantes
 **Solution** :
 ```bash

@@ -134,25 +134,6 @@ models:
           - accepted_values:
               values: ['NON_CALCULEE', 'FIABLE', 'INDICATIVE', 'FAIBLE']
 
-  - name: stations_piezo_carte
-    description: |
-      Mart "prêt carte" : une ligne par station avec géométrie (geom),
-      entité TME (code_eh, libelle_eh, …) et indicateurs (niveau_alerte, tendance_classification).
-      Évite les jointures côté consommateur pour les calques "stations piézo" avec libellés et alertes.
-    columns:
-      - name: code_bss
-        tests: [unique, not_null]
-      - name: geom
-        description: "Géométrie PostGIS (point station)"
-      - name: code_eh
-        description: "Code entité hydrogéologique TME"
-      - name: libelle_eh
-        description: "Libellé entité hydrogéologique"
-      - name: niveau_alerte
-        description: "NORMAL / VIGILANCE / ALERTE"
-      - name: tendance_classification
-        description: "HAUSSE / BAISSE / STABLE / INSUFFISANT"
-
   - name: hydro_daily_chroniques
     description: "Table finale hydrométrie combinant observations et météo ERA5"
     columns:
@@ -274,16 +255,6 @@ models:
         tests:
           - unique
           - not_null
-
-  - name: stations_hydro_carte
-    description: |
-      Mart "prêt carte" : une ligne par station hydrométrique avec géométrie (geom)
-      et indicateurs hydrométriques principaux. Évite les jointures côté consommateur.
-    columns:
-      - name: code_station
-        tests: [unique, not_null]
-      - name: geom
-        description: "Géométrie PostGIS (point station)"
 
   - name: dim_date
     description: "Dimension temps pour analyses (jour, mois, semaine, trimestre)"

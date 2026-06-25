@@ -32,7 +32,7 @@ Les données traversent trois couches de qualité croissante, chacune dans son s
 | Bronze | `bronze` | DLT | MERGE | Données brutes telles que reçues (colonnes `text`) |
 | Silver | `silver` | dbt `staging/` | table / incrémental | Données nettoyées et typées (7 modèles) |
 | Rejects | `silver_rejects` | dbt `rejects/` | table | Lignes filtrées avec motif de rejet (3 modèles) |
-| Gold | `gold` | dbt `intermediate/` + `marts/` | table / incrémental | Tables analytiques enrichies (6 + 12 modèles) |
+| Gold | `gold` | dbt `intermediate/` + `marts/` | table / incrémental | Tables analytiques enrichies (6 + 10 modèles) |
 
 Le routage d'un modèle vers son schéma est géré par la macro
 `macros/generate_schema_name.sql`.
@@ -66,7 +66,6 @@ sont incrémentaux (`delete+insert`, fenêtre de lookback de 7 jours).
     (hydro + météo) — **hypertables** TimescaleDB compressées.
   - Faits agrégés : `fct_monthly_*`, `fct_yearly_*` (tables simples, `delete+insert`).
   - Dimensions : `dim_date`, `dim_geography`, `dim_piezo_stations`, `dim_hydro_stations`.
-  - Cartographie : `stations_piezo_carte`, `stations_hydro_carte`.
 
 ### Indices standardisés (assets Dagster)
 
