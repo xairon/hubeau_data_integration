@@ -279,7 +279,7 @@ This project handles hydrological time series, geospatial data, and climate rean
 | `scientific-skills:statistical-analysis` | Trend analysis, seasonality, hypothesis testing | Analyze piezometric trends, validate seasonal patterns, statistical tests on data quality. |
 | `scientific-skills:statsmodels` | Regression, time series decomposition | Trend detection in water levels, seasonal decomposition of hydrometric data, autocorrelation analysis. |
 | `scientific-skills:scikit-learn` | Anomaly detection, clustering, classification | Detect anomalous measurements in chroniques, cluster stations by behavior, classify data quality. |
-| `scientific-skills:plotly` | Interactive charts and maps | Interactive station maps, time series exploration. Superset uses Plotly internally. |
+| `scientific-skills:plotly` | Interactive charts and maps | Interactive station maps, time series exploration. |
 | `scientific-skills:matplotlib` | Static publication-quality plots | Detailed custom plots when Plotly is overkill. |
 | `scientific-skills:seaborn` | Statistical visualization with pandas | Heatmaps of data coverage, distribution plots, correlation matrices between hydro variables. |
 | `scientific-skills:scientific-visualization` | Publication-ready multi-panel figures | Meta-skill for combining matplotlib/seaborn/plotly into polished figures. |
@@ -308,7 +308,7 @@ This project handles hydrological time series, geospatial data, and climate rean
 
 | Skill | Invoke when... | Why for this project |
 |-------|---------------|---------------------|
-| `frontend-design:frontend-design` | Building web interfaces | Custom dashboards beyond Superset, data quality monitoring UIs, admin panels. |
+| `frontend-design:frontend-design` | Building web interfaces | Custom dashboards, data quality monitoring UIs, admin panels. |
 
 ### Meta & Maintenance Skills
 
