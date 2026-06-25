@@ -136,9 +136,9 @@ models:
 
   - name: stations_piezo_carte
     description: |
-      Mart "prêt carte" pour Superset : une ligne par station avec géométrie (geom),
+      Mart "prêt carte" : une ligne par station avec géométrie (geom),
       entité TME (code_eh, libelle_eh, …) et indicateurs (niveau_alerte, tendance_classification).
-      Évite les jointures côté BI pour les calques "stations piézo" avec libellés et alertes.
+      Évite les jointures côté consommateur pour les calques "stations piézo" avec libellés et alertes.
     columns:
       - name: code_bss
         tests: [unique, not_null]
@@ -277,8 +277,8 @@ models:
 
   - name: stations_hydro_carte
     description: |
-      Mart "prêt carte" pour Superset : une ligne par station hydrométrique avec géométrie (geom)
-      et indicateurs hydrométriques principaux. Évite les jointures côté BI.
+      Mart "prêt carte" : une ligne par station hydrométrique avec géométrie (geom)
+      et indicateurs hydrométriques principaux. Évite les jointures côté consommateur.
     columns:
       - name: code_station
         tests: [unique, not_null]

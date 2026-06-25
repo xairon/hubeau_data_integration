@@ -27,15 +27,6 @@ Les extensions (`postgis`, `timescaledb`) sont activées par `docker/postgres/in
 
 En production, passer `DAGSTER_ENABLE_SCHEDULES` et `DAGSTER_ENABLE_SENSORS` à `true`.
 
-### Superset — BI
-
-| Variable | Description | Défaut | Obligatoire |
-|----------|-------------|--------|-------------|
-| `SUPERSET_SECRET_KEY` | Clé de chiffrement Flask | — | Oui |
-| `SUPERSET_ADMIN_PASSWORD` | Mot de passe admin | — | Oui |
-| `SUPERSET_ADMIN_USER` | Identifiant admin | `admin` | Non |
-| `SUPERSET_ADMIN_EMAIL` | Email admin | `admin@hubeau.com` | Non |
-
 ### ERA5 — Copernicus
 
 | Variable | Description | Défaut | Obligatoire |
@@ -98,8 +89,7 @@ dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapp
 ### Secrets CI/CD (GitLab)
 
 Définir dans **Settings → CI/CD → Variables** (Protected + Masked) :
-`PG_PASSWORD`, `DAGSTER_PG_PASSWORD`, `COPERNICUS_API_KEY`,
-`SUPERSET_SECRET_KEY`, `SUPERSET_ADMIN_PASSWORD`.
+`PG_PASSWORD`, `DAGSTER_PG_PASSWORD`, `COPERNICUS_API_KEY`.
 
 ### Base de données externe
 

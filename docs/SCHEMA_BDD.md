@@ -231,11 +231,10 @@ Table dimensionnelle enrichie :
 
 **Granularité** : Station
 
-Mart "prêt carte" pour Superset :
-- Une ligne par station avec géométrie PostGIS
+Mart "prêt carte" (une ligne par station, prêt à cartographier) :
+- Géométrie PostGIS
 - Libellés TME enrichis
 - Indicateurs d'alerte et tendance
-- **Optimisé pour les visualisations cartographiques**
 
 ### Marts (Hydrométrie)
 
@@ -278,10 +277,9 @@ Table dimensionnelle enrichie :
 
 **Granularité** : Station
 
-Mart "prêt carte" pour Superset :
-- Une ligne par station avec géométrie PostGIS
+Mart "prêt carte" (une ligne par station, prêt à cartographier) :
+- Géométrie PostGIS
 - Indicateurs hydrométriques principaux
-- **Optimisé pour les visualisations cartographiques**
 
 ### Dimensions transverses
 

@@ -6,7 +6,7 @@ resource:
   name: bdlisa_entites_raw
   # Option A : un seul URL (comportement classique)
   url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip
-  # Option B : plusieurs périmètres (Superset : filtrer par colonne perimeter)
+  # Option B : plusieurs périmètres (filtrables par colonne perimeter)
   # perimeters:
   #   - code: METRO
   #     url: https://reseau.eaufrance.fr/geotraitements/bdlisa/files/telechargement/BDLISA_V3/BDLISA_V3_METRO-gpkg.zip

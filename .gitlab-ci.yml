@@ -43,11 +43,6 @@ build_postgres:
   script:
     - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/docker/sandbox/postgres.Dockerfile" --destination "$CI_REGISTRY_IMAGE/hubeau-postgres-sandbox:sandbox"
 
-build_superset:
-  extends: .kaniko
-  script:
-    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/docker/sandbox/superset.Dockerfile" --destination "$CI_REGISTRY_IMAGE/hubeau-superset-sandbox:sandbox"
-
 pages:
   stage: deploy
   script:

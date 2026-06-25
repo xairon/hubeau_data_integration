@@ -1,10 +1,11 @@
 # Hub'Eau Data Pipeline
 
 Entrepôt de données hydrologiques françaises : ingestion automatique, transformation et
-visualisation. Collecte les niveaux piézométriques (nappes souterraines), les débits
+exposition. Collecte les niveaux piézométriques (nappes souterraines), les débits
 hydrométriques (rivières), les données climatiques ERA5 et les référentiels associés,
 selon une architecture Medallion (Bronze → Silver → Gold) sur PostgreSQL/TimescaleDB,
-orchestrée par Dagster.
+orchestrée par Dagster. Les tables Gold sont consommées directement en SQL par les
+applications aval (observatoire Junon).
 
 ## Stack technique
 
@@ -16,7 +17,6 @@ orchestrée par Dagster.
 | PostgreSQL | 16 | Base de données |
 | TimescaleDB | pg16 | Séries temporelles (hypertables, compression) |
 | PostGIS | 3.4 | Géospatial (jointures spatiales) |
-| Superset | 4.0 | Business Intelligence (dashboards) |
 
 ## Démarrage
 
@@ -53,7 +53,6 @@ docker compose ps
 | Dagster | http://localhost:49500 | Orchestration et supervision |
 | Adminer | http://localhost:49501 | Administration PostgreSQL |
 | PostgreSQL | localhost:49502 | Accès direct à la base |
-| Superset | http://localhost:49504 | Dashboards BI |
 | dbt docs | http://localhost:49505 | Documentation dbt (à lancer manuellement, voir ci-dessous) |
 
 ### Chargement initial des données
@@ -108,7 +107,6 @@ docker exec -it brgm-postgres psql -U postgres -d postgres
 | [Configuration](docs/CONFIGURATION.md) | Variables d'environnement, paramétrage, déploiement |
 | [Schéma BDD](docs/SCHEMA_BDD.md) | Structure des tables PostgreSQL (Bronze, Silver, Gold) |
 | [Opérations](docs/OPERATIONS.md) | Runbook : bootstrap, exploitation, incidents, sauvegarde |
-| [Superset](docs/SUPERSET.md) | Tables BI disponibles et cartographie |
 | [ERA5](docs/ERA5.md) | Ingestion des données climatiques |
 | [TimescaleDB](docs/TIMESCALEDB.md) | Hypertables, compression, types d'index |
 | [Déploiement sandbox](docs/deploy-sandbox.md) | Déploiement Portainer + GitOps |

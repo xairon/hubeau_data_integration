@@ -217,48 +217,6 @@ services:
       - ./docker/adminer/adminer.css:/var/www/html/adminer.css:ro
     mem_limit: 256M
 
-  # Redis - Cache for Superset
-  redis:
-    image: redis:7-alpine
-    container_name: brgm-redis
-    restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-    mem_limit: 256M
-
-  # Apache Superset - BI & Visualization
-  superset:
-    image: apache/superset:4.0.0
-    container_name: brgm-superset
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      SUPERSET_SECRET_KEY: "${SUPERSET_SECRET_KEY:-your-secret-key-change-in-production}"
-      # Connect to the main postgres container, separate DB 'superset'
-      SUPERSET_SQLALCHEMY_DATABASE_URI: "postgresql://postgres:${PG_PASSWORD}@postgres:5432/superset"
-      REDIS_HOST: "redis"
-      REDIS_PORT: "6379"
-      SUPERSET_CONFIG_PATH: "/app/superset_config.py"
-      # Admin credentials (used by docker-init.sh)
-      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
-      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
-      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@hubeau.com}
-    volumes:
-      - ./docker/superset/superset_config.py:/app/superset_config.py
-      - ./docker/superset/docker-init.sh:/app/docker-init.sh
-      - ./docker/superset/datasources.yaml:/app/datasources.yaml
-    ports:
-      - "49504:8088"
-    entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
-    mem_limit: 1G  # Superset idles at ~115 MB, 4G was excessive
-    restart: unless-stopped
 volumes:
   # ============================================================================
   # VOLUMES PERSISTANTS - PROTECTION MAXIMALE CONTRE SUPPRESSION ACCIDENTELLE

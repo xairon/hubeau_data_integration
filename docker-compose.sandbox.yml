@@ -176,42 +176,6 @@ services:
       - "49501:8080"
     mem_limit: 256M
 
-  # ---- Redis (cache Superset) ----------------------------------------------
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-    mem_limit: 256M
-
-  # ---- Superset (BI) -------------------------------------------------------
-  # Image custom : superset_config.py + docker-init.sh + datasources.yaml intégrés.
-  superset:
-    image: ${REGISTRY_PREFIX}/hubeau-superset-sandbox:${IMAGE_TAG:-sandbox}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      SUPERSET_SECRET_KEY: "${SUPERSET_SECRET_KEY:-change-me-in-portainer}"
-      SUPERSET_SQLALCHEMY_DATABASE_URI: "postgresql://postgres:${PG_PASSWORD}@postgres:5432/superset"
-      REDIS_HOST: "redis"
-      REDIS_PORT: "6379"
-      SUPERSET_CONFIG_PATH: "/app/superset_config.py"
-      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
-      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
-      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@hubeau.com}
-    ports:
-      - "49504:8088"
-    entrypoint: [ "/bin/bash", "-c", "cp /app/docker-init.sh /tmp/docker-init.sh && chmod +x /tmp/docker-init.sh && sed -i 's/\\r$//' /tmp/docker-init.sh && /bin/bash /tmp/docker-init.sh" ]
-    mem_limit: 1G
-    restart: unless-stopped
-
 # ----------------------------------------------------------------------------
 # Volumes NOMMÉS (non-externes) : Portainer les crée automatiquement, préfixés
 # par le nom du stack. Aucune reprise de données — bootstrap from scratch.

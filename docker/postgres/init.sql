@@ -94,10 +94,6 @@ CREATE SCHEMA IF NOT EXISTS gold;
 CREATE SCHEMA IF NOT EXISTS ops;
 CREATE SCHEMA IF NOT EXISTS ml;
 
--- Create Superset database (idempotent way)
-SELECT 'CREATE DATABASE superset'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'superset')\gexec
-
 -- Log enabled extensions
 DO $$
 BEGIN

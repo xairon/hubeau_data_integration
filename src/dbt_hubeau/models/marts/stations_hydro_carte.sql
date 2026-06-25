@@ -14,7 +14,7 @@
   )
 }}
 
--- Mart "prêt carte" pour Superset : une ligne par station hydrométrique avec géométrie + indicateurs.
+-- Mart "prêt carte" : une ligne par station hydrométrique avec géométrie + indicateurs.
 -- INCREMENTAL: recalcul des stations récentes uniquement.
 
 {% set lookback_days = var('streaming_lookback_days', 7) %}

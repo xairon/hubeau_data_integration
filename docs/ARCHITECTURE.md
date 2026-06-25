@@ -7,12 +7,12 @@ pour l'exploitation, voir [OPERATIONS.md](OPERATIONS.md).
 ## Vue d'ensemble
 
 ```
-Sources externes        Ingestion      Stockage            Transformation     Restitution
-─────────────────       ─────────      ────────            ──────────────     ───────────
-Hub'Eau (piézo, hydro)    DLT     →   PostgreSQL    →          dbt        →     Superset
-Copernicus CDS (ERA5)               + TimescaleDB
-BDLISA (TME)                        + PostGIS
-                                          ↑
+Sources externes        Ingestion      Stockage            Transformation     Consommation
+─────────────────       ─────────      ────────            ──────────────     ────────────
+Hub'Eau (piézo, hydro)    DLT     →   PostgreSQL    →          dbt        →   Applications aval
+Copernicus CDS (ERA5)               + TimescaleDB                              (SQL sur Gold,
+BDLISA (TME)                        + PostGIS                                   ex. observatoire
+                                          ↑                                     Junon)
                                   Dagster (orchestration)
 ```
 
@@ -20,7 +20,8 @@ BDLISA (TME)                        + PostGIS
 - **dbt** transforme Bronze → Silver → Gold (DAG de modèles SQL versionnés, tests qualité).
 - **Dagster** orchestre l'ensemble (ingestion planifiée, transformation événementielle).
 - **PostgreSQL** stocke tout ; TimescaleDB optimise les séries temporelles, PostGIS le spatial.
-- **Superset** sert les dashboards directement sur les tables Gold.
+- Les **tables Gold** sont consommées directement en SQL par les applications aval. Les
+  dépendances aval sont déclarées dans `models/exposures.yml`.
 
 ## Architecture Medallion
 
@@ -117,7 +118,7 @@ un test en échec produit un run en échec mais ne bloque pas le rafraîchisseme
 
 ## Infrastructure Docker
 
-Neuf services orchestrés par `docker-compose.yml`.
+Sept services orchestrés par `docker-compose.yml`.
 
 | Service | Conteneur | Rôle |
 |---------|-----------|------|
@@ -127,8 +128,6 @@ Neuf services orchestrés par `docker-compose.yml`.
 | `dlt_worker` | `brgm-dlt-worker` | Code métier (assets, jobs, DLT, dbt) — code-server gRPC |
 | `dagster_webserver` | `brgm-dagster-webserver` | UI Dagster |
 | `dagster_daemon` | `brgm-dagster-daemon` | Daemon (schedules, sensors, file d'attente) |
-| `superset` | `brgm-superset` | Business Intelligence |
-| `redis` | `brgm-redis` | Cache Superset |
 | `adminer` | `brgm-adminer` | Administration PostgreSQL |
 
 ### Worker et orchestrateur
@@ -185,7 +184,7 @@ src/
     └── models/{staging,rejects,intermediate,marts}/   # Modèles SQL + schema.yml
 
 configs/                          # Configuration YAML des sources (hubeau, era5, bdlisa)
-docker/                           # Dockerfiles + init SQL + config Superset
+docker/                           # Dockerfiles + init SQL + config des services
 scripts/                          # init_volumes.sh, create_readonly_user.sh, server_deploy.sh, ...
 ```
 

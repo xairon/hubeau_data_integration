@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hub'Eau Data Pipeline: a production data warehouse for French hydrological data using a **Medallion Architecture** (Bronze → Silver → Gold). Ingests data from Hub'Eau APIs and ERA5 climate reanalysis, transforms via dbt, serves analytics via Apache Superset.
+Hub'Eau Data Pipeline: a production data warehouse for French hydrological data using a **Medallion Architecture** (Bronze → Silver → Gold). Ingests data from Hub'Eau APIs and ERA5 climate reanalysis, transforms via dbt, and exposes Gold tables to downstream applications (the Junon observatory) directly in SQL.
 
 **Stack**: Dagster (orchestration), DLT (ingestion), dbt 1.7.0 (transformation), PostgreSQL 16 + TimescaleDB + PostGIS, Docker Compose
 
@@ -157,7 +157,7 @@ dbt test fails the quality run (visible/alertable) but does NOT block the data r
   - `profiles.yml` - PostgreSQL connection (env var templated)
   - `packages.yml` - depends on `dbt_utils`
 - `configs/` - YAML configs for API endpoints (`hubeau/`), ERA5 parameters (`era5/`), BDLISA (`bdlisa/`)
-- `docker/` - Dockerfiles, init SQL (`postgres/init.sql`), Superset config, Adminer, sandbox image variants
+- `docker/` - Dockerfiles, init SQL (`postgres/init.sql`), Adminer, sandbox image variants
 - `dagster_home/` - Dagster metadata, `workspace.yaml` (GRPC connection to worker)
 
 ### CI/CD
@@ -200,10 +200,9 @@ Staging models use delete+insert with configurable lookback windows (default 7 d
 | Dagster UI | http://localhost:49500 | Pipeline orchestration |
 | PostgreSQL | localhost:49502 | Direct DB access |
 | Adminer | http://localhost:49501 | Lightweight DB admin |
-| Superset | http://localhost:49504 | BI dashboards |
 | dbt docs | http://localhost:49505 | Manual: `docker exec brgm-dlt-worker dbt docs serve --port 8080` |
 
-> The monitoring stack (Grafana/Prometheus/cAdvisor/postgres_exporter) and CloudBeaver were removed to slim the stack. Remaining services: postgres, dagster (webserver/daemon/postgres), dlt_worker, adminer, redis, superset, postgres_tuning.
+> The monitoring stack (Grafana/Prometheus/cAdvisor/postgres_exporter), CloudBeaver, and Superset+Redis were removed to slim the stack. Remaining services: postgres, postgres_tuning, dagster (webserver/daemon/postgres), dlt_worker, adminer.
 
 ## Common Issues
 

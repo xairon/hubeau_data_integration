@@ -14,8 +14,8 @@
   )
 }}
 
--- Mart "prêt carte" pour Superset : une ligne par station avec géométrie + entité BDLISA + indicateurs (alerte, tendance).
--- Évite les jointures côté BI : une seule table pour les calques "stations piézo" avec libellés et alertes.
+-- Mart "prêt carte" : une ligne par station avec géométrie + entité BDLISA + indicateurs (alerte, tendance).
+-- Évite les jointures côté consommateur : une seule table pour les calques "stations piézo" avec libellés et alertes.
 -- INCREMENTAL: recalcul des stations récentes uniquement.
 
 {% set lookback_days = var('streaming_lookback_days', 7) %}

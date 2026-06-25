@@ -44,14 +44,13 @@ Les images sont buildées par la CI, pas par Portainer.
    (= la variable `CI_REGISTRY_IMAGE`), ex. `registry.scm.univ-tours.fr/ringuet/hubeau_data_integration`.
    **Note ce chemin** : c'est le `REGISTRY_PREFIX` de l'étape 3.
 2. **Lancer le pipeline** : un push sur `main` déclenche le
-   stage `build` (`.gitlab-ci.yml`) qui build et pousse 4 images via kaniko :
+   stage `build` (`.gitlab-ci.yml`) qui build et pousse 3 images via kaniko :
    - `hubeau-worker:sandbox`
    - `hubeau-orchestrator:sandbox`
    - `hubeau-postgres-sandbox:sandbox` (TimescaleDB + `init.sql` intégré)
-   - `hubeau-superset-sandbox:sandbox` (configs Superset intégrées)
 
    Suivre dans GitLab → *Build → Pipelines*. Le job `build_worker` est le plus long (~2 GB, GDAL + dbt).
-3. **Vérifier** : GitLab → *Deploy → Container Registry* doit lister les 4 images taguées `sandbox`.
+3. **Vérifier** : GitLab → *Deploy → Container Registry* doit lister les 3 images taguées `sandbox`.
 
 ## 2. Déclarer le registry dans Portainer (pour pull le privé)
 
@@ -78,10 +77,10 @@ Portainer → *Stacks* → **Add stack** → méthode **Repository** :
 
 Dans **Environment variables** (Advanced mode → coller le `.env.sandbox`), au minimum :
 `REGISTRY_PREFIX` (le chemin de l'étape 1), `DAGSTER_PG_PASSWORD`, `PG_PASSWORD`,
-`POSTGIS_PASSWORD`, `COPERNICUS_API_KEY`, `SUPERSET_SECRET_KEY`, `SUPERSET_ADMIN_PASSWORD`.
+`POSTGIS_PASSWORD`, `COPERNICUS_API_KEY`.
 
 > Le compose ne contient **ni `build:` ni bind mount** → uniquement des `image:`
-> (4 custom depuis le registry + postgres/redis/adminer publics) et 2 volumes nommés.
+> (3 custom depuis le registry + postgres/adminer publics) et 2 volumes nommés.
 
 Cliquer **Deploy the stack**. Portainer pull les images (pas de build) → démarrage en 1-2 min.
 
@@ -149,7 +148,7 @@ Le code est **intégré dans l'image worker** (plus de hot reload par volume) :
 
 ## Points d'attention sandbox
 
-- **Serveur mutualisé** : les ports 495xx et la BI Superset sont exposés sur l'IP du
+- **Serveur mutualisé** : les ports 495xx sont exposés sur l'IP du
   sandbox. Ne pas y mettre de données sensibles ; changer les mots de passe par défaut.
 - **Persistance** : volumes Portainer non-externes → un *remove stack* avec l'option
   "remove volumes" efface la base. Acceptable pour un POC (re-bootstrap possible).

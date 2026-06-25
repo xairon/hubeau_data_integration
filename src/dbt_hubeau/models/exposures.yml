@@ -4,8 +4,7 @@ version: 2
 # Exposures : consommateurs aval des modèles dbt.
 # ------------------------------------------------------------------------------
 # Rendent visibles dans le DAG / dbt docs les dépendances « qui casse si je
-# touche ce modèle ». Listes établies par inspection réelle (2026-06-23) du
-# backend junon (grep /app) et de docker/superset/datasources.yaml.
+# touche ce modèle ». Liste établie par inspection réelle du backend junon (grep /app).
 # ==============================================================================
 
 exposures:
@@ -31,27 +30,3 @@ exposures:
       - source('gold_ips', 'station_current_index')
       - source('gold_ips', 'fct_monthly_index')
       - source('gold_ips', 'station_reference_stats')
-
-  - name: superset_dashboards
-    type: dashboard
-    maturity: medium
-    description: >
-      Tableaux de bord BI Superset. Datasets déclarés dans
-      docker/superset/datasources.yaml (cartes stations, chroniques quotidiennes,
-      agrégats mensuels/annuels, mapping ERA5, référentiel TME).
-    owner:
-      name: Observatoire Junon (BRGM)
-      email: ringuetnicolas2@gmail.com
-    depends_on:
-      - ref('stations_piezo_carte')
-      - ref('dim_piezo_stations')
-      - ref('hubeau_daily_chroniques')
-      - ref('fct_monthly_chroniques')
-      - ref('fct_yearly_stats')
-      - ref('int_daily_measurements')
-      - ref('int_era5_for_all_stations')
-      - ref('int_era5_grid_points')
-      - ref('int_station_era5_mapping')
-      - ref('stg_piezo_stations')
-      - ref('stg_tme_entites')
-      - source('staging', 'tme_entites_hydrogeo')
