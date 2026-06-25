@@ -1,24 +1,27 @@
 # Stockage ERA5
 
-**Architecture Unifiée : Direct-to-Timeseries**
+**Architecture : Direct-to-Timeseries**
 
-Contrairement aux versions précédentes, le pipeline actuel n'archive plus les fichiers NetCDF en base (`raw`) pour économiser du stockage (50GB+ économisés). Les données sont téléchargées, traitées en mémoire/disque temporaire, et insérées directement dans la table partitionnée `timeseries`.
+Le pipeline n'archive pas les fichiers NetCDF en base. Les données ERA5-Land (résolution
+native ~0.1°, servies par le Copernicus Climate Data Store) sont téléchargées, traitées en
+mémoire / disque temporaire, puis insérées directement dans la table partitionnée
+`bronze.era5_france_timeseries`.
 
-## Vue d'Ensemble
+## Vue d'ensemble
 
 ```
-ERA5 API (Copernicus CDS)
+Copernicus CDS — ERA5-Land (~0.1°)
     │
     ▼
-[Job Dagster: era5_historical_load / era5_weekly_update_job]
+[Job Dagster : era5_meteo_job (historique) / era5_weekly_job (incrémental)]
     │ 1. Téléchargement NetCDF (tmp)
-    │ 2. Extraction xarray (In-Memory)
-    │ 3. Insertion par Batch
+    │ 2. Extraction xarray (en mémoire)
+    │ 3. Insertion par lots
     ▼
-bronze.era5_france_timeseries (Time series)
+bronze.era5_france_timeseries (séries temporelles)
     │
     ▼
-dbt Silver/Gold Layers
+Couches dbt Silver / Gold
 ```
 
 ## Table : `bronze.era5_france_timeseries`
@@ -39,31 +42,30 @@ dbt Silver/Gold Layers
 | `source_file_id` | TEXT | Traceabilité (ex: "era5_hist_2024_2025") |
 
 ### Optimisations
-1.  **Index Spatio-Temporels** : `idx_era5_time`, `idx_era5_location`.
-2.  **Partitionnement (Logique)** : Ingestion par chunks de 2 ans.
-3.  **TimescaleDB** : Table convertie en **Hypertable** (Chunk `1 year`) + **Compression** activée.
+1. **Index spatio-temporels** : `idx_era5_time`, `idx_era5_location`.
+2. **TimescaleDB** : table convertie en **hypertable** (chunk d'1 an) + **compression** des chunks anciens.
 
 ---
 
 ## Pipelines d'Ingestion
 
-### 1. Job Historique (`era5_historical_load`)
-- **But** : Charger le backlog (1950 - Présent).
-- **Méthode** : Partitionné par blocs de 2 ans (ex: 2020-2021).
-- **Action** : Télécharge le NetCDF, extrait, insère, supprime le fichier.
-- **Idempotence** : Supprime la plage existante (DELETE overlap), puis réinsère.
+### 1. Job historique (`era5_meteo_job`)
+- **But** : charger le backlog (1950 → présent), partitionné par blocs d'années.
+- **Action** : télécharge le NetCDF, extrait, insère, supprime le fichier temporaire.
+- **Idempotence** : supprime la plage existante (DELETE de l'overlap), puis réinsère.
+- **Usage** : bootstrap et rattrapage manuel d'une période.
 
-### 2. Job Hebdomadaire (`era5_weekly_update_job`)
-- **But** : Mettre à jour les données récentes (J-5 à aujourd'hui).
-- **Logique "Smart Update"** :
+### 2. Job incrémental quotidien (`era5_weekly_job`)
+- **But** : mettre à jour les données récentes (jusqu'à `aujourd'hui − ERA5_AVAILABILITY_LAG_DAYS`).
+- **Logique « Smart Update »** :
     1. Vérifie la date max en base (`MAX(time)`).
-    2. Ne télécharge que le delta manquant (+ buffer sécurité).
-    3. Si "trou" trop grand (> 60 jours), demande un backfill manuel.
+    2. Dérive la fenêtre réelle manquante et ne télécharge que ce delta.
+    3. Déclenché chaque jour à 3h00 UTC (schedule).
 
 ---
 
-## Mapping Spatial
-Les stations piézométriques sont mappées aux points de grille ERA5 les plus proches via **PostGIS KNN** (opérateur `<->`).
+## Mapping spatial
+Les stations (piézométriques et hydrométriques) sont rattachées au point de grille ERA5 le plus proche via **PostGIS KNN** (opérateur `<->`), dans `int_station_era5_mapping` et `int_hydro_station_era5_mapping`.
 
 ```sql
 -- Algorithme de mapping (Nearest Neighbor)
@@ -97,6 +99,6 @@ ORDER BY source_file_id DESC;
 
 ### Relancer une période
 Depuis l'interface Dagster :
-1. Job `era5_historical_load`
-2. Sélectionner la partition (ex: `2024_2025`)
-3. Lancer le run (le job écrasera ou ignorera selon la logique d'idempotence, delete manuel conseillé si données corrompues).
+1. Job `era5_meteo_job`
+2. Sélectionner la partition correspondant à la période à recharger
+3. Lancer le run (le job supprime l'overlap puis réinsère ; un DELETE manuel est conseillé si les données sont corrompues).

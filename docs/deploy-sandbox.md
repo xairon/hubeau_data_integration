@@ -17,7 +17,7 @@ avec rechargement complet des données (pas de migration : `full_bootstrap_job`)
 > **GitLab Container Registry** ; le compose ne fait que les référencer par tag.
 >
 > Autres différences avec la prod : volumes nommés (pas d'`init_volumes.sh`), pas
-> de monitoring, pas de GPU, `postgres_tuning`/`cloudbeaver` retirés, `mem_limit` réduits.
+> de GPU, `postgres_tuning` retiré, `mem_limit` réduits.
 >
 > ⚠️ Dans Portainer : **ne PAS activer « relative path volumes »** (aucun bind mount).
 
@@ -43,7 +43,7 @@ Les images sont buildées par la CI, pas par Portainer.
    que **Container Registry** est activé. Le chemin s'affiche dans *Deploy → Container Registry*
    (= la variable `CI_REGISTRY_IMAGE`), ex. `registry.scm.univ-tours.fr/ringuet/hubeau_data_integration`.
    **Note ce chemin** : c'est le `REGISTRY_PREFIX` de l'étape 3.
-2. **Lancer le pipeline** : un push sur `feat/sandbox-deploy` (déjà fait) déclenche le
+2. **Lancer le pipeline** : un push sur `main` déclenche le
    stage `build` (`.gitlab-ci.yml`) qui build et pousse 4 images via kaniko :
    - `hubeau-worker:sandbox`
    - `hubeau-orchestrator:sandbox`
@@ -71,7 +71,7 @@ Portainer → *Stacks* → **Add stack** → méthode **Repository** :
 |---|---|
 | Name | `hubeau-sandbox` |
 | Repository URL | URL GitLab du repo |
-| Repository reference | `refs/heads/feat/sandbox-deploy` (ou `main` une fois mergé) |
+| Repository reference | `refs/heads/main` |
 | Compose path | `docker-compose.sandbox.yml` |
 | Authentication | token GitLab si repo privé |
 | Relative path volumes | **décoché** (aucun bind mount) |
@@ -108,7 +108,7 @@ deploy_sandbox:
   script:
     - curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "feat/sandbox-deploy"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 ```
 
 3. GitLab → *Settings → CI/CD → Variables* → `PORTAINER_WEBHOOK_URL` (masquée).

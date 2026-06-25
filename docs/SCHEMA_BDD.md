@@ -18,9 +18,8 @@ ERA5 API ──────┘
 | `silver` | dbt staging | Tables nettoyées (`stg_*`) |
 | `silver_rejects` | dbt rejects | Lignes filtrées (exceptions) avec `rejection_reason` — audit, qualité |
 | `gold` | dbt (intermediate + marts) + assets Dagster (`indices`) + seeds dbt | Tables transformées (`int_*` + marts), indices standardisés (réf. fixe) et référentiels |
-| `ml` | assets Dagster / scripts Pastas | Features modèles Pastas (`pastas_irf_features`, …) consommées par certains marts gold |
 
-## 🔥 Optimisations TimescaleDB
+## Optimisations TimescaleDB
 
 Les tables suivantes sont converties en **Hypertables** (PK incluant la colonne temps, puis `create_hypertable`) :
 - **Silver** : `stg_era5_timeseries`
@@ -28,13 +27,13 @@ Les tables suivantes sont converties en **Hypertables** (PK incluant la colonne 
 
 **Compression** (chunks anciens compressés) : `stg_era5_timeseries` (90 j), `hubeau_daily_chroniques` (365 j), `hydro_daily_chroniques` (365 j).
 
-## 🗺 PostGIS
+## PostGIS
 
 - **Géométries** : `make_point(longitude, latitude)` → `geometry(Point, 4326)` (WGS84). Index **GIST** sur toutes les colonnes `geometry` / `geom`.
 - **Distances** : utiliser `::geography` pour des mètres exacts : `ST_Distance(geom::geography, ...)`.
 - **KNN** : l'opérateur `<->` s'appuie sur l'index GIST (ex. plus proche point ERA5 dans `int_station_era5_mapping`).
 
-## 📇 Index (silver / gold)
+## Index (silver / gold)
 
 - **Temps** : index **BRIN** sur les colonnes de temps (`date_mesure`, `date`, `time`, `era5_date`, `mois`, `annee`) pour les requêtes par plage.
 - **Clés** : index B-tree sur `code_bss`, `code_site`, `code_station`, `(code_bss, date)`, etc.
@@ -148,7 +147,6 @@ Tables transformées et prêtes pour l'analyse.
 | `int_era5_for_all_stations` | ERA5 filtré pour les points de grille utilisés par toutes les stations (piézo + hydro) | `silver.stg_era5_timeseries` + mappings |
 | `int_hydro_daily_measurements` | Mesures quotidiennes agrégées (hydrométrie) | `silver.stg_hydrometry_obs_elab` |
 | `int_hydro_station_era5_mapping` | Mapping stations hydrométriques → grille ERA5 | `silver.stg_hydrometry_stations` |
-| `int_pastas_station_profile` | Profil Pastas par station (IRF, résidus, SGI) — voir section dédiée plus bas | `ml.pastas_irf_features` |
 
 **Détails** :
 - `int_daily_measurements` : Agrégation par `code_bss` et `date_mesure` (AVG)
@@ -413,15 +411,6 @@ aux cartes BRGM. **Source** : `src/dbt_hubeau/seeds/ref_stations_meteeau_bsn.csv
 pas de calcul). Colonnes : `code_bss`, `code_bss_nouveau`, … **Consommée par l'app** :
 `observatory_situation.py::_official_codes()`.
 
-#### `int_pastas_station_profile` (dbt intermediate)
-
-**Granularité** : 1 ligne par station piézométrique.
-**Objectif** : profil **Pastas** complet par station (base dashboards, embeddings, ML) :
-paramètres IRF, qualité du modèle, diagnostics et statistiques des résidus
-(global / 12 derniers mois / saisonnier), bilan hydrique moyen, signatures hydrogéo, SGI récent.
-**Source** : `ml.pastas_irf_features` (schéma `ml`, features produites par les modèles
-Pastas), filtré sur `fit_success = true`. Matérialisé en table.
-
 ---
 
 ## Index Automatiques
@@ -535,15 +524,3 @@ Les schémas sont créés automatiquement :
 - `silver` : Créé par dbt au premier run
 - `silver_rejects` : Créé par dbt au premier run
 - `gold` : Créé par dbt au premier run
-
----
-
-## Évolution Future
-
-### Priorité 1 : Référentiels géographiques
-- Ajouter des contours administratifs (régions, départements) si besoin cartographique avancé
-- Ajouter des zones hydrographiques (BD Carthage) si disponible
-
-### Priorité 2 : Optimisation performance
-- Vues matérialisées pour dashboards lourds
-- Agrégations pré-calculées à l'échelle régionale/départementale

@@ -19,20 +19,20 @@
 
 ### Bootstrap complet (base vide)
 
-Lancer le job `full_bootstrap_job` depuis Dagster UI :
-1. Ouvrir http://localhost:49500 → Jobs → `full_bootstrap_job`
+Lancer le job `full_bootstrap` depuis Dagster UI :
+1. Ouvrir http://localhost:49500 → Jobs → `full_bootstrap`
 2. Cliquer sur "Launchpad" → "Launch Run"
 
-Ce job charge dans l'ordre : référentiels (BDLISA + SANDRE) → stations → chroniques (par année) → ERA5 → dbt.
+Ce job charge dans l'ordre : référentiel TME (BDLISA) → stations → chroniques (par année) → ERA5 → dbt.
 
 **Attention** : le bootstrap complet prend plusieurs heures (toutes les données depuis 1967/2000).
 
 ### Chargement progressif (pour tester)
 
-1. `reference_data_bronze_job` — données TME/SANDRE
-2. `all_stations_job` — métadonnées stations
-3. Un job de chroniques pour une année récente
-4. `dbt_full_pipeline_job` — transformations Silver + Gold
+1. `reference_data_bronze` — référentiel TME
+2. `piezometry_stations_bronze` + `hydrometry_stations_bronze` — métadonnées stations
+3. Un job de chroniques pour une année récente (`piezometry_chroniques_bronze` / `hydrometry_chroniques_bronze`)
+4. `dbt_transform` — transformations Silver + Gold
 
 ### Variables de contrôle du bootstrap
 
@@ -100,7 +100,7 @@ docker exec -i brgm-postgres psql -U postgres -d postgres -c \
   "DROP SCHEMA IF EXISTS silver CASCADE; DROP SCHEMA IF EXISTS gold CASCADE; DROP SCHEMA IF EXISTS silver_rejects CASCADE;"
 
 # 3. Relancer le pipeline dbt complet
-# Via Dagster UI : Jobs → dbt_full_pipeline_job → Launch Run
+# Via Dagster UI : Jobs → dbt_transform → Launch Run
 ```
 
 ### Après modification du code Python
@@ -158,7 +158,7 @@ docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
 # Exemple : rejouer piézo 2020 et ERA5 1990-1991
 BOOTSTRAP_PARTITIONS=chroniques:piezometry:2020,era5:1990-1991
 BOOTSTRAP_FORCE_RERUN=true
-# Puis relancer full_bootstrap_job depuis Dagster UI
+# Puis relancer full_bootstrap depuis Dagster UI
 ```
 
 ---
@@ -181,7 +181,7 @@ BOOTSTRAP_FORCE_RERUN=true
 **Solution** :
 1. Relancer le job (retry intégré)
 2. Vérifier le [statut CDS](https://cds.climate.copernicus.eu/)
-3. Si un chunk de 2 ans échoue, relancer en plages plus petites
+3. Si une plage trop large échoue, relancer sur des périodes plus courtes
 
 ### TimescaleDB "tuple decompression limit exceeded"
 
