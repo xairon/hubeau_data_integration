@@ -71,10 +71,8 @@ services:
   dlt_worker:
     image: ${REGISTRY_PREFIX}/hubeau-worker:${IMAGE_TAG:-sandbox}
     depends_on:
-      postgres:
-        condition: service_healthy
-      dagster_postgres:
-        condition: service_healthy
+      - postgres
+      - dagster_postgres
     environment:
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
@@ -127,10 +125,8 @@ services:
   dagster_webserver:
     image: ${REGISTRY_PREFIX}/hubeau-orchestrator:${IMAGE_TAG:-sandbox}
     depends_on:
-      dagster_postgres:
-        condition: service_healthy
-      dlt_worker:
-        condition: service_healthy
+      - dagster_postgres
+      - dlt_worker
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
@@ -157,10 +153,8 @@ services:
   dagster_daemon:
     image: ${REGISTRY_PREFIX}/hubeau-orchestrator:${IMAGE_TAG:-sandbox}
     depends_on:
-      dagster_postgres:
-        condition: service_healthy
-      dlt_worker:
-        condition: service_healthy
+      - dagster_postgres
+      - dlt_worker
     environment:
       DAGSTER_HOME: /app/dagster_home
       DAGSTER_PG_HOST: ${DAGSTER_PG_HOST:-dagster_postgres}
