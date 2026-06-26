@@ -34,7 +34,10 @@ services:
       timeout: 3s
       retries: 20
       start_period: 30s
-    mem_limit: 1G
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     restart: unless-stopped
 
   # ---- Base Hub'Eau (PostGIS + TimescaleDB) --------------------------------
@@ -56,7 +59,10 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    mem_limit: 24G          # POC : plafond réduit vs 48G en prod
+    deploy:
+      resources:
+        limits:
+          memory: 24G        # POC : plafond réduit vs 48G en prod
     restart: unless-stopped
 
   # ---- Worker (exécution pipeline via GRPC) --------------------------------
@@ -110,7 +116,10 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
-    mem_limit: 16G          # POC : dbt only (plus d'entraînement ML)
+    deploy:
+      resources:
+        limits:
+          memory: 16G        # POC : dbt only (plus d'entraînement ML)
     restart: unless-stopped
 
   # ---- Dagster Web UI (NO USER CODE, GRPC → worker) ------------------------
@@ -138,7 +147,10 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
-    mem_limit: 2G
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     restart: unless-stopped
 
   # ---- Dagster Daemon (schedules + sensors + run queue) --------------------
@@ -163,7 +175,10 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 3
-    mem_limit: 2G
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     restart: unless-stopped
 
   # ---- Adminer (admin DB léger, zéro config) -------------------------------
@@ -174,7 +189,10 @@ services:
       - postgres
     ports:
       - "49501:8080"
-    mem_limit: 256M
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 # ----------------------------------------------------------------------------
 # Volumes NOMMÉS (non-externes) : Portainer les crée automatiquement, préfixés
