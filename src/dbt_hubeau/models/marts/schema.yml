@@ -45,7 +45,19 @@ models:
               config:
                 severity: warn
                 where: "total_precipitation IS NOT NULL"
-      
+
+      - name: potential_evaporation
+        description: >
+          Évaporation potentielle journalière ERA5 en mm — convention flux descendant :
+          valeurs NÉGATIVES (ETP positive = -potential_evaporation). NULL si ERA5 absent.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -100
+              max_value: 5
+              config:
+                severity: warn
+                where: "potential_evaporation IS NOT NULL"
+
       - name: station_latitude
         description: "Latitude de la station (NULL si mapping absent)"
         tests:
@@ -89,6 +101,31 @@ models:
         description: >
           Niveau moyen mensuel (m NGF). NULLABLE : stations à profondeur seule (sans niveau NGF),
           cf. niveau_nappe_eau de hubeau_daily_chroniques.
+      - name: temperature_moyenne
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -30
+              max_value: 40
+              config:
+                severity: warn
+                where: "temperature_moyenne IS NOT NULL"
+      - name: precipitation_totale
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1500
+              config:
+                severity: warn
+                where: "precipitation_totale IS NOT NULL"
+      - name: evaporation_moyenne
+        description: "AVG des PEV journalières (mm, convention négative ERA5)"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -100
+              max_value: 5
+              config:
+                severity: warn
+                where: "evaporation_moyenne IS NOT NULL"
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
@@ -108,6 +145,22 @@ models:
         tests:
           - accepted_values:
               values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+      - name: temperature_moyenne_annuelle
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -15
+              max_value: 30
+              config:
+                severity: warn
+                where: "temperature_moyenne_annuelle IS NOT NULL"
+      - name: precipitation_totale_annuelle
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 5000
+              config:
+                severity: warn
+                where: "precipitation_totale_annuelle IS NOT NULL"
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
@@ -172,6 +225,18 @@ models:
                 severity: warn
                 where: "total_precipitation IS NOT NULL"
 
+      - name: potential_evaporation
+        description: >
+          Évaporation potentielle journalière ERA5 en mm — convention flux descendant :
+          valeurs NÉGATIVES (ETP positive = -potential_evaporation). NULL si ERA5 absent.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -100
+              max_value: 5
+              config:
+                severity: warn
+                where: "potential_evaporation IS NOT NULL"
+
       - name: station_latitude
         description: "Latitude de la station (NULL si mapping absent)"
         tests:
@@ -218,6 +283,31 @@ models:
       - name: resultat_moyen
         tests:
           - not_null
+      - name: temperature_moyenne
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -30
+              max_value: 40
+              config:
+                severity: warn
+                where: "temperature_moyenne IS NOT NULL"
+      - name: precipitation_totale
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1500
+              config:
+                severity: warn
+                where: "precipitation_totale IS NOT NULL"
+      - name: evaporation_moyenne
+        description: "AVG des PEV journalières (mm, convention négative ERA5)"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -100
+              max_value: 5
+              config:
+                severity: warn
+                where: "evaporation_moyenne IS NOT NULL"
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
@@ -241,6 +331,22 @@ models:
         tests:
           - accepted_values:
               values: ['TRES_BAS', 'BAS', 'NORMAL', 'HAUT', 'TRES_HAUT']
+      - name: temperature_moyenne_annuelle
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -15
+              max_value: 30
+              config:
+                severity: warn
+                where: "temperature_moyenne_annuelle IS NOT NULL"
+      - name: precipitation_totale_annuelle
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 5000
+              config:
+                severity: warn
+                where: "precipitation_totale_annuelle IS NOT NULL"
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:

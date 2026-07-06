@@ -78,6 +78,14 @@ models:
               config:
                 severity: warn
                 where: "total_precipitation IS NOT NULL"
+      - name: potential_evaporation
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -100
+              max_value: 5
+              config:
+                severity: warn
+                where: "potential_evaporation IS NOT NULL"
     # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).
     # Test dbt_utils retiré: OOM sur ~40M lignes ERA5.
 
