@@ -378,8 +378,8 @@ def process_era5_range_to_timeseries(
 def era5_france_timeseries_historical(context: AssetExecutionContext):
     """
     Historique ERA5 (1950-Present) - Direct to Timeseries.
-    
-    Partitionné par chunks de 2 ans.
+
+    Partitionné par chunks de 1 an (ERA5_YEARS_PER_CHUNK).
     Télécharge et insère directement dans `era5_france_timeseries`.
     Pas de stockage intermédiaire "RAW".
     """

@@ -2,7 +2,7 @@
 Jobs ERA5 - Bronze Layer
 
 Job pour téléchargement historique ERA5
-- Partitionné par chunks de 2 ans (ex: "2024_2025")
+- Partitionné par chunks de 1 an (ERA5_YEARS_PER_CHUNK, ex: "2024")
 - Durée estimée: 5-10 minutes par chunk
 - Mode: DELETE overlap + insert (idempotent par fenêtre)
 - Support de partitions: relance un chunk spécifique (ex: 2006)
@@ -16,7 +16,7 @@ era5_meteo_job = define_asset_job(
     name="era5_historical_load",
     description=(
         "Historique ERA5 (1950-Present) - Direct to Timeseries. "
-        "Partitionné par chunks de 2 ans. Télécharge & Insère directement."
+        "Partitionné par chunks de 1 an. Télécharge & Insère directement."
     ),
     selection=AssetSelection.keys(
         AssetKey("era5_france_timeseries_historical")
