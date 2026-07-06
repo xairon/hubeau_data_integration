@@ -24,17 +24,25 @@
 -- Table plain (PAS d'hypertable) : règle projet pour les tables mensuelles.
 
 WITH daily AS (
-    SELECT
-        latitude,
-        longitude,
+    -- Arrondi défensif 0.1° + dédup : silver a déjà contenu des variantes float non
+    -- arrondies (jan-mai 2026, purgées) ; même défense que int_era5_grid_points /
+    -- int_era5_for_all_stations pour qu'une pollution future ne fragmente pas la grille
+    -- ni ne double-compte un jour (DISTINCT ON garde la ligne la plus récente).
+    SELECT DISTINCT ON (ROUND(latitude, 1), ROUND(longitude, 1), time::date)
+        ROUND(latitude, 1)  AS latitude,
+        ROUND(longitude, 1) AS longitude,
         time::date AS jour,
         temperature_2m,
         total_precipitation,
         potential_evaporation
     FROM {{ ref('stg_era5_timeseries') }}
     {% if is_incremental() %}
-    WHERE time >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '3 months')
+    -- Lookback surchargeable pour backfill ciblé (ex. correctif coordonnées 2026) :
+    -- --vars '{"era5_monthly_grid_lookback_months": 6}' — ATTENTION : DELETE manuel
+    -- préalable des mois hors du predicate de 4 mois requis (sinon conflit de PK).
+    WHERE time >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '{{ var("era5_monthly_grid_lookback_months", 3) }} months')
     {% endif %}
+    ORDER BY ROUND(latitude, 1), ROUND(longitude, 1), time::date, created_at DESC NULLS LAST
 )
 
 SELECT
