@@ -67,7 +67,12 @@ Livrable indépendamment, gains immédiats :
   `int_era5_for_all_stations`, ex. [-5, 20] mm/j en warn) ; ranges sur agrégats météo mensuels/annuels
   (`temperature_moyenne` [-30, 40], `precipitation_totale` mensuelle [0, 1500] mm,
   `evaporation_moyenne` etc., tous en warn).
-- **Symétrie** : ajouter `era5_distance_m` à `hubeau_daily_chroniques` (déjà présent côté hydro).
+- ~~**Symétrie** : ajouter `era5_distance_m` à `hubeau_daily_chroniques`~~ — **ABANDONNÉ
+  (2026-07-06)** : `ALTER TABLE ADD COLUMN` sur l'hypertable compressée casse les requêtes
+  (`cache lookup failed`) car l'event trigger `timescaledb_ddl_command_end` est volontairement
+  désactivé (fix anti-phantom) et ne synchronise plus le schéma des chunks compressés.
+  La distance est constante par station et reste disponible via `int_station_era5_mapping`
+  (jointure côté consommateur). Tentative proprement annulée.
 
 ## Lot 1 — Marts climat par point de grille (pipeline)
 
