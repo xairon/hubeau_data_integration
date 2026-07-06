@@ -391,3 +391,50 @@ models:
             - code_commune
             - code_departement
 
+  - name: fct_era5_monthly_grid
+    description: >
+      Agrégats météo mensuels ERA5 par point de grille 0.1° (toute la France, 1950→présent).
+      Base du module Climat junon. etp_totale et bilan_hydrique en mm positifs
+      (PEV ERA5 négative inversée à l'agrégation).
+    columns:
+      - name: era5_latitude
+        tests: [not_null]
+      - name: era5_longitude
+        tests: [not_null]
+      - name: mois
+        tests: [not_null]
+      - name: precipitation_totale
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1500
+              config:
+                severity: warn
+      - name: etp_totale
+        description: "ETP mensuelle en mm POSITIFS (= SUM(-potential_evaporation))"
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -50
+              max_value: 2500
+              config:
+                severity: warn
+      - name: nb_jours
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 31
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - era5_latitude
+            - era5_longitude
+            - mois
+          config:
+            severity: warn
+      # Cohérence du bilan hydrique (tolérance flottants)
+      - dbt_utils.expression_is_true:
+          expression: "ABS(bilan_hydrique - (precipitation_totale - etp_totale)) < 0.01"
+          config:
+            severity: warn
+            where: "bilan_hydrique IS NOT NULL"
+
