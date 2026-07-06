@@ -16,6 +16,7 @@ from .bronze import (
 )
 from .dbt_assets import hubeau_dbt_assets
 from .current_index_assets import station_current_index
+from .era5_indices_assets import fct_era5_indices_grid
 from .monthly_index_assets import fct_monthly_index
 from .reference_stats_assets import station_reference_stats
 
@@ -35,7 +36,12 @@ all_bronze_assets = [
 # dbt assets replace the manual aggregation assets
 all_dbt_assets = [hubeau_dbt_assets]
 
-all_indices_assets = [station_reference_stats, station_current_index, fct_monthly_index]
+all_indices_assets = [
+    station_reference_stats,
+    station_current_index,
+    fct_monthly_index,
+    fct_era5_indices_grid,
+]
 
 all_assets = all_bronze_assets + all_dbt_assets + all_indices_assets
 

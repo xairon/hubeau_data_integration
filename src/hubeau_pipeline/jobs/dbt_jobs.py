@@ -41,10 +41,13 @@ dbt_transform_job = define_asset_job(
 station_current_index_job = define_asset_job(
     name="station_index_refresh",
     description=(
-        "Rebuild gold.fct_monthly_index + gold.station_current_index (IPS/SSFI) after the "
-        "transform. Reads the fixed baseline gold.station_reference_stats."
+        "Rebuild gold.fct_monthly_index + gold.station_current_index (IPS/SSFI) + "
+        "gold.fct_era5_indices_grid (SPI/STI grille ERA5) after the transform. "
+        "Reads the fixed baseline gold.station_reference_stats."
     ),
-    selection=AssetSelection.assets("fct_monthly_index", "station_current_index"),
+    selection=AssetSelection.assets(
+        "fct_monthly_index", "station_current_index", "fct_era5_indices_grid"
+    ),
     tags={"dagster/concurrency_key": "dbt_pipeline"},
 )
 
