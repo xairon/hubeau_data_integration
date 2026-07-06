@@ -56,9 +56,13 @@ stg_era5_timeseries (321M, existant)        Backend : SELECT simples,
 Livrable indépendamment, gains immédiats :
 
 - **Suppressions** : `src/hubeau_pipeline/sources/era5_source.py` ; table
-  `staging.era5_france_meteo_raw` ; seed `ref_stations_meteeau_bsn` (+ entrée `seeds/schema.yml`) ;
-  table orpheline `gold.int_pastas_station_profile` (DROP en base, plus de modèle dbt) ;
+  `staging.era5_france_meteo_raw` ; tests orphelins `tests/test_pastas_*.py` (importent
+  `ml.pastas_wrapper` supprimé — cassent la collecte pytest) ; table orpheline
+  `gold.int_pastas_station_profile` (DROP en base, plus de modèle dbt) ;
   commentaires « 2 ans » obsolètes dans `era5_jobs.py` et l'asset historique.
+- **Conservé (correction d'audit)** : le seed `ref_stations_meteeau_bsn` est consommé par le
+  backend junon (`api/routers/observatory_situation.py` — filtre réseau officiel MétéEAU) ;
+  il n'est PAS supprimé.
 - **Tests dbt ajoutés** : `accepted_range` sur `potential_evaporation` (daily marts et
   `int_era5_for_all_stations`, ex. [-5, 20] mm/j en warn) ; ranges sur agrégats météo mensuels/annuels
   (`temperature_moyenne` [-30, 40], `precipitation_totale` mensuelle [0, 1500] mm,
@@ -72,8 +76,13 @@ Livrable indépendamment, gains immédiats :
 - **Clé** : `(era5_latitude, era5_longitude, mois)` — 11 496 pts × ~912 mois ≈ 10,5 M lignes.
 - **Colonnes** : `temperature_moyenne`, `temperature_min`, `temperature_max`,
   `precipitation_totale`, `etp_totale`, `bilan_hydrique` (= P − ETP), `nb_jours`,
-  `mois_complet` (bool), et colonnes indices remplies par l'asset Python :
-  `spi_1`, `spi_3`, `spi_6`, `spi_12`, `sti_1`, `sti_3`, `sti_6`, `sti_12`.
+  `mois_complet` (bool). **Convention de signe** : la PEV ERA5 est stockée négative
+  (convention flux descendant) — `etp_totale = SUM(-potential_evaporation)` (mm positifs).
+- **Les indices SPI/STI vivent dans une table séparée** `gold.fct_era5_indices_grid`
+  (format long : `era5_latitude, era5_longitude, month, fenetre ∈ {1,3,6,12}, spi, sti`),
+  possédée par l'asset Python — même séparation de propriété que `gold.fct_monthly_index`
+  (IPS). Évite qu'un `delete+insert` ou full-refresh dbt du mart mensuel n'efface des
+  colonnes calculées par Python.
 - **Matérialisation** : table plain, incrémental `delete+insert`, lookback 2 mois,
   `incremental_predicates`. **PAS d'hypertable** (règle projet : mensuel = table plain).
 - Source : `stg_era5_timeseries` (coordonnées déjà arrondies à 0.1° en staging — les doublons de
@@ -91,9 +100,10 @@ Livrable indépendamment, gains immédiats :
 
 ### Asset Python `era5_indices_refresh`
 
-- Calcule SPI (gamma → normale, McKee 1993) et STI (z-score) par cellule × mois × fenêtre à partir
-  de `fct_era5_monthly_grid` + `fct_era5_climatology_grid`, et UPDATE les colonnes `spi_*` / `sti_*`
-  du mart mensuel. scipy, vectorisé numpy, même pattern que les assets IPS
+- Calcule SPI (gamma → normale, McKee 1993, avec probabilité de cumul nul `prob_zero` :
+  H(x) = q + (1−q)·G(x)) et STI (z-score) par cellule × mois × fenêtre à partir de
+  `fct_era5_monthly_grid` + `fct_era5_climatology_grid`, et upsert dans
+  `gold.fct_era5_indices_grid`. scipy, vectorisé numpy, même pattern que les assets IPS
   (`monthly_index_assets.py` / `ml/indices.py`).
 - **Incrémental** : recalcule les 3 derniers mois chaque nuit ; full refresh via config/var.
 - **Orchestration** : ajouté à la chaîne sensor existante après `dbt_transform_job` (aux côtés de
@@ -105,7 +115,7 @@ Livrable indépendamment, gains immédiats :
 ### Bénéfice junon immédiat
 
 Le SPI par station (aujourd'hui recalculé à la volée par le backend) devient une lecture directe :
-station → cellule via `int_station_era5_mapping` → `fct_era5_monthly_grid.spi_*`. Suppression de
+station → cellule via `int_station_era5_mapping` → `fct_era5_indices_grid`. Suppression de
 `_warm_era5_climatology`, des locks single-flight et du re-warm 6 jours dans `api/main.py`.
 
 ## Lot 2 — junon : page « Climat » + intégrations
