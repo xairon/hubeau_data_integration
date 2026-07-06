@@ -438,3 +438,49 @@ models:
             severity: warn
             where: "bilan_hydrique IS NOT NULL"
 
+  - name: fct_era5_climatology_grid
+    description: >
+      Normales 1991-2020 par cellule ERA5 × mois calendaire × fenêtre (1/3/6/12 mois) :
+      paramètres gamma (SPI, méthode des moments, prob_zero) et moyenne/écart-type (STI).
+    columns:
+      - name: mois_calendaire
+        tests:
+          - not_null
+          - dbt_utils.accepted_range: {min_value: 1, max_value: 12}
+      - name: fenetre
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 3, 6, 12]
+              quote: false
+      - name: nb_annees
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 25
+              max_value: 30
+              config:
+                severity: warn
+      - name: gamma_alpha
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 10000
+              config:
+                severity: warn
+                where: "gamma_alpha IS NOT NULL"
+      - name: gamma_beta
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 10000
+              config:
+                severity: warn
+                where: "gamma_beta IS NOT NULL"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - era5_latitude
+            - era5_longitude
+            - mois_calendaire
+            - fenetre
+
