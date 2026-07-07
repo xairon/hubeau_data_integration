@@ -90,7 +90,7 @@ Two custom images, communicating via GRPC (defined in `dagster_home/workspace.ya
 | Silver | `staging/` (7 models) | `silver` | table |
 | Rejects | `rejects/` (3 models) | `silver_rejects` | table |
 | Gold (intermediate) | `intermediate/` (6 models) | `gold` | table (some incremental) |
-| Gold (marts) | `marts/` (10 models) | `gold` | table |
+| Gold (marts) | `marts/` (12 models) | `gold` | table |
 
 Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_project.yml` model configs.
 
@@ -98,7 +98,7 @@ Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_projec
 
 - **Piezometry**: Groundwater level stations + chroniques (year-partitioned 1967-present)
 - **Hydrometry**: River flow sites → stations → observations (year-partitioned 2000-present)
-- **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid
+- **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid. Grid-level climate marts: `gold.fct_era5_monthly_grid` (monthly aggregates per 0.1° cell), `gold.fct_era5_climatology_grid` (1991-2020 normals, gamma MoM + μ/σ), `gold.fct_era5_indices_grid` (SPI/STI drought/heat indices, windows 1/3/6/12 months)
 - **Reference**: TME hydrogeo entities (BDLISA)
 
 ### Pipeline Flow
@@ -123,7 +123,7 @@ The spatial join between stations and ERA5 grid is done in `int_station_era5_map
 ```
 Bronze materializes
   → bronze_to_transform_sensor    → dbt_transform_job       (ALL dbt models, incremental; dbt ref() DAG orders them)
-      ├ transform_to_index_sensor   → station_index_refresh   (fct_monthly_index + station_current_index)
+      ├ transform_to_index_sensor   → station_index_refresh   (fct_monthly_index + station_current_index + fct_era5_indices_grid — the latter is a Python asset, not a dbt model, computing SPI/STI from the climate grid marts)
       └ transform_to_quality_sensor → dbt_quality_job         (source freshness + dbt tests, non-blocking alerting)
 ```
 The two post-transform sensors fire in parallel on `dbt_transform_job` SUCCESS. A failing

@@ -83,6 +83,16 @@ CROSS JOIN LATERAL (
 
 ---
 
+## Marts climat par point de grille (module Climat junon)
+
+- `gold.fct_era5_monthly_grid` — agrégats mensuels par cellule 0.1° (1950→présent, ~10,5 M lignes).
+  `etp_totale`/`bilan_hydrique` en mm POSITIFS (PEV ERA5 négative inversée à l'agrégation).
+- `gold.fct_era5_climatology_grid` — normales 1991-2020 (gamma MoM + μ/σ) par cellule × mois × fenêtre.
+- `gold.fct_era5_indices_grid` — SPI/STI (fenêtres 1/3/6/12) calculés par l'asset Python
+  `fct_era5_indices_grid` (job `station_index_refresh`, nightly). Table vide → bootstrap complet.
+
+---
+
 ## Maintenance
 
 ### Vérifier les Time Series
