@@ -67,6 +67,28 @@ ERA5_DAILY_TEMP_PARTITIONS_DEF = StaticPartitionsDefinition(ERA5_DAILY_TEMP_PART
 # SHARED HELPERS
 # ============================================================================
 
+def _connect():
+    """
+    Connexion PostgreSQL COURTE DURÉE, à utiliser uniquement pour du travail DB
+    bref (ensure_table, lecture MAX(time), DELETE+INSERT post-fusion).
+
+    NE JAMAIS garder l'objet retourné ouvert pendant la phase de téléchargement
+    CDS : celle-ci peut attendre plusieurs HEURES en file CADS, et PostgreSQL
+    tue les connexions inactives trop longtemps -> `server closed the
+    connection unexpectedly` (run 1950 du 2026-07-07, échec après 6h34
+    d'attente, données téléchargées perdues faute de connexion valide pour
+    les insérer).
+    """
+    return psycopg2.connect(
+        host=os.getenv("PG_HOST", "postgres"),
+        port=os.getenv("PG_PORT", "5432"),
+        database=os.getenv("PG_DB", "postgres"),
+        user=os.getenv("PG_USER", "postgres"),
+        password=os.getenv("PG_PASSWORD"),
+        sslmode=os.getenv("PG_SSLMODE", "prefer"),
+    )
+
+
 def _ensure_table(conn):
     """Create bronze.era5_daily_temp_stats if not exists (idempotent)."""
     with conn.cursor() as cur:
@@ -176,6 +198,62 @@ def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) 
     conn.commit()
     context.log.info(f"All {rows_inserted:,} rows committed to database")
     return rows_inserted
+
+
+def _delete_overlap_and_insert(
+    context: AssetExecutionContext,
+    start_date: datetime,
+    end_date: datetime,
+    merged: pd.DataFrame,
+) -> int:
+    """DELETE overlap + INSERT sur UNE connexion fraîche (ouverte et fermée ici)."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            context.log.info(f"Clearing existing data for range {start_date} -> {end_date} to prevent duplicates...")
+            cur.execute(
+                """
+                DELETE FROM bronze.era5_daily_temp_stats
+                WHERE time >= %s AND time <= %s
+                """,
+                (start_date, end_date),
+            )
+            conn.commit()
+            context.log.info(f"   (Deleted {cur.rowcount} overlapping rows)")
+
+        return _insert_dataframe(conn, merged, context)
+    finally:
+        conn.close()
+
+
+def _delete_overlap_and_insert_with_retry(
+    context: AssetExecutionContext,
+    start_date: datetime,
+    end_date: datetime,
+    merged: pd.DataFrame,
+    max_attempts: int = 2,
+) -> int:
+    """
+    DELETE overlap + INSERT sur une connexion FRAÎCHE, ouverte APRÈS la fin des
+    téléchargements CDS (jamais tenue pendant l'attente en file, cf. `_connect`).
+
+    Retry UNE fois (max_attempts=2) sur erreur DB transitoire
+    (OperationalError/DatabaseError), avec une NOUVELLE connexion. Les
+    téléchargements CDS sont la partie coûteuse (heures d'attente file) : on ne
+    veut pas les perdre pour un hoquet DB passager après coup.
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return _delete_overlap_and_insert(context, start_date, end_date, merged)
+        except (psycopg2.OperationalError, psycopg2.DatabaseError) as e:
+            if attempt < max_attempts:
+                context.log.warning(
+                    f"DB error during DELETE+INSERT (attempt {attempt}/{max_attempts}): {e}. "
+                    "Retrying once with a fresh connection (downloaded data preserved)..."
+                )
+            else:
+                context.log.error(f"DB error during DELETE+INSERT after {max_attempts} attempts: {e}")
+                raise
 
 
 def _build_cds_client(cds_api_url: str, cds_api_key: str) -> "cdsapi.Client":
@@ -313,21 +391,24 @@ def process_daily_stats_range(
        cellules mer (NaN sur les 3 stats, même masque terre/mer partout).
     4. K -> degC (fait par statistique avant fusion), DELETE overlap + INSERT.
     Retourne le nombre de lignes insérées.
+
+    Cycle de vie des connexions DB : AUCUNE connexion n'est tenue ouverte
+    pendant la phase de téléchargement CDS (étape 1, qui peut attendre
+    plusieurs HEURES en file CADS). `_ensure_table` utilise une connexion
+    courte fermée avant les téléchargements ; le DELETE+INSERT (étape 4) ouvre
+    une connexion FRAÎCHE après leur fin. Raison : connexions tuées côté
+    PostgreSQL après une attente trop longue -> perte des données déjà
+    téléchargées (run 1950 du 2026-07-07, échec après 6h34 d'attente).
     """
-    conn = None
     tmp_paths = []
 
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("PG_HOST", "postgres"),
-            port=os.getenv("PG_PORT", "5432"),
-            database=os.getenv("PG_DB", "postgres"),
-            user=os.getenv("PG_USER", "postgres"),
-            password=os.getenv("PG_PASSWORD"),
-            sslmode=os.getenv("PG_SSLMODE", "prefer"),
-        )
-
-        _ensure_table(conn)
+        # Connexion COURTE DURÉE : fermée avant le début des téléchargements CDS.
+        ensure_conn = _connect()
+        try:
+            _ensure_table(ensure_conn)
+        finally:
+            ensure_conn.close()
 
         context.log.info(f"Downloading ERA5 daily temp stats for {file_id}...")
 
@@ -445,24 +526,12 @@ def process_daily_stats_range(
 
         context.log.info(f"DataFrame fusionné prêt: {len(merged):,} rows")
 
-        with conn.cursor() as cur:
-            context.log.info(f"Clearing existing data for range {start_date} -> {end_date} to prevent duplicates...")
-            cur.execute(
-                """
-                DELETE FROM bronze.era5_daily_temp_stats
-                WHERE time >= %s AND time <= %s
-                """,
-                (start_date, end_date),
-            )
-            conn.commit()
-            context.log.info(f"   (Deleted {cur.rowcount} overlapping rows)")
-
-        rows_inserted = _insert_dataframe(conn, merged, context)
-        return rows_inserted
+        # Connexion FRAÎCHE ouverte APRÈS la fin des téléchargements (cf.
+        # docstring). Retry 1x sur erreur DB transitoire pour ne jamais perdre
+        # des heures de téléchargement CDS pour un hoquet DB passager.
+        return _delete_overlap_and_insert_with_retry(context, start_date, end_date, merged)
 
     finally:
-        if conn:
-            conn.close()
         for tmp_path in tmp_paths:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -533,15 +602,12 @@ def era5_daily_temp_stats_update(context: AssetExecutionContext):
     )
     end_date = datetime.now() - timedelta(days=lag_days)
 
+    # Connexion COURTE DURÉE : uniquement pour lire MAX(time), fermée dans le
+    # `finally` ci-dessous AVANT l'appel à `process_daily_stats_range` (qui
+    # gère lui-même son propre cycle de connexions autour des téléchargements
+    # CDS — cf. docstring de `_connect`).
     last_date_in_db = None
-    conn = psycopg2.connect(
-        host=os.getenv("PG_HOST", "postgres"),
-        port=os.getenv("PG_PORT", "5432"),
-        database=os.getenv("PG_DB", "postgres"),
-        user=os.getenv("PG_USER", "postgres"),
-        password=os.getenv("PG_PASSWORD"),
-        sslmode=os.getenv("PG_SSLMODE", "prefer"),
-    )
+    conn = _connect()
     try:
         with conn.cursor() as cur:
             cur.execute("""
