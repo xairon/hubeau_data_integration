@@ -30,6 +30,7 @@ import logging
 import os
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 import cdsapi
@@ -177,6 +178,11 @@ def _insert_dataframe(conn, df: pd.DataFrame, context, batch_size: int = 10000) 
     return rows_inserted
 
 
+def _build_cds_client(cds_api_url: str, cds_api_key: str) -> "cdsapi.Client":
+    """Instancie un client CDS dédié (un par thread : cdsapi.Client n'est pas garanti thread-safe si partagé)."""
+    return cdsapi.Client(url=cds_api_url, key=cds_api_key)
+
+
 def _download_one_statistic(
     context: AssetExecutionContext,
     client: "cdsapi.Client",
@@ -295,7 +301,9 @@ def process_daily_stats_range(
 ) -> int:
     """
     Pour la fenêtre [start_date, end_date] :
-    1. Une requête CDS par daily_statistic (mean/min/max) -> 3 NetCDF.
+    1. Une requête CDS par daily_statistic (mean/min/max) -> 3 NetCDF, soumises
+       CONCURREMMENT (ThreadPoolExecutor, un client CDS par thread) car l'attente
+       en file CADS (~2h/requête) domine largement le temps de traitement.
     2. Chaque NetCDF -> DataFrame [time, latitude, longitude, t2m_<stat>].
     3. Fusion OUTER des 3 DataFrames sur (time, latitude, longitude).
        Choix : OUTER (pas INNER) pour ne pas perdre une cellule/jour si UNE
@@ -337,7 +345,7 @@ def process_daily_stats_range(
                 "or configure 'cds_api_key' in configs/era5/era5_daily_temp_stats.yml."
             )
 
-        client = cdsapi.Client(url=config["credentials"]["cds_api_url"], key=cds_api_key)
+        cds_api_url = config["credentials"]["cds_api_url"]
         dataset = config["resource"]["dataset"]
 
         # Dériver year/month/day de la fenêtre RÉELLE (pas un day=[1..31] figé)
@@ -370,16 +378,50 @@ def process_daily_stats_range(
             "daily_maximum": "t2m_max",
         }
 
-        stat_dataframes = []
-        for statistic in config["resource"]["daily_statistics"]:
-            target_column = stat_to_column[statistic]
+        statistics = list(config["resource"]["daily_statistics"])
+
+        def _download_for_statistic(statistic: str) -> tuple[str, str]:
+            # Client CDS dédié à ce thread (cf. _build_cds_client).
+            thread_client = _build_cds_client(cds_api_url, cds_api_key)
             request = dict(base_request, daily_statistic=statistic)
-
             tmp_path = _download_one_statistic(
-                context, client, dataset, request, statistic, max_retries, retry_delay
+                context, thread_client, dataset, request, statistic, max_retries, retry_delay
             )
-            tmp_paths.append(tmp_path)
+            return statistic, tmp_path
 
+        # Soumission concurrente des 3 statistiques : chaque requête passe
+        # ~2h en file CADS, les paralléliser divise par ~3 le temps d'une
+        # partition (au lieu de 3x2h en séquentiel). `as_completed` attend
+        # TOUTES les tâches avant de sortir la boucle, donc un échec sur un
+        # thread n'interrompt pas les autres : ils ont le temps de finir
+        # (succès -> fichier temp conservé pour cleanup global, échec ->
+        # `_download_one_statistic` nettoie déjà son propre fichier temp
+        # partiel) avant qu'on ne lève l'exception agrégée ci-dessous.
+        download_results: dict[str, str] = {}
+        errors: list[tuple[str, Exception]] = []
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {executor.submit(_download_for_statistic, statistic): statistic for statistic in statistics}
+            for future in as_completed(futures):
+                statistic = futures[future]
+                try:
+                    stat_label, tmp_path = future.result()
+                    download_results[stat_label] = tmp_path
+                    tmp_paths.append(tmp_path)
+                except Exception as e:
+                    errors.append((statistic, e))
+
+        if errors:
+            failed_stats = ", ".join(stat for stat, _ in errors)
+            context.log.error(f"Daily stats download failed for: {failed_stats}")
+            # tmp_paths des téléchargements réussis sont nettoyés par le
+            # `finally` de cette fonction ; on relève la 1ère erreur rencontrée.
+            raise errors[0][1]
+
+        stat_dataframes = []
+        for statistic in statistics:
+            target_column = stat_to_column[statistic]
+            tmp_path = download_results[statistic]
             df_stat = _load_statistic_dataframe(context, tmp_path, start_date, end_date, target_column)
             context.log.info(f"{statistic}: {len(df_stat):,} rows (raw, before merge/filter)")
             stat_dataframes.append(df_stat)
