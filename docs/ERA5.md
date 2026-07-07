@@ -96,6 +96,33 @@ CROSS JOIN LATERAL (
 
 ---
 
+## Voie complémentaire : statistiques journalières (mean/min/max)
+
+**Dataset CDS distinct** : `derived-era5-land-daily-statistics` (vs `reanalysis-era5-land`
+pour la timeseries ci-dessus). Calcule côté CADS, à partir des 24 pas horaires, la
+moyenne/min/max journalières réelles de `2m_temperature` — sans le biais d'échantillonnage
+00:00 UTC de `fct_era5_monthly_grid.temperature_*` (cf. section précédente).
+
+- **Table bronze** : `bronze.era5_daily_temp_stats(time, latitude, longitude, t2m_mean,
+  t2m_min, t2m_max, source_file_id, created_at)` — hypertable chunks 1 an, compression
+  après 30 j, K→°C converti à l'insertion.
+- **Silver** : `silver.stg_era5_daily_temp_stats` (append incrémental, dédup DISTINCT ON,
+  arrondi 1 décimale), tests not_null/accepted_range/expression_is_true (`min≤mean≤max`).
+- **Jobs Dagster** : `era5_daily_temp_historical_load` (partitionné 1 an, clés
+  `"YYYY_YYYY"`, ex. `1950_1950`) pour le backfill 1950→présent ; `era5_daily_temp_update_job`
+  (smart update quotidien, schedule 03h30 UTC).
+- **Statut (2026-07-07)** : backfill **EN COURS** — 1ère tranche 1950-1959 lancée via
+  `launchPartitionBackfill` (backfill id `keaocyyd`, 10 runs, `dagster/concurrency_key:
+  era5_historical` sérialisé par le `QueuedRunCoordinator`). Rythme observé : la queue CDS
+  de ce dataset dérivé prend ~2 h par requête (3 requêtes/partition) → ~6 h/partition.
+  Tranches suivantes (1960-1969 … 2020-2025) à lancer une fois la tranche courante verte — voir
+  `.superpowers/sdd/progress.md` pour la procédure de reprise.
+- **Cutover (hors périmètre backfill)** : bascule de `fct_era5_monthly_grid.temperature_*`
+  vers cette voie (COALESCE), full-refresh, rebuild climatologie + indices SPI/STI,
+  ré-étiquetage junon — plan dédié une fois le backfill complet et audité.
+
+---
+
 ## Maintenance
 
 ### Vérifier les Time Series
