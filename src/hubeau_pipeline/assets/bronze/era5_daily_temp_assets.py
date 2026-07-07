@@ -17,8 +17,12 @@ Entrées normatives :
   structure NetCDF, gotchas `number`/`valid_time`/Kelvin/NaN=mer)
 - Référence   : src/hubeau_pipeline/assets/bronze/era5_assets.py
 
-Ce module N'EST PAS câblé dans assets/__init__.py ni les jobs (voir Task T3
-du plan docs/superpowers/plans/2026-07-07-era5-daily-temp-ingestion.md).
+Câblé dans assets/__init__.py, jobs/era5_jobs.py (era5_daily_temp_historical_load
+partitionné + era5_daily_temp_update_job) et schedules.py (03h30 UTC).
+
+⚠️ Ops : lancer les matérialisations via l'UI/GraphQL (run queue, max_concurrent_runs=1),
+PAS via `docker exec ... dagster asset materialize` — un client CLI tué laisse un step
+zombie qui continue d'insérer (doublons constatés le 2026-07-07, dédoublonnés).
 """
 
 import gc
