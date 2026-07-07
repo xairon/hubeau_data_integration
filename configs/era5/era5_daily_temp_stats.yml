@@ -1,0 +1,45 @@
+resource:
+  name: era5_daily_temp_stats
+  # ERA5-Land daily statistics (post-processed sur le CADS) : moyenne/min/max
+  # journalières calculées à partir des 24 pas horaires. Voir spike
+  # .superpowers/sdd/spike-cds-daily-stats.md pour la requête canonique validée.
+  dataset: derived-era5-land-daily-statistics
+
+  # Variable ERA5 (nom officiel CDS)
+  variable: 2m_temperature   # Température à 2m (K), servie sous le nom court `t2m`
+
+  # Une requête CDS par statistique (le paramètre daily_statistic est un
+  # string simple, pas une liste) -> 3 requêtes par fenêtre.
+  daily_statistics:
+    - daily_mean
+    - daily_minimum
+    - daily_maximum
+
+  # Jour civil UTC (défaut CADS) + agrégation sur les 24 pas horaires (le plus précis)
+  time_zone: "utc+00:00"
+  frequency: "1_hourly"
+
+  # Zone géographique : France métropolitaine (identique à l'ingestion horaire existante)
+  # Format: [North, West, South, East]
+  area: [51.5, -5.5, 41.0, 10.0]
+
+extraction:
+  # Période historique complète
+  time_range:
+    start_year: 1950  # ERA5-Land commence en 1950
+    end_year: null    # null = année courante
+
+  # Résolution spatiale (métadonnée only — NON envoyé au CADS ; ERA5-Land servi en 0.1° natif)
+  grid_resolution: 0.1
+
+  # Délai de production Copernicus CDS pour ce produit (~6j observés, +1j marge)
+  availability_lag_days: 7
+
+performance:
+  retry_times: 3
+  retry_delay: 10.0  # 10 secondes entre retries (backoff exponentiel dans le code)
+
+credentials:
+  cds_api_url: https://cds.climate.copernicus.eu/api
+  cds_api_key: ""  # Set via COPERNICUS_API_KEY env var (voir .env.example)
+  cds_api_key_env: "COPERNICUS_API_KEY"
