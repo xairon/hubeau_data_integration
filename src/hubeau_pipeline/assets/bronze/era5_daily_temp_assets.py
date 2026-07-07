@@ -190,23 +190,30 @@ def _download_one_statistic(
         tmp_path = tmp.name
 
     delay = retry_delay
-    for attempt in range(max_retries):
-        try:
-            client.retrieve(dataset, request, tmp_path)
-            context.log.info(f"Download complete ({stat_label}): {tmp_path}")
-            return tmp_path
-        except Exception as e:
-            if attempt < max_retries - 1:
-                context.log.warning(
-                    f"CDS API failed for {stat_label} (attempt {attempt + 1}/{max_retries}): {e}. "
-                    f"Retrying in {delay}s..."
-                )
-                import time
-                time.sleep(delay)
-                delay *= 2  # Exponential backoff
-            else:
-                context.log.error(f"CDS API failed for {stat_label} after {max_retries} attempts: {e}")
-                raise
+    try:
+        for attempt in range(max_retries):
+            try:
+                client.retrieve(dataset, request, tmp_path)
+                context.log.info(f"Download complete ({stat_label}): {tmp_path}")
+                return tmp_path
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    context.log.warning(
+                        f"CDS API failed for {stat_label} (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    import time
+                    time.sleep(delay)
+                    delay *= 2  # Exponential backoff
+                else:
+                    context.log.error(f"CDS API failed for {stat_label} after {max_retries} attempts: {e}")
+                    raise
+    except Exception:
+        # Retries épuisés : le fichier temp vide/partiel n'a pas de propriétaire
+        # (le chemin n'est jamais retourné à l'appelant) -> le nettoyer ici.
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 def _load_statistic_dataframe(
@@ -384,6 +391,12 @@ def process_daily_stats_range(
         merged["source_file_id"] = file_id
         merged = merged[["time", "latitude", "longitude", "t2m_mean", "t2m_min", "t2m_max", "source_file_id"]]
 
+        # NaN -> None : psycopg2 adapte un float NaN en 'NaN'::numeric (valeur
+        # acceptée par PostgreSQL et triée AU-DESSUS de toutes les autres) au
+        # lieu de NULL. t2m_min/t2m_max peuvent rester NaN après le merge OUTER
+        # (une statistique ponctuellement absente) : on force explicitement NULL.
+        merged = merged.astype(object).where(merged.notna(), None)
+
         context.log.info(f"DataFrame fusionné prêt: {len(merged):,} rows")
 
         with conn.cursor() as cur:
@@ -461,10 +474,17 @@ def era5_daily_temp_stats_update(context: AssetExecutionContext):
     2. Cap de sécurité à 60 jours de lookback (évite un timeout CDS si trou).
     3. Table vide -> fenêtre par défaut = les `max_lookback_days` derniers jours.
 
-    Lag de disponibilité CDS configurable via `ERA5_DAILY_STATS_LAG_DAYS`
-    (défaut 7 jours - production CDS observée ~6j, +1j de marge).
+    Lag de disponibilité CDS : `ERA5_DAILY_STATS_LAG_DAYS` (env var) > yaml
+    `extraction.availability_lag_days` > défaut 7 jours (production CDS
+    observée ~6j, +1j de marge).
     """
-    lag_days = int(os.getenv("ERA5_DAILY_STATS_LAG_DAYS", "7"))
+    with open(CONFIG_PATH) as f:
+        _config = yaml.safe_load(f)
+
+    # Précédence : env var > yaml (extraction.availability_lag_days) > défaut 7j
+    lag_days = int(
+        os.getenv("ERA5_DAILY_STATS_LAG_DAYS", _config.get("extraction", {}).get("availability_lag_days", 7))
+    )
     end_date = datetime.now() - timedelta(days=lag_days)
 
     last_date_in_db = None
