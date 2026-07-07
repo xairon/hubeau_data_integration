@@ -8,7 +8,8 @@ import logging
 
 import numpy as np
 import pandas as pd
-from dagster import AssetExecutionContext, AssetKey, MetadataValue, asset
+from dagster import AssetExecutionContext, MetadataValue, asset
+from dagster_dbt import get_asset_key_for_model
 
 from ..ml.era5_indices import MIN_YEARS_REF, compute_spi, compute_sti
 from ..ml.era5_indices_persistence import (
@@ -17,6 +18,7 @@ from ..ml.era5_indices_persistence import (
     upsert_era5_indices,
 )
 from ..resources import PostgreSQLResource
+from .dbt_assets import hubeau_dbt_assets
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,8 @@ BOOTSTRAP_CHUNK_YEARS = 5
 # Le warmup de 11 mois avant start_month garantit des fenêtres 12 mois complètes.
 # NB : le garde n_mois = fenêtre ne protège que contre le ramp-up de début de série ; la
 # contiguïté calendaire des mois est une propriété du mart amont (grille ERA5 continue,
-# 0 trou vérifié 1990→présent) — surveillée par data_completeness_job, pas re-vérifiée ici.
+# 0 trou vérifié 1990→présent) — surveillée par data_completeness_job (entrée
+# "gold ERA5 grille"), pas re-vérifiée ici.
 _QUERY = """
 WITH rolled AS (
     SELECT
@@ -91,7 +94,7 @@ def _compute_range(pg, start_month, end_month):
              None if np.isnan(s) else float(s),
              None if np.isnan(t) else float(t))
             for lat, lon, mois, s, t in zip(
-                df["era5_latitude"], df["era5_longitude"], df["mois"], spi, sti
+                df["era5_latitude"], df["era5_longitude"], df["mois"], spi, sti, strict=True
             )
         ]
         upsert_era5_indices(pg, rows)
@@ -102,7 +105,10 @@ def _compute_range(pg, start_month, end_month):
 @asset(
     name="fct_era5_indices_grid",
     group_name="indices",
-    deps=[AssetKey("fct_era5_monthly_grid"), AssetKey("fct_era5_climatology_grid")],
+    deps=[
+        get_asset_key_for_model([hubeau_dbt_assets], "fct_era5_monthly_grid"),
+        get_asset_key_for_model([hubeau_dbt_assets], "fct_era5_climatology_grid"),
+    ],
     description=(
         "SPI/STI par cellule ERA5 (fenêtres 1/3/6/12 mois, normale 1991-2020). "
         "Nightly: 3 derniers mois. Table vide: bootstrap 1950→présent."

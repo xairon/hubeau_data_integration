@@ -8,7 +8,8 @@ months in silver and gold and FAILS the run when a month is missing or
 abnormally thin, so the gap shows up red in Dagster instead of being noticed
 months later in the dashboards.
 
-Checks per source (silver chroniques + gold monthly index, piezo and hydro):
+Checks per source (silver chroniques + gold monthly index, piezo and hydro; gold ERA5
+monthly grid):
 - MISSING: a month with zero rows.
 - PARTIAL: a month with fewer rows than COMPLETENESS_MIN_PCT % (default 50)
   of the median of the non-empty months in the window.
@@ -16,7 +17,8 @@ Checks per source (silver chroniques + gold monthly index, piezo and hydro):
 Remediation is the documented backfill procedure: reload the year partition
 (piezometry_chroniques_raw / hydrometry_obs_elab_raw), then the dbt chain with
 piezometry_reprocess_from_date / streaming_lookback_days /
-daily_recompute_window_days, then fct_monthly_index.
+daily_recompute_window_days, then fct_monthly_index. For the ERA5 grid, see
+era5_monthly_grid_lookback_months and the ERA5 backfill procedure in docs/ERA5.md.
 """
 
 import os
@@ -31,6 +33,9 @@ _CHECKS = [
     ("silver hydro", "silver.stg_hydrometry_obs_elab", "date_obs_elab", ""),
     ("gold index piezo", "gold.fct_monthly_index", "month", "AND type = 'piezo'"),
     ("gold index hydro", "gold.fct_monthly_index", "month", "AND type = 'hydro'"),
+    # Une ligne par cellule de grille ERA5 (~11496) : un mois avec moins de lignes que
+    # la médiane signale un trou de contiguïté amont (cf. fct_era5_indices_grid).
+    ("gold ERA5 grille", "gold.fct_era5_monthly_grid", "mois", ""),
 ]
 
 _MONTHS_WINDOW = 13
@@ -114,7 +119,8 @@ def check_data_completeness(context: OpExecutionContext) -> None:
     name="data_completeness_check",
     description=(
         "Quality: detect missing/partial months (last 13 months) in silver "
-        "chroniques and gold.fct_monthly_index. Fails on any gap."
+        "chroniques, gold.fct_monthly_index and gold.fct_era5_monthly_grid. "
+        "Fails on any gap."
     ),
     tags={"dagster/concurrency_key": "data_completeness_check"},
 )

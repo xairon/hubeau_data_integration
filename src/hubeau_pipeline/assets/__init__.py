@@ -14,8 +14,8 @@ from .bronze import (
     piezometry_stations_raw,
     tme_entites_hydrogeo,  # Attributs TME (TME.csv) — enrichit stg_tme_entites
 )
-from .dbt_assets import hubeau_dbt_assets
 from .current_index_assets import station_current_index
+from .dbt_assets import hubeau_dbt_assets
 from .era5_indices_assets import fct_era5_indices_grid
 from .monthly_index_assets import fct_monthly_index
 from .reference_stats_assets import station_reference_stats

@@ -13,7 +13,9 @@
 -- Normales climatiques 1991-2020 par cellule × mois calendaire × fenêtre glissante (1/3/6/12 mois).
 -- Fournit les paramètres SPI (gamma, méthode des moments, cf. McKee 1993 avec prob_zero)
 -- et STI (moyenne/écart-type) consommés par l'asset Python fct_era5_indices_grid.
--- Fenêtres ROWS BETWEEN : la grille ERA5 est continue mensuellement par cellule (vérifié via n_<w> = <w>).
+-- Fenêtres ROWS BETWEEN : le garde n_<w> = <w> protège uniquement contre le ramp-up de
+-- début de série (fenêtres tronquées en tête). La contiguïté calendaire des mois est une
+-- propriété amont de la grille ERA5 (0 trou vérifié 1990→2021), pas re-vérifiée ici.
 
 {% set windows = [1, 3, 6, 12] %}
 
