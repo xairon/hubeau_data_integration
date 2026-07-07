@@ -8,22 +8,23 @@ Domains:
 """
 
 # Jobs dbt
+# Full Bootstrap Job (Complete population with partition iteration)
+from .completeness_job import data_completeness_job
 from .dbt_jobs import (
-    dbt_transform_job,            # ALL models, incremental (nightly via sensor + manual full refresh)
-    dbt_quality_job,              # source freshness + dbt tests (nightly via sensor)
-    dbt_docs_job,                 # docs generation (weekly schedule)
-    station_current_index_job,    # IPS/SSFI nightly: fct_monthly_index + station_current_index (sensor)
+    dbt_docs_job,  # docs generation (weekly schedule)
+    dbt_quality_job,  # source freshness + dbt tests (nightly via sensor)
+    dbt_transform_job,  # ALL models, incremental (nightly via sensor + manual full refresh)
+    station_current_index_job,  # IPS/SSFI nightly: fct_monthly_index + station_current_index (sensor)
     station_reference_stats_job,  # IPS baseline weekly (schedule)
 )
 
 # Jobs ERA5
 from .era5_jobs import (
+    era5_daily_temp_historical_load,
+    era5_daily_temp_update_job,
     era5_meteo_job,
     era5_weekly_job,
 )
-
-# Full Bootstrap Job (Complete population with partition iteration)
-from .completeness_job import data_completeness_job
 from .full_bootstrap_job import full_bootstrap_job
 from .hubeau_jobs import (
     daily_hydrometry_bronze_job,
@@ -51,6 +52,8 @@ all_jobs = [
     daily_hydrometry_bronze_job,
     era5_meteo_job,                 # historique (manuel/bootstrap)
     era5_weekly_job,                # quotidien (schedule)
+    era5_daily_temp_historical_load,  # historique températures journalières (manuel/backfill)
+    era5_daily_temp_update_job,       # quotidien températures journalières (schedule)
     # --- Transformation dbt ---
     dbt_transform_job,              # all models, nightly via sensor + manuel
     dbt_quality_job,                # tests + freshness, nightly via sensor
@@ -75,6 +78,8 @@ __all__ = [
     "daily_hydrometry_bronze_job",
     "era5_meteo_job",
     "era5_weekly_job",
+    "era5_daily_temp_historical_load",
+    "era5_daily_temp_update_job",
     "dbt_transform_job",
     "dbt_quality_job",
     "dbt_docs_job",

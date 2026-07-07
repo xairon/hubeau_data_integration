@@ -14,6 +14,10 @@ from .bronze import (
     piezometry_stations_raw,
     tme_entites_hydrogeo,  # Attributs TME (TME.csv) — enrichit stg_tme_entites
 )
+from .bronze.era5_daily_temp_assets import (
+    era5_daily_temp_stats_historical,  # Historique 1950-Present (partitionné)
+    era5_daily_temp_stats_update,  # Smart Update quotidien
+)
 from .current_index_assets import station_current_index
 from .dbt_assets import hubeau_dbt_assets
 from .era5_indices_assets import fct_era5_indices_grid
@@ -30,6 +34,8 @@ all_bronze_assets = [
     hydrometry_obs_daily_raw,
     era5_france_timeseries_historical,
     era5_weekly_update,
+    era5_daily_temp_stats_historical,
+    era5_daily_temp_stats_update,
     tme_entites_hydrogeo,
 ]
 

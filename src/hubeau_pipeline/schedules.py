@@ -13,26 +13,27 @@ Schedule Timeline (UTC):
 - Dimanche 7h00: IPS reference baseline (station_reference_stats)
 """
 
-from dagster import (
-    ScheduleDefinition,
-    DefaultScheduleStatus,
-    schedule,
-    RunRequest,
-    ScheduleEvaluationContext,
-)
 from datetime import datetime
 
+from dagster import (
+    DefaultScheduleStatus,
+    RunRequest,
+    ScheduleDefinition,
+    ScheduleEvaluationContext,
+    schedule,
+)
+
 from .jobs import (
-    daily_piezometry_bronze_job,
     daily_hydrometry_bronze_job,
+    daily_piezometry_bronze_job,
     data_completeness_job,
+    dbt_docs_job,
+    era5_daily_temp_update_job,
     era5_weekly_job,
     reference_data_bronze_job,
     station_reference_stats_job,
-    dbt_docs_job,
 )
 from .utils import env_true
-
 
 DEFAULT_SCHEDULE_STATUS = (
     DefaultScheduleStatus.RUNNING
@@ -76,6 +77,19 @@ def daily_era5_schedule(context: ScheduleEvaluationContext):
     """ERA5 incremental update. Calculates missing period automatically."""
     return RunRequest(
         run_key=f"era5_daily_{datetime.now().strftime('%Y%m%d')}",
+    )
+
+
+@schedule(
+    job=era5_daily_temp_update_job,
+    cron_schedule="30 3 * * *",  # Daily 3h30 UTC
+    default_status=DEFAULT_SCHEDULE_STATUS,
+    description="Daily: ERA5 daily temp stats Smart Update (mean/min/max -> Bronze)",
+)
+def daily_era5_temp_stats_schedule(context: ScheduleEvaluationContext):
+    """ERA5 daily temp stats incremental update. Calculates missing period automatically."""
+    return RunRequest(
+        run_key=f"era5_daily_temp_stats_{datetime.now().strftime('%Y%m%d')}",
     )
 
 
@@ -139,6 +153,7 @@ all_schedules = [
     daily_piezometry_schedule,
     daily_hydrometry_schedule,
     daily_era5_schedule,
+    daily_era5_temp_stats_schedule,
     # Maintenance
     weekly_dbt_docs_schedule,
     monthly_reference_data_schedule,
