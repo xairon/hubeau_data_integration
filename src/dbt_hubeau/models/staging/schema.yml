@@ -151,3 +151,55 @@ models:
           - not_null
     # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).
     # Test dbt_utils.unique_combination_of_columns retiré: OOM sur ~100M lignes ERA5.
+
+  - name: stg_era5_daily_temp_stats
+    description: "Températures journalières ERA5-Land (Silver)"
+    columns:
+      - name: time
+        tests:
+          - not_null
+      - name: latitude
+        tests:
+          - not_null
+      - name: longitude
+        tests:
+          - not_null
+      - name: t2m_mean
+        description: "Température moyenne journalière en °C"
+        tests:
+          - not_null
+      - name: t2m_min
+        description: "Température minimale journalière en °C"
+      - name: t2m_max
+        description: "Température maximale journalière en °C"
+      - name: geometry
+        description: "Point géographique PostGIS"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.accepted_range:
+          column_name: t2m_mean
+          min_value: -45
+          max_value: 45
+          where: "t2m_mean IS NOT NULL"
+          severity: warn
+      - dbt_utils.accepted_range:
+          column_name: t2m_min
+          min_value: -45
+          max_value: 45
+          where: "t2m_min IS NOT NULL"
+          severity: warn
+      - dbt_utils.accepted_range:
+          column_name: t2m_max
+          min_value: -45
+          max_value: 45
+          where: "t2m_max IS NOT NULL"
+          severity: warn
+      - dbt_utils.expression_is_true:
+          expression: "t2m_min <= t2m_mean AND t2m_mean <= t2m_max"
+          where: "t2m_min IS NOT NULL AND t2m_max IS NOT NULL"
+          severity: warn
+      - dbt_utils.expression_is_true:
+          expression: "latitude*10 = ROUND(latitude*10) AND longitude*10 = ROUND(longitude*10)"
+          severity: error
+    # Unicité garantie par la PK PostgreSQL (post_hook add_primary_key).

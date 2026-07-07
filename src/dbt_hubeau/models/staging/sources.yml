@@ -20,6 +20,15 @@ sources:
           warn_after: {count: 30, period: day}
           error_after: {count: 60, period: day}
         loaded_at_field: "time"
+      - name: era5_daily_temp_stats
+        description: Données météo ERA5-Land brutes (températures journalières daily_mean/daily_minimum/daily_maximum)
+        # Le dataset CADS `derived-era5-land-daily-statistics` a une latence de publication de ~6-7 jours.
+        # Seuils calés pour ne sonner qu'en cas de blocage ingestion (lag normal ~7 j).
+        # loaded_at_field = `time` (date donnée).
+        freshness:
+          warn_after: {count: 30, period: day}
+          error_after: {count: 60, period: day}
+        loaded_at_field: "time"
       - name: piezometry_stations_raw
         description: Métadonnées des stations piézométriques
         freshness: null  # Static reference data
