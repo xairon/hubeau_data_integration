@@ -57,6 +57,7 @@ PAS via `docker exec ... dagster asset materialize` — un client CLI tué laiss
 zombie qui continue d'insérer (doublons constatés le 2026-07-07, dédoublonnés).
 """
 
+import calendar
 import gc
 import logging
 import os
@@ -310,20 +311,50 @@ def _months_in_range(start_date: datetime, end_date: datetime) -> list[tuple[int
     return months
 
 
-def _build_month_request(config: dict, year: int, month: int) -> dict:
+def _days_for_month(year: int, month: int, start_date: datetime, end_date: datetime) -> list[int]:
     """
-    Requête CDS `reanalysis-era5-land` pour UN mois calendaire complet (jours
-    1-31 fixes, 24 pas horaires) — l'agrégation locale filtre ensuite sur la
-    fenêtre exacte demandée. Contrairement à l'ancienne ingestion horaire
-    (era5_assets.py), pas besoin de dériver les jours réels de la fenêtre : ce
-    n'est pas un produit "dérivé" sujet à un cache CADS périmé, la donnée
-    brute d'un mois passé est stable.
+    Liste des jours [1..N] du mois (year, month) à demander à CDS, CLAMPÉS sur
+    la fenêtre réelle [start_date, end_date] (pas de jours 1-31 figés).
+
+    - Si (year, month) est le mois de start_date : commence à start_date.day.
+    - Si (year, month) est le mois de end_date : s'arrête à end_date.day.
+    - Sinon (mois intermédiaire d'une fenêtre multi-mois) : mois complet.
+
+    Voir `_build_month_request` pour le rationale (anti-cache CADS périmé).
     """
+    first_day = start_date.day if (year, month) == (start_date.year, start_date.month) else 1
+    last_day_of_month = calendar.monthrange(year, month)[1]
+    last_day = end_date.day if (year, month) == (end_date.year, end_date.month) else last_day_of_month
+    return list(range(first_day, last_day + 1))
+
+
+def _build_month_request(config: dict, year: int, month: int, start_date: datetime, end_date: datetime) -> dict:
+    """
+    Requête CDS `reanalysis-era5-land` pour UN mois calendaire, jours DÉRIVÉS
+    de la fenêtre réelle [start_date, end_date] (`_days_for_month`) — pas un
+    `day: 1..31` figé.
+
+    Le CADS met en cache par signature de requête ; `era5_daily_temp_stats_update`
+    tourne sur un schedule nightly (03h30 UTC) et, pour le mois en cours, une
+    liste de jours 1-31 constante produit une requête QUASI-IDENTIQUE chaque
+    nuit → retombe sur un artefact en cache PÉRIMÉ et gèle silencieusement
+    l'ingestion (bug diagnostiqué le 2026-06-24 sur `era5_assets.py` :
+    entrepôt gelé au 2 juin alors que le CADS servait des données jusqu'au 19
+    juin, aucune erreur levée). En dérivant les jours de la fenêtre réelle, la
+    signature change dès que end_date (= now - lag) avance d'un jour ->
+    nouvelle clé de cache -> données fraîches. Bénéfice secondaire : on ne
+    demande jamais un jour futur du mois en cours (qui n'existe pas encore
+    côté CDS).
+
+    Pour le chargement historique (fenêtre = année civile complète), le clamp
+    redonne naturellement jours 1-31 sur chaque mois.
+    """
+    days = _days_for_month(year, month, start_date, end_date)
     return {
         "variable": [config["resource"]["variable"]],
         "year": str(year),
         "month": f"{month:02d}",
-        "day": [f"{d:02d}" for d in range(1, 32)],
+        "day": [f"{d:02d}" for d in days],
         "time": list(config["resource"]["hours"]),
         "area": config["resource"]["area"],
         "data_format": "netcdf",
@@ -468,7 +499,13 @@ def _load_month_daily_dataframe(context: AssetExecutionContext, nc_path: str, ye
 
         ds = xr.open_dataset(actual_nc_path, engine="h5netcdf")
 
-        df = aggregate_hourly_to_daily(ds)
+        try:
+            df = aggregate_hourly_to_daily(ds)
+        except ValueError as e:
+            # Contexte mois manquant dans l'erreur d'origine (`aggregate_hourly_to_daily`
+            # est pure et ignore year/month) : essentiel pour diagnostiquer QUEL mois a
+            # échoué quand plusieurs mois sont téléchargés concurremment.
+            raise ValueError(f"{year}-{month:02d}: {e}") from e
         context.log.info(f"{year}-{month:02d}: {len(df):,} lignes agrégées (jour x cellule, mer exclue)")
         return df
     finally:
@@ -492,13 +529,20 @@ def process_daily_stats_range(
     Pour la fenêtre [start_date, end_date] :
     1. Détermine les mois calendaires à télécharger (`_months_in_range`).
     2. Une requête CDS `reanalysis-era5-land` PAR MOIS (horaire brut, 24 pas,
-       jours 1-31), soumises CONCURREMMENT (ThreadPoolExecutor, un client CDS
-       par thread, `months_concurrency` dans le yaml — défaut 4). L'archive
-       brute n'est pas saturée comme le produit dérivé : la parallélisation
-       accélère une partition multi-mois sans dégrader le service.
+       jours CLAMPÉS sur la fenêtre réelle via `_days_for_month` — jamais
+       `1..31` figé, cf. `_build_month_request`), soumises CONCURREMMENT
+       (ThreadPoolExecutor, un client CDS par thread, `months_concurrency`
+       dans le yaml — défaut 4). L'archive brute n'est pas saturée comme le
+       produit dérivé : la parallélisation accélère une partition multi-mois
+       sans dégrader le service.
     3. Chaque mois -> DataFrame journalier via `aggregate_hourly_to_daily`
        (agrégation LOCALE mean/min/max, remplace les 3 requêtes CDS du
-       produit dérivé).
+       produit dérivé). Un mois à 0 pas de temps (fichier CDS corrompu/vide)
+       fait lever une erreur qui interrompt toute la partition — y compris les
+       mois déjà téléchargés avec succès, non insérés — mais c'est sûr à
+       relancer (DELETE overlap + INSERT est idempotent) ; avec des jours
+       dérivés de la fenêtre réelle, ce cas ne devrait plus se produire par
+       construction (on ne demande plus jamais un jour hors calendrier).
     4. Concaténation de tous les mois, puis filtre sur la fenêtre EXACTE
        demandée (utile pour `era5_daily_temp_stats_update`, dont la fenêtre
        ne coïncide pas forcément avec des bornes de mois calendaires).
@@ -555,7 +599,7 @@ def process_daily_stats_range(
         def _download_for_month(year: int, month: int) -> tuple[tuple[int, int], str]:
             # Client CDS dédié à ce thread (cf. _build_cds_client).
             thread_client = _build_cds_client(cds_api_url, cds_api_key)
-            request = _build_month_request(config, year, month)
+            request = _build_month_request(config, year, month, start_date, end_date)
             label = f"{year}-{month:02d}"
             tmp_path = _download_cds_request(context, thread_client, dataset, request, label, max_retries, retry_delay)
             return (year, month), tmp_path

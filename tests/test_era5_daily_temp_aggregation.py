@@ -8,12 +8,14 @@ Nécessite xarray/numpy/pandas réels (pas de stub) : dagster est stubbé par
 `tests/conftest.py` mais reste inerte ici (le module importé ne dépend que du
 décorateur `@asset`, jamais appelé par ces tests).
 """
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
 
-from hubeau_pipeline.assets.bronze.era5_daily_temp_assets import aggregate_hourly_to_daily
+from hubeau_pipeline.assets.bronze.era5_daily_temp_assets import _days_for_month, aggregate_hourly_to_daily
 
 LAT_RAW = np.array([45.000000001, 46.099999999])  # -> arrondi 0.1° : 45.0, 46.1
 LON_RAW = np.array([2.000000001, 3.099999999])     # -> arrondi 0.1° : 2.0, 3.1
@@ -167,3 +169,79 @@ def test_output_columns_and_time_dtype():
     df = aggregate_hourly_to_daily(ds)
     assert list(df.columns) == ["time", "latitude", "longitude", "t2m_mean", "t2m_min", "t2m_max"]
     assert pd.api.types.is_datetime64_any_dtype(df["time"])
+
+
+# ============================================================================
+# _days_for_month — anti-cache CADS : jours dérivés de la fenêtre réelle,
+# jamais un `1..31` figé (cf. incident 2026-06-24, era5_assets.py).
+# ============================================================================
+
+def test_days_for_month_window_within_single_month():
+    # Fenêtre entière contenue dans un seul mois : clampée aux deux bouts.
+    start, end = datetime(2024, 3, 5), datetime(2024, 3, 20)
+    days = _days_for_month(2024, 3, start, end)
+    assert days == list(range(5, 21))
+
+
+def test_days_for_month_window_spanning_three_months():
+    start, end = datetime(2024, 1, 20), datetime(2024, 3, 10)
+
+    first_month = _days_for_month(2024, 1, start, end)
+    middle_month = _days_for_month(2024, 2, start, end)
+    last_month = _days_for_month(2024, 3, start, end)
+
+    assert first_month == list(range(20, 32))  # clampé au début (janvier = 31j)
+    assert middle_month == list(range(1, 30))  # 2024 bissextile -> février complet = 29j
+    assert last_month == list(range(1, 11))    # clampé à la fin
+
+
+def test_days_for_month_window_ending_mid_month_nightly_update_shape():
+    # Simule `era5_daily_temp_stats_update`: fenêtre ouverte au début du mois
+    # en cours, se terminant "hier" (now - lag). Le dernier jour == end_date.day.
+    start, end = datetime(2024, 6, 1), datetime(2024, 6, 15)
+    days = _days_for_month(2024, 6, start, end)
+    assert days[-1] == 15
+    assert days == list(range(1, 16))
+
+
+def test_days_for_month_anti_cache_property_end_date_advances():
+    # LA propriété qui corrige le bug : deux fenêtres consécutives (comme deux
+    # exécutions nightly successives, end_date avançant d'1 jour) DOIVENT
+    # produire des listes de jours différentes -> signature de requête CDS
+    # différente -> pas de cache périmé.
+    start = datetime(2024, 6, 1)
+    days_night_1 = _days_for_month(2024, 6, start, datetime(2024, 6, 15))
+    days_night_2 = _days_for_month(2024, 6, start, datetime(2024, 6, 16))
+    assert days_night_1 != days_night_2
+    assert days_night_2[-1] == 16
+
+
+def test_days_for_month_no_future_days_requested():
+    # Le mois en cours ne doit jamais inclure de jours au-delà de end_date,
+    # même si le mois calendaire a plus de jours restants.
+    start, end = datetime(2024, 6, 1), datetime(2024, 6, 15)
+    days = _days_for_month(2024, 6, start, end)
+    assert max(days) == 15
+    assert 16 not in days
+    assert 30 not in days
+
+
+def test_days_for_month_leap_year_february_full():
+    # Mois intermédiaire d'une fenêtre multi-mois, février bissextile -> 29 jours.
+    start, end = datetime(2024, 1, 15), datetime(2024, 3, 5)
+    days = _days_for_month(2024, 2, start, end)
+    assert days == list(range(1, 30))
+    assert len(days) == 29
+
+
+def test_days_for_month_non_leap_year_february_full():
+    start, end = datetime(2023, 1, 15), datetime(2023, 3, 5)
+    days = _days_for_month(2023, 2, start, end)
+    assert days == list(range(1, 29))
+    assert len(days) == 28
+
+
+def test_days_for_month_single_day_window():
+    start = end = datetime(2024, 6, 1)
+    days = _days_for_month(2024, 6, start, end)
+    assert days == [1]
