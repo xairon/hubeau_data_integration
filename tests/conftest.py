@@ -33,6 +33,17 @@ if "hubeau_pipeline.assets" not in sys.modules:
     assets_pkg.__package__ = "hubeau_pipeline.assets"
     sys.modules["hubeau_pipeline.assets"] = assets_pkg
 
+# Same trick one level deeper: hubeau_pipeline.assets.bronze/__init__.py pulls
+# in dlt_assets.py + era5_assets.py (dlt, cdsapi, psycopg2...) as a side
+# effect of the package import. Stubbing the package lets tests import a
+# single submodule (e.g. era5_daily_temp_assets) without paying for the rest
+# of the bronze package.
+if "hubeau_pipeline.assets.bronze" not in sys.modules:
+    bronze_pkg = types.ModuleType("hubeau_pipeline.assets.bronze")
+    bronze_pkg.__path__ = [str(Path(_SRC_ROOT) / "assets" / "bronze")]  # type: ignore[assignment]
+    bronze_pkg.__package__ = "hubeau_pipeline.assets.bronze"
+    sys.modules["hubeau_pipeline.assets.bronze"] = bronze_pkg
+
 # Stub dagster so asset modules can be imported without the full install.
 if "dagster" not in sys.modules:
     dagster_stub = types.ModuleType("dagster")
@@ -43,9 +54,24 @@ if "dagster" not in sys.modules:
             return args[0]
         return lambda fn: fn
 
+    class _StaticPartitionsDefinitionStub:
+        """Minimal stand-in: only stores the partition keys, no scheduling logic."""
+
+        def __init__(self, partition_keys, **kwargs):
+            self.partition_keys = partition_keys
+
+    class _OutputStub:
+        """Minimal stand-in for dagster.Output: keeps value/metadata, no I/O manager wiring."""
+
+        def __init__(self, value, metadata=None):
+            self.value = value
+            self.metadata = metadata
+
     dagster_stub.asset = _asset
     dagster_stub.AssetExecutionContext = object
-    dagster_stub.MetadataValue = types.SimpleNamespace(int=lambda x: x)
+    dagster_stub.MetadataValue = types.SimpleNamespace(int=lambda x: x, text=lambda x: x)
+    dagster_stub.StaticPartitionsDefinition = _StaticPartitionsDefinitionStub
+    dagster_stub.Output = _OutputStub
     sys.modules["dagster"] = dagster_stub
 
 # Stub hubeau_pipeline.resources (PostgreSQLResource not needed in unit tests).

@@ -1,20 +1,52 @@
 """
-ERA5 Daily Temperature Stats Bronze Layer Assets (derived-era5-land-daily-statistics)
+ERA5 Daily Temperature Stats Bronze Layer Assets (archive horaire brute agrégée localement)
 
 Miroir de `era5_assets.py` (client CADS, retry/backoff, DELETE overlap + INSERT
-idempotent, hypertable, conversion K->degC) pour le dataset CDS
-`derived-era5-land-daily-statistics` : moyenne/min/max journalières de
-`2m_temperature`, calculées côté CADS sur les 24 pas horaires.
+idempotent, hypertable, conversion K->degC) pour produire moyenne/min/max
+journalières de `2m_temperature` dans `bronze.era5_daily_temp_stats`.
 
-Différence structurante vs l'ingestion horaire existante : le paramètre
-`daily_statistic` est un STRING simple (pas une liste) -> 3 requêtes CDS
-séparées par fenêtre (une par statistique), dont les résultats sont fusionnés
-en mémoire sur (time, latitude, longitude) avant insertion.
+## Pourquoi l'archive horaire brute plutôt que le produit dérivé CADS
+
+La première implémentation interrogeait `derived-era5-land-daily-statistics`
+(3 requêtes CDS par fenêtre, une par statistique daily_mean/minimum/maximum,
+calculées côté CADS). Ce service post-traité est une file d'attente minuscule
+et globalement saturée : **~43h d'attente par ANNÉE demandée** (mesuré). Un
+backfill complet 1950-présent y aurait pris ~6 semaines — inutilisable.
+
+L'archive `reanalysis-era5-land` (horaire brute) est rapide (mesuré : 3 jours
+d'horaire = 27s ; 1 MOIS complet d'horaire = 179s, 17.7 MB, ACCEPTED). Or la
+donnée horaire brute EST la donnée sur laquelle le CADS calcule ces mêmes
+statistiques journalières côté serveur — il suffit de refaire l'agrégation en
+local (`aggregate_hourly_to_daily`, groupby+mean/min/max) pour obtenir un
+résultat équivalent.
+
+**Équivalence vérifiée empiriquement** (2026-07) en comparant, cellule-jour
+par cellule-jour, l'agrégation locale de l'horaire brut contre les données
+1950 déjà en base via le produit dérivé (34 488 cellule-jours) :
+- Tn (minimum) et Tx (maximum) : identiques à 0.0000°C près (100% des lignes)
+- moyenne : identique à 0.01°C près (arrondi float de la colonne NUMERIC(6,2)
+  côté PostgreSQL, pas un écart réel de calcul)
+
+Conclusion : même donnée, ~4h de traitement au lieu de 6 semaines.
+
+## Design
+
+1 requête CDS par MOIS calendaire (dataset `reanalysis-era5-land`, variable
+`2m_temperature`, 24 pas horaires, jours 1-31, zone France) au lieu de 3
+requêtes par fenêtre pour le produit dérivé. Les mois d'une partition sont
+téléchargés CONCURREMMENT (`ThreadPoolExecutor`, un `cdsapi.Client` par
+thread — cf. `_build_cds_client`) car l'archive brute n'est pas saturée et
+absorbe plusieurs requêtes en parallèle sans dégrader le temps de traitement.
+Chaque mois est agrégé en DataFrame journalier (`aggregate_hourly_to_daily`),
+puis tous les mois sont concaténés et filtrés EXACTEMENT sur la fenêtre
+demandée (utile pour `era5_daily_temp_stats_update`, dont la fenêtre ne
+coïncide pas forcément avec des bornes de mois).
 
 Entrées normatives :
 - Spec design : docs/superpowers/specs/2026-07-07-era5-daily-temperature-stats-design.md
-- Spike CDS   : .superpowers/sdd/spike-cds-daily-stats.md (requête canonique,
-  structure NetCDF, gotchas `number`/`valid_time`/Kelvin/NaN=mer)
+- Spike CDS   : .superpowers/sdd/spike-cds-daily-stats.md (structure NetCDF,
+  gotchas `number`/`valid_time`/Kelvin/NaN=mer — toujours valables pour
+  l'horaire brut, même structure de fichier)
 - Référence   : src/hubeau_pipeline/assets/bronze/era5_assets.py
 
 Câblé dans assets/__init__.py, jobs/era5_jobs.py (era5_daily_temp_historical_load
@@ -64,7 +96,7 @@ ERA5_DAILY_TEMP_PARTITIONS_DEF = StaticPartitionsDefinition(ERA5_DAILY_TEMP_PART
 
 
 # ============================================================================
-# SHARED HELPERS
+# SHARED HELPERS - DB
 # ============================================================================
 
 def _connect():
@@ -90,7 +122,7 @@ def _connect():
 
 
 def _ensure_table(conn):
-    """Create bronze.era5_daily_temp_stats if not exists (idempotent)."""
+    """Create bronze.era5_daily_temp_stats if not exists (idempotent). Schéma inchangé."""
     with conn.cursor() as cur:
         cur.execute("CREATE SCHEMA IF NOT EXISTS bronze;")
 
@@ -239,8 +271,8 @@ def _delete_overlap_and_insert_with_retry(
 
     Retry UNE fois (max_attempts=2) sur erreur DB transitoire
     (OperationalError/DatabaseError), avec une NOUVELLE connexion. Les
-    téléchargements CDS sont la partie coûteuse (heures d'attente file) : on ne
-    veut pas les perdre pour un hoquet DB passager après coup.
+    téléchargements CDS sont la partie coûteuse : on ne veut pas les perdre
+    pour un hoquet DB passager après coup.
     """
     for attempt in range(1, max_attempts + 1):
         try:
@@ -256,23 +288,61 @@ def _delete_overlap_and_insert_with_retry(
                 raise
 
 
+# ============================================================================
+# SHARED HELPERS - CDS download (archive horaire brute, 1 requête / mois)
+# ============================================================================
+
 def _build_cds_client(cds_api_url: str, cds_api_key: str) -> "cdsapi.Client":
     """Instancie un client CDS dédié (un par thread : cdsapi.Client n'est pas garanti thread-safe si partagé)."""
     return cdsapi.Client(url=cds_api_url, key=cds_api_key)
 
 
-def _download_one_statistic(
+def _months_in_range(start_date: datetime, end_date: datetime) -> list[tuple[int, int]]:
+    """Liste des mois calendaires (year, month) couvrant [start_date, end_date], bornes incluses."""
+    months = []
+    year, month = start_date.year, start_date.month
+    while (year, month) <= (end_date.year, end_date.month):
+        months.append((year, month))
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    return months
+
+
+def _build_month_request(config: dict, year: int, month: int) -> dict:
+    """
+    Requête CDS `reanalysis-era5-land` pour UN mois calendaire complet (jours
+    1-31 fixes, 24 pas horaires) — l'agrégation locale filtre ensuite sur la
+    fenêtre exacte demandée. Contrairement à l'ancienne ingestion horaire
+    (era5_assets.py), pas besoin de dériver les jours réels de la fenêtre : ce
+    n'est pas un produit "dérivé" sujet à un cache CADS périmé, la donnée
+    brute d'un mois passé est stable.
+    """
+    return {
+        "variable": [config["resource"]["variable"]],
+        "year": str(year),
+        "month": f"{month:02d}",
+        "day": [f"{d:02d}" for d in range(1, 32)],
+        "time": list(config["resource"]["hours"]),
+        "area": config["resource"]["area"],
+        "data_format": "netcdf",
+    }
+
+
+def _download_cds_request(
     context: AssetExecutionContext,
     client: "cdsapi.Client",
     dataset: str,
     request: dict,
-    stat_label: str,
+    label: str,
     max_retries: int,
     retry_delay: float,
 ) -> str:
     """
-    Télécharge une statistique journalière (mean/min/max) et retourne le
-    chemin du fichier NetCDF local. Retry exponentiel comme era5_assets.py.
+    Télécharge une requête CDS (1 mois d'horaire brut) et retourne le chemin
+    du fichier local (NetCDF direct ou ZIP contenant un NetCDF). Retry
+    exponentiel comme era5_assets.py.
     """
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
         tmp_path = tmp.name
@@ -282,19 +352,19 @@ def _download_one_statistic(
         for attempt in range(max_retries):
             try:
                 client.retrieve(dataset, request, tmp_path)
-                context.log.info(f"Download complete ({stat_label}): {tmp_path}")
+                context.log.info(f"Download complete ({label}): {tmp_path}")
                 return tmp_path
             except Exception as e:
                 if attempt < max_retries - 1:
                     context.log.warning(
-                        f"CDS API failed for {stat_label} (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"CDS API failed for {label} (attempt {attempt + 1}/{max_retries}): {e}. "
                         f"Retrying in {delay}s..."
                     )
                     import time
                     time.sleep(delay)
                     delay *= 2  # Exponential backoff
                 else:
-                    context.log.error(f"CDS API failed for {stat_label} after {max_retries} attempts: {e}")
+                    context.log.error(f"CDS API failed for {label} after {max_retries} attempts: {e}")
                     raise
     except Exception:
         # Retries épuisés : le fichier temp vide/partiel n'a pas de propriétaire
@@ -304,27 +374,90 @@ def _download_one_statistic(
         raise
 
 
-def _load_statistic_dataframe(
-    context: AssetExecutionContext,
-    nc_path: str,
-    start_date: datetime,
-    end_date: datetime,
-    target_column: str,
-) -> pd.DataFrame:
+# ============================================================================
+# CORE AGGREGATION (pure, testable sans I/O réseau/DB)
+# ============================================================================
+
+def aggregate_hourly_to_daily(ds: "xr.Dataset") -> pd.DataFrame:
     """
-    Ouvre le NetCDF d'une statistique, filtre la fenêtre exacte, convertit
-    K->degC et renvoie un DataFrame [time, latitude, longitude, <target_column>].
+    Agrège un Dataset xarray HORAIRE ERA5-Land (variable `t2m`, Kelvin) en
+    moyenne/min/max JOURNALIÈRES par cellule de grille, en °C.
+
+    Remplace les 3 requêtes CDS `derived-era5-land-daily-statistics` (service
+    saturé, ~43h/an) : la donnée horaire brute EST la donnée sur laquelle le
+    CADS calcule ces mêmes statistiques -> on refait l'agrégation en local.
+    Équivalence vérifiée empiriquement (2026-07) contre les données 1950 déjà
+    en base : Tn/Tx identiques à 0.0000°C (100%), moyenne à 0.01°C près
+    (arrondi float de la colonne NUMERIC(6,2)).
+
+    Étapes (design figé) :
+    1. Dim temporelle `valid_time` (fallback `time`), variable `t2m`.
+    2. Coordonnée scalaire `number` (ensemble member id) droppée si présente.
+    3. Kelvin -> °C.
+    4. groupby(f"{tdim}.date") -> .mean() / .min() / .max().
+    5. Arrondi grille 0.1° (lat/lon) + arrondi 2 décimales (temps, colonne
+       NUMERIC(6,2)).
+    6. Lignes où t2m_mean est NaN supprimées (cellules mer : masque terre/mer
+       identique sur les 3 statistiques, donc aussi filtre implicite sur
+       t2m_min/t2m_max).
+
+    Retourne un DataFrame [time, latitude, longitude, t2m_mean, t2m_min, t2m_max].
+    NaN résiduel (ex: t2m_min/max NaN alors que t2m_mean ne l'est pas — cas
+    limite non attendu en pratique) est laissé tel quel ; la conversion
+    NaN -> None pour l'insertion DB est faite par l'appelant.
     """
-    actual_nc_path = nc_path
+    if "number" in ds.coords or "number" in ds.variables:
+        ds = ds.drop_vars("number")
+
+    if "t2m" not in ds.data_vars:
+        raise ValueError(f"ERA5-Land hourly Dataset missing 't2m'. Available: {list(ds.data_vars)}")
+
+    tdim = "valid_time" if "valid_time" in ds.dims else "time"
+    if ds.sizes.get(tdim, 0) == 0:
+        raise ValueError("ERA5-Land hourly Dataset has 0 time steps - corrupted or empty download")
+
+    t2m_celsius = ds["t2m"] - 273.15  # K -> degC, avant agrégation
+
+    grouped = t2m_celsius.groupby(f"{tdim}.date")
+    daily = xr.Dataset(
+        {
+            "t2m_mean": grouped.mean(),
+            "t2m_min": grouped.min(),
+            "t2m_max": grouped.max(),
+        }
+    )
+
+    df = daily.to_dataframe().reset_index()
+    df = df.rename(columns={"date": "time"})
+    df["time"] = pd.to_datetime(df["time"])
+
+    # Arrondi grille 0.1° (ERA5-Land natif) : évite les artefacts float lors
+    # des concaténations/filtrages sur latitude/longitude entre mois.
+    df["latitude"] = df["latitude"].round(1)
+    df["longitude"] = df["longitude"].round(1)
+    for col in ("t2m_mean", "t2m_min", "t2m_max"):
+        df[col] = df[col].round(2)
+
+    # Cellules mer : t2m_mean NaN sur toute la fenêtre -> supprimées.
+    df = df[df["t2m_mean"].notna()]
+
+    return df[["time", "latitude", "longitude", "t2m_mean", "t2m_min", "t2m_max"]]
+
+
+def _load_month_daily_dataframe(context: AssetExecutionContext, nc_path: str, year: int, month: int) -> pd.DataFrame:
+    """
+    Ouvre le fichier téléchargé pour un mois (NetCDF direct ou ZIP contenant
+    un NetCDF, mirroir de era5_assets.py), agrège via
+    `aggregate_hourly_to_daily`, et nettoie les fichiers intermédiaires.
+    """
     ds = None
+    actual_nc_path = nc_path
     try:
-        # Défensif : le produit sert du NetCDF direct (spike §1/§6), mais on
-        # garde le fallback ZIP par sécurité (comme process_era5_range_to_timeseries).
         with open(nc_path, "rb") as f:
             header = f.read(4)
 
         if header == b"PK\x03\x04":
-            context.log.info(f"Format détecté: ZIP pour {target_column}. Extraction en cours...")
+            context.log.info(f"Format détecté: ZIP pour {year}-{month:02d}. Extraction en cours...")
             with zipfile.ZipFile(nc_path, "r") as zf:
                 nc_files = [n for n in zf.namelist() if n.endswith(".nc")]
                 if not nc_files:
@@ -335,41 +468,19 @@ def _load_statistic_dataframe(
 
         ds = xr.open_dataset(actual_nc_path, engine="h5netcdf")
 
-        if "t2m" not in ds.data_vars:
-            raise ValueError(f"ERA5 daily stats NetCDF missing 't2m'. Available: {list(ds.data_vars)}")
-
-        # Coordonnée scalaire `number` (ensemble member id) à dropper (spike §2/§6)
-        if "number" in ds.coords or "number" in ds.variables:
-            ds = ds.drop_vars("number")
-
-        time_dim = "valid_time" if "valid_time" in ds.dims else "time"
-        if ds.dims.get(time_dim, 0) == 0:
-            raise ValueError("ERA5 daily stats NetCDF has 0 time steps - corrupted or empty download")
-
-        ds = ds.sel({time_dim: slice(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))})
-
-        df = ds.to_dataframe().reset_index()
-        df = df.rename(columns={"t2m": target_column, time_dim: "time"})
-        if "number" in df.columns:
-            df = df.drop(columns=["number"])
-
-        # K -> degC, arrondi 2 décimales (table NUMERIC(6,2))
-        df[target_column] = (df[target_column] - 273.15).round(2)
-
-        # Arrondi défensif des coordonnées (pattern du mart grille ERA5, commit
-        # ea9ad30) : la grille est déjà des multiples exacts de 0.1 mais le
-        # merge des 3 statistiques sur (time, latitude, longitude) doit
-        # comparer des floats identiques.
-        df["latitude"] = df["latitude"].round(3)
-        df["longitude"] = df["longitude"].round(3)
-
-        return df[["time", "latitude", "longitude", target_column]]
+        df = aggregate_hourly_to_daily(ds)
+        context.log.info(f"{year}-{month:02d}: {len(df):,} lignes agrégées (jour x cellule, mer exclue)")
+        return df
     finally:
         if ds is not None:
             ds.close()
         if actual_nc_path != nc_path and os.path.exists(actual_nc_path):
             os.remove(actual_nc_path)
 
+
+# ============================================================================
+# ORCHESTRATION - download concurrent des mois + agrégation + DELETE/INSERT
+# ============================================================================
 
 def process_daily_stats_range(
     context: AssetExecutionContext,
@@ -379,26 +490,28 @@ def process_daily_stats_range(
 ) -> int:
     """
     Pour la fenêtre [start_date, end_date] :
-    1. Une requête CDS par daily_statistic (mean/min/max) -> 3 NetCDF, soumises
-       CONCURREMMENT (ThreadPoolExecutor, un client CDS par thread) car l'attente
-       en file CADS (~2h/requête) domine largement le temps de traitement.
-    2. Chaque NetCDF -> DataFrame [time, latitude, longitude, t2m_<stat>].
-    3. Fusion OUTER des 3 DataFrames sur (time, latitude, longitude).
-       Choix : OUTER (pas INNER) pour ne pas perdre une cellule/jour si UNE
-       des 3 statistiques manque un jour ponctuel (retard partiel côté CADS) ;
-       on ne garde ensuite que les lignes où t2m_mean est renseigné (la
-       moyenne est la statistique de référence). Ce filtre élimine aussi les
-       cellules mer (NaN sur les 3 stats, même masque terre/mer partout).
-    4. K -> degC (fait par statistique avant fusion), DELETE overlap + INSERT.
+    1. Détermine les mois calendaires à télécharger (`_months_in_range`).
+    2. Une requête CDS `reanalysis-era5-land` PAR MOIS (horaire brut, 24 pas,
+       jours 1-31), soumises CONCURREMMENT (ThreadPoolExecutor, un client CDS
+       par thread, `months_concurrency` dans le yaml — défaut 4). L'archive
+       brute n'est pas saturée comme le produit dérivé : la parallélisation
+       accélère une partition multi-mois sans dégrader le service.
+    3. Chaque mois -> DataFrame journalier via `aggregate_hourly_to_daily`
+       (agrégation LOCALE mean/min/max, remplace les 3 requêtes CDS du
+       produit dérivé).
+    4. Concaténation de tous les mois, puis filtre sur la fenêtre EXACTE
+       demandée (utile pour `era5_daily_temp_stats_update`, dont la fenêtre
+       ne coïncide pas forcément avec des bornes de mois calendaires).
+    5. DELETE overlap + INSERT (idempotent, inchangé).
     Retourne le nombre de lignes insérées.
 
     Cycle de vie des connexions DB : AUCUNE connexion n'est tenue ouverte
-    pendant la phase de téléchargement CDS (étape 1, qui peut attendre
-    plusieurs HEURES en file CADS). `_ensure_table` utilise une connexion
-    courte fermée avant les téléchargements ; le DELETE+INSERT (étape 4) ouvre
-    une connexion FRAÎCHE après leur fin. Raison : connexions tuées côté
-    PostgreSQL après une attente trop longue -> perte des données déjà
-    téléchargées (run 1950 du 2026-07-07, échec après 6h34 d'attente).
+    pendant la phase de téléchargement CDS (étape 2). `_ensure_table` utilise
+    une connexion courte fermée avant les téléchargements ; le DELETE+INSERT
+    (étape 5) ouvre une connexion FRAÎCHE après leur fin. Raison : connexions
+    tuées côté PostgreSQL après une attente trop longue -> perte des données
+    déjà téléchargées (run 1950 du 2026-07-07, échec après 6h34 d'attente,
+    avant le passage à l'archive horaire brute).
     """
     tmp_paths = []
 
@@ -410,7 +523,7 @@ def process_daily_stats_range(
         finally:
             ensure_conn.close()
 
-        context.log.info(f"Downloading ERA5 daily temp stats for {file_id}...")
+        context.log.info(f"Downloading ERA5-Land hourly raw data for {file_id}...")
 
         with open(CONFIG_PATH) as f:
             config = yaml.safe_load(f)
@@ -429,106 +542,81 @@ def process_daily_stats_range(
         cds_api_url = config["credentials"]["cds_api_url"]
         dataset = config["resource"]["dataset"]
 
-        # Dériver year/month/day de la fenêtre RÉELLE (pas un day=[1..31] figé)
-        # pour éviter le cache CADS périmé — même piège que era5_assets.py.
-        window_dates = []
-        d = start_date
-        while d <= end_date:
-            window_dates.append(d)
-            d += timedelta(days=1)
-        years = sorted({dd.year for dd in window_dates})
-        months = sorted({dd.month for dd in window_dates})
-        days_list = sorted({dd.day for dd in window_dates})
-
-        base_request = {
-            "variable": [config["resource"]["variable"]],
-            "year": [str(y) for y in years],
-            "month": [f"{m:02d}" for m in months],
-            "day": [f"{dd:02d}" for dd in days_list],
-            "time_zone": config["resource"]["time_zone"],
-            "frequency": config["resource"]["frequency"],
-            "area": config["resource"]["area"],
-        }
-
         max_retries = int(config.get("performance", {}).get("retry_times", 3))
         retry_delay = float(config.get("performance", {}).get("retry_delay", 10.0))
+        months_concurrency = int(config.get("performance", {}).get("months_concurrency", 4))
 
-        stat_to_column = {
-            "daily_mean": "t2m_mean",
-            "daily_minimum": "t2m_min",
-            "daily_maximum": "t2m_max",
-        }
+        month_keys = _months_in_range(start_date, end_date)
+        context.log.info(
+            f"Fenêtre {start_date.date()} -> {end_date.date()} : {len(month_keys)} mois à télécharger "
+            f"(concurrence={months_concurrency})"
+        )
 
-        statistics = list(config["resource"]["daily_statistics"])
-
-        def _download_for_statistic(statistic: str) -> tuple[str, str]:
+        def _download_for_month(year: int, month: int) -> tuple[tuple[int, int], str]:
             # Client CDS dédié à ce thread (cf. _build_cds_client).
             thread_client = _build_cds_client(cds_api_url, cds_api_key)
-            request = dict(base_request, daily_statistic=statistic)
-            tmp_path = _download_one_statistic(
-                context, thread_client, dataset, request, statistic, max_retries, retry_delay
-            )
-            return statistic, tmp_path
+            request = _build_month_request(config, year, month)
+            label = f"{year}-{month:02d}"
+            tmp_path = _download_cds_request(context, thread_client, dataset, request, label, max_retries, retry_delay)
+            return (year, month), tmp_path
 
-        # Soumission concurrente des 3 statistiques : chaque requête passe
-        # ~2h en file CADS, les paralléliser divise par ~3 le temps d'une
-        # partition (au lieu de 3x2h en séquentiel). `as_completed` attend
-        # TOUTES les tâches avant de sortir la boucle, donc un échec sur un
-        # thread n'interrompt pas les autres : ils ont le temps de finir
-        # (succès -> fichier temp conservé pour cleanup global, échec ->
-        # `_download_one_statistic` nettoie déjà son propre fichier temp
-        # partiel) avant qu'on ne lève l'exception agrégée ci-dessous.
-        download_results: dict[str, str] = {}
-        errors: list[tuple[str, Exception]] = []
+        # Soumission concurrente des mois : `as_completed` attend TOUTES les
+        # tâches avant de sortir la boucle, donc un échec sur un thread
+        # n'interrompt pas les autres (ils ont le temps de finir avant qu'on
+        # ne lève l'exception agrégée ci-dessous). Succès -> fichier temp
+        # conservé pour cleanup global ; échec -> `_download_cds_request`
+        # nettoie déjà son propre fichier temp partiel.
+        download_results: dict[tuple[int, int], str] = {}
+        errors: list[tuple[tuple[int, int], Exception]] = []
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {executor.submit(_download_for_statistic, statistic): statistic for statistic in statistics}
+        with ThreadPoolExecutor(max_workers=months_concurrency) as executor:
+            futures = {executor.submit(_download_for_month, y, m): (y, m) for (y, m) in month_keys}
             for future in as_completed(futures):
-                statistic = futures[future]
+                key = futures[future]
                 try:
-                    stat_label, tmp_path = future.result()
-                    download_results[stat_label] = tmp_path
+                    result_key, tmp_path = future.result()
+                    download_results[result_key] = tmp_path
                     tmp_paths.append(tmp_path)
                 except Exception as e:
-                    errors.append((statistic, e))
+                    errors.append((key, e))
 
         if errors:
-            failed_stats = ", ".join(stat for stat, _ in errors)
-            context.log.error(f"Daily stats download failed for: {failed_stats}")
+            failed_months = ", ".join(f"{y}-{m:02d}" for (y, m), _ in errors)
+            context.log.error(f"Téléchargement échoué pour: {failed_months}")
             # tmp_paths des téléchargements réussis sont nettoyés par le
             # `finally` de cette fonction ; on relève la 1ère erreur rencontrée.
             raise errors[0][1]
 
-        stat_dataframes = []
-        for statistic in statistics:
-            target_column = stat_to_column[statistic]
-            tmp_path = download_results[statistic]
-            df_stat = _load_statistic_dataframe(context, tmp_path, start_date, end_date, target_column)
-            context.log.info(f"{statistic}: {len(df_stat):,} rows (raw, before merge/filter)")
-            stat_dataframes.append(df_stat)
+        month_dataframes = []
+        for year, month in month_keys:
+            tmp_path = download_results[(year, month)]
+            df_month = _load_month_daily_dataframe(context, tmp_path, year, month)
+            month_dataframes.append(df_month)
 
-        merge_keys = ["time", "latitude", "longitude"]
-        merged = stat_dataframes[0]
-        for df_stat in stat_dataframes[1:]:
-            merged = merged.merge(df_stat, on=merge_keys, how="outer")
+        if month_dataframes:
+            merged = pd.concat(month_dataframes, ignore_index=True)
+        else:
+            merged = pd.DataFrame(columns=["time", "latitude", "longitude", "t2m_mean", "t2m_min", "t2m_max"])
 
-        # Ne garder que les lignes où la moyenne est renseignée (cf. docstring)
-        merged = merged[merged["t2m_mean"].notna()]
+        # Filtre EXACT sur la fenêtre demandée (les requêtes mensuelles
+        # couvrent le mois entier, la fenêtre update peut être plus étroite).
+        window_start = pd.Timestamp(start_date.date())
+        window_end = pd.Timestamp(end_date.date())
+        merged = merged[(merged["time"] >= window_start) & (merged["time"] <= window_end)]
 
         merged["source_file_id"] = file_id
         merged = merged[["time", "latitude", "longitude", "t2m_mean", "t2m_min", "t2m_max", "source_file_id"]]
 
         # NaN -> None : psycopg2 adapte un float NaN en 'NaN'::numeric (valeur
         # acceptée par PostgreSQL et triée AU-DESSUS de toutes les autres) au
-        # lieu de NULL. t2m_min/t2m_max peuvent rester NaN après le merge OUTER
-        # (une statistique ponctuellement absente) : on force explicitement NULL.
+        # lieu de NULL.
         merged = merged.astype(object).where(merged.notna(), None)
 
         context.log.info(f"DataFrame fusionné prêt: {len(merged):,} rows")
 
         # Connexion FRAÎCHE ouverte APRÈS la fin des téléchargements (cf.
         # docstring). Retry 1x sur erreur DB transitoire pour ne jamais perdre
-        # des heures de téléchargement CDS pour un hoquet DB passager.
+        # des téléchargements CDS pour un hoquet DB passager.
         return _delete_overlap_and_insert_with_retry(context, start_date, end_date, merged)
 
     finally:
@@ -553,8 +641,9 @@ def era5_daily_temp_stats_historical(context: AssetExecutionContext):
     Historique ERA5 daily temp stats (1950-Present).
 
     Partitionné par chunks de 1 an (ERA5_DAILY_TEMP_YEARS_PER_CHUNK).
-    Télécharge (3 requêtes CDS : mean/min/max) et insère directement dans
-    `bronze.era5_daily_temp_stats`.
+    Télécharge l'archive horaire brute (12 requêtes CDS/an, une par mois,
+    concurrentes) et agrège localement mean/min/max avant insertion directe
+    dans `bronze.era5_daily_temp_stats`.
     """
     partition_key = context.partition_key
     start_year, end_year = map(int, partition_key.split("_"))
