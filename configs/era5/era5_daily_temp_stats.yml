@@ -68,7 +68,9 @@ performance:
   # brute, rapide et non saturée -> peut absorber plusieurs requêtes en
   # parallèle sans dégrader le temps de traitement, contrairement à l'ancien
   # produit dérivé). Un client cdsapi.Client dédié par thread.
-  months_concurrency: 4
+  # 6 mois en parallèle : l'archive brute reanalysis-era5-land n'est pas saturée
+  # (460 slots globaux). Mesuré à 4 → ~30 min/année ; le téléchargement domine (~25 min).
+  months_concurrency: 6
 
 credentials:
   cds_api_url: https://cds.climate.copernicus.eu/api
