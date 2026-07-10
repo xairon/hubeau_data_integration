@@ -15,16 +15,31 @@ storage:
       password:
         env: DAGSTER_PG_PASSWORD
 
-# DLT ne supporte pas les runs concurrents avec le même pipeline
-# Un seul run à la fois pour éviter les FileNotFoundError pendant normalize
+# Concurrence par LANE (2026-07-08) : plusieurs runs simultanés, mais chaque pipeline
+# DLT plafonné à 1 (le risque « FileNotFoundError pendant normalize » ne concerne que
+# 2 runs du MÊME pipeline DLT — piézo vs hydro sont des pipelines distincts, parallèle sûr ;
+# le backfill temp ERA5 n'utilise pas DLT). Objectif : le backfill historique tourne en
+# parallèle SANS jamais affamer la chaîne nocturne, et à ×3 le débit (file CDS).
 run_coordinator:
   module: dagster.core.run_coordinator
   class: QueuedRunCoordinator
   config:
-    max_concurrent_runs: 1  # ⚠️ CRITIQUE: Un seul run pour éviter conflits DLT
+    max_concurrent_runs: 5
     tag_concurrency_limits:
-      - key: "dagster/concurrency_key"
-        limit: 1
+      # --- Pipelines DLT : jamais 2 fois le même en parallèle ---
+      - {key: "dagster/concurrency_key", value: "daily_piezometry_bronze", limit: 1}
+      - {key: "dagster/concurrency_key", value: "daily_hydrometry_bronze", limit: 1}
+      - {key: "dagster/concurrency_key", value: "piezometry_chroniques_bronze", limit: 1}
+      - {key: "dagster/concurrency_key", value: "hydrometry_chroniques_bronze", limit: 1}
+      - {key: "dagster/concurrency_key", value: "piezometry_stations_bronze", limit: 1}
+      - {key: "dagster/concurrency_key", value: "hydrometry_stations_bronze", limit: 1}
+      - {key: "dagster/concurrency_key", value: "reference_data_bronze", limit: 1}
+      # --- dbt : chaîne transform/quality/index/docs jamais dupliquée ---
+      - {key: "dagster/concurrency_key", value: "dbt_pipeline", limit: 1}
+      # --- ERA5 grille (update quotidien) : 1 ---
+      - {key: "dagster/concurrency_key", value: "era5_weekly", limit: 1}
+      # --- Backfill historique ERA5 : jusqu'à 3 partitions CDS en parallèle (débit) ---
+      - {key: "dagster/concurrency_key", value: "era5_historical", limit: 3}
 
 telemetry:
   enabled: false
