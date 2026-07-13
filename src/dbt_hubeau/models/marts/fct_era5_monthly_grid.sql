@@ -22,8 +22,16 @@
 -- INCREMENTAL delete+insert : régénère les 3 derniers mois (predicate 4 mois > fenêtre
 -- régénérée pour couvrir le 1er du mois tronqué — sinon conflit de PK).
 -- Table plain (PAS d'hypertable) : règle projet pour les tables mensuelles.
+--
+-- CUTOVER TEMPÉRATURE (2026-07-13) : temperature_moyenne/min/max viennent désormais de
+-- stg_era5_daily_temp_stats (t2m_mean/min/max), calculées côté CDS à partir des 24 pas
+-- horaires du jour — une vraie moyenne/Tn/Tx journalière. Avant, ces colonnes dérivaient
+-- de stg_era5_timeseries.temperature_2m, un échantillon instantané à 00:00 UTC (biais
+-- froid nocturne ~2-4°C, pas une vraie moyenne). Précipitation/ETP/bilan_hydrique/nb_jours/
+-- mois_complet restent inchangés, dérivés de stg_era5_timeseries (pas d'équivalent
+-- journalier vrai dispo pour ces variables). Voir docs/ERA5.md.
 
-WITH daily AS (
+WITH precip_daily AS (
     -- Arrondi défensif 0.1° + dédup : silver a déjà contenu des variantes float non
     -- arrondies (jan-mai 2026, purgées) ; même défense que int_era5_grid_points /
     -- int_era5_for_all_stations pour qu'une pollution future ne fragmente pas la grille
@@ -32,7 +40,6 @@ WITH daily AS (
         ROUND(latitude, 1)  AS latitude,
         ROUND(longitude, 1) AS longitude,
         time::date AS jour,
-        temperature_2m,
         total_precipitation,
         potential_evaporation
     FROM {{ ref('stg_era5_timeseries') }}
@@ -43,25 +50,46 @@ WITH daily AS (
     WHERE time >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '{{ var("era5_monthly_grid_lookback_months", 3) }} months')
     {% endif %}
     ORDER BY ROUND(latitude, 1), ROUND(longitude, 1), time::date, created_at DESC NULLS LAST
+),
+
+temp_daily AS (
+    -- Même dédup défensive que precip_daily, appliquée à la vraie source journalière
+    -- (24 pas horaires agrégés côté CDS, pas un instantané 00:00 UTC).
+    SELECT DISTINCT ON (ROUND(latitude, 1), ROUND(longitude, 1), time::date)
+        ROUND(latitude, 1)  AS latitude,
+        ROUND(longitude, 1) AS longitude,
+        time::date AS jour,
+        t2m_mean,
+        t2m_min,
+        t2m_max
+    FROM {{ ref('stg_era5_daily_temp_stats') }}
+    {% if is_incremental() %}
+    WHERE time >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '{{ var("era5_monthly_grid_lookback_months", 3) }} months')
+    {% endif %}
+    ORDER BY ROUND(latitude, 1), ROUND(longitude, 1), time::date, created_at DESC NULLS LAST
 )
 
 SELECT
-    latitude  AS era5_latitude,
-    longitude AS era5_longitude,
-    DATE_TRUNC('month', jour)::date AS mois,
+    p.latitude  AS era5_latitude,
+    p.longitude AS era5_longitude,
+    DATE_TRUNC('month', p.jour)::date AS mois,
 
-    AVG(temperature_2m) AS temperature_moyenne,
-    MIN(temperature_2m) AS temperature_min,
-    MAX(temperature_2m) AS temperature_max,
+    AVG(t.t2m_mean) AS temperature_moyenne,
+    MIN(t.t2m_min)  AS temperature_min,
+    MAX(t.t2m_max)  AS temperature_max,
 
-    SUM(total_precipitation)        AS precipitation_totale,
-    SUM(-potential_evaporation)     AS etp_totale,
-    SUM(total_precipitation) - SUM(-potential_evaporation) AS bilan_hydrique,
+    SUM(p.total_precipitation)        AS precipitation_totale,
+    SUM(-p.potential_evaporation)     AS etp_totale,
+    SUM(p.total_precipitation) - SUM(-p.potential_evaporation) AS bilan_hydrique,
 
     COUNT(*) AS nb_jours,
     -- Mois complet = autant de jours que le mois calendaire en compte
-    COUNT(*) = EXTRACT(DAY FROM (DATE_TRUNC('month', jour) + INTERVAL '1 month - 1 day'))::int
+    COUNT(*) = EXTRACT(DAY FROM (DATE_TRUNC('month', p.jour) + INTERVAL '1 month - 1 day'))::int
         AS mois_complet
 
-FROM daily
-GROUP BY latitude, longitude, DATE_TRUNC('month', jour)
+FROM precip_daily p
+LEFT JOIN temp_daily t
+    ON p.latitude = t.latitude
+    AND p.longitude = t.longitude
+    AND p.jour = t.jour
+GROUP BY p.latitude, p.longitude, DATE_TRUNC('month', p.jour)

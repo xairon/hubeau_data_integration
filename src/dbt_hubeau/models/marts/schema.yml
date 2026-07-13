@@ -405,9 +405,23 @@ models:
         tests: [not_null]
       - name: temperature_moyenne
         description: >
-          Moyenne mensuelle des températures échantillonnées à 00:00 UTC (instantané
-          nocturne, biais froid ~2-4°C vs vraie moyenne journalière — cf. docs/ERA5.md).
-          Pas une normale Tn/Tx.
+          Moyenne mensuelle des vraies moyennes journalières (source
+          stg_era5_daily_temp_stats.t2m_mean, calculées côté CDS à partir des 24 pas
+          horaires du jour) — fini le biais d'échantillonnage 00:00 UTC (cf. docs/ERA5.md).
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -20
+              max_value: 35
+              config:
+                severity: warn
+      - name: temperature_min
+        description: >
+          Minimum mensuel des vraies températures minimales journalières (Tn, source
+          stg_era5_daily_temp_stats.t2m_min).
+      - name: temperature_max
+        description: >
+          Maximum mensuel des vraies températures maximales journalières (Tx, source
+          stg_era5_daily_temp_stats.t2m_max).
       - name: precipitation_totale
         tests:
           - dbt_utils.accepted_range:

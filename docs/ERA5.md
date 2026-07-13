@@ -87,9 +87,13 @@ CROSS JOIN LATERAL (
 
 - `gold.fct_era5_monthly_grid` — agrégats mensuels par cellule 0.1° (1950→présent, ~10,5 M lignes).
   `etp_totale`/`bilan_hydrique` en mm POSITIFS (PEV ERA5 négative inversée à l'agrégation).
-  `temperature_moyenne`/`temperature_min`/`temperature_max` = moyenne/min/max des échantillons
-  quotidiens à 00:00 UTC (instantané nocturne, pas une vraie moyenne/Tn/Tx journalière — biais
-  froid ~2-4°C, cf. table `bronze.era5_france_timeseries` ci-dessus).
+  `temperature_moyenne`/`temperature_min`/`temperature_max` = moyenne/min/max des vraies
+  statistiques journalières (source `stg_era5_daily_temp_stats`, cf. section suivante),
+  agrégées côté CDS à partir des 24 pas horaires du jour. **Cutover 2026-07-13** : ces
+  3 colonnes ne dérivent plus de l'échantillon instantané 00:00 UTC de
+  `bronze.era5_france_timeseries` — le biais froid nocturne (~2-4°C) décrit plus bas ne
+  s'applique plus aux marts grille. Précipitation/ETP/bilan_hydrique restent dérivés de
+  `stg_era5_timeseries` (pas de source journalière vraie disponible pour ces variables).
 - `gold.fct_era5_climatology_grid` — normales 1991-2020 (gamma MoM + μ/σ) par cellule × mois × fenêtre.
 - `gold.fct_era5_indices_grid` — SPI/STI (fenêtres 1/3/6/12) calculés par l'asset Python
   `fct_era5_indices_grid` (job `station_index_refresh`, nightly). Table vide → bootstrap complet.
@@ -101,7 +105,8 @@ CROSS JOIN LATERAL (
 **Dataset CDS distinct** : `derived-era5-land-daily-statistics` (vs `reanalysis-era5-land`
 pour la timeseries ci-dessus). Calcule côté CADS, à partir des 24 pas horaires, la
 moyenne/min/max journalières réelles de `2m_temperature` — sans le biais d'échantillonnage
-00:00 UTC de `fct_era5_monthly_grid.temperature_*` (cf. section précédente).
+00:00 UTC. C'est désormais la source de `fct_era5_monthly_grid.temperature_*` (cf. section
+précédente).
 
 - **Table bronze** : `bronze.era5_daily_temp_stats(time, latitude, longitude, t2m_mean,
   t2m_min, t2m_max, source_file_id, created_at)` — hypertable chunks 1 an, compression
@@ -117,9 +122,13 @@ moyenne/min/max journalières réelles de `2m_temperature` — sans le biais d'�
   de ce dataset dérivé prend ~2 h par requête (3 requêtes/partition) → ~6 h/partition.
   Tranches suivantes (1960-1969 … 2020-2025) à lancer une fois la tranche courante verte — voir
   `.superpowers/sdd/progress.md` pour la procédure de reprise.
-- **Cutover (hors périmètre backfill)** : bascule de `fct_era5_monthly_grid.temperature_*`
-  vers cette voie (COALESCE), full-refresh, rebuild climatologie + indices SPI/STI,
-  ré-étiquetage junon — plan dédié une fois le backfill complet et audité.
+- **Cutover mart (2026-07-13)** : `fct_era5_monthly_grid.temperature_*` dérive désormais de
+  `stg_era5_daily_temp_stats` (LEFT JOIN sur lat/lon/jour, pas de COALESCE de repli — un mois
+  hors backfill donne `temperature_*` NULL plutôt qu'une valeur biaisée 00:00 UTC).
+  Précipitation/ETP/bilan_hydrique/nb_jours/mois_complet restent dérivés de
+  `stg_era5_timeseries`, inchangés. **Reste à faire** une fois le backfill 1950→présent
+  complet et audité : `dbt run --full-refresh --select fct_era5_monthly_grid`, rebuild
+  climatologie + indices SPI/STI en aval, ré-étiquetage junon.
 
 ---
 
