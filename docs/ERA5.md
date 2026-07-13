@@ -89,7 +89,7 @@ CROSS JOIN LATERAL (
   `etp_totale`/`bilan_hydrique` en mm POSITIFS (PEV ERA5 négative inversée à l'agrégation).
   `temperature_moyenne`/`temperature_min`/`temperature_max` = moyenne/min/max des vraies
   statistiques journalières (source `stg_era5_daily_temp_stats`, cf. section suivante),
-  agrégées côté CDS à partir des 24 pas horaires du jour. **Cutover 2026-07-13** : ces
+  agrégées LOCALEMENT à partir des 24 pas horaires bruts. **Cutover 2026-07-13** : ces
   3 colonnes ne dérivent plus de l'échantillon instantané 00:00 UTC de
   `bronze.era5_france_timeseries` — le biais froid nocturne (~2-4°C) décrit plus bas ne
   s'applique plus aux marts grille. Précipitation/ETP/bilan_hydrique restent dérivés de
@@ -102,11 +102,18 @@ CROSS JOIN LATERAL (
 
 ## Voie complémentaire : statistiques journalières (mean/min/max)
 
-**Dataset CDS distinct** : `derived-era5-land-daily-statistics` (vs `reanalysis-era5-land`
-pour la timeseries ci-dessus). Calcule côté CADS, à partir des 24 pas horaires, la
-moyenne/min/max journalières réelles de `2m_temperature` — sans le biais d'échantillonnage
-00:00 UTC. C'est désormais la source de `fct_era5_monthly_grid.temperature_*` (cf. section
-précédente).
+**Même dataset que la timeseries** : `reanalysis-era5-land` (archive horaire brute), mais on
+télécharge les **24 pas horaires** du jour (au lieu du seul 00:00 UTC) et on calcule
+**localement** (`aggregate_hourly_to_daily`, groupby jour) la moyenne/min/max journalières
+réelles de `2m_temperature` — sans le biais d'échantillonnage 00:00 UTC. C'est désormais la
+source de `fct_era5_monthly_grid.temperature_*` (cf. section précédente).
+
+> **Historique** : une 1ʳᵉ implémentation utilisait le produit dérivé
+> `derived-era5-land-daily-statistics` (calcul côté CADS). Ce service post-traité est une file
+> minuscule saturée (~43 h par ANNÉE demandée, backfill complet ~6 semaines). Bascule le
+> 2026-07-10 vers l'archive brute (rapide : ~25 min/année). Équivalence vérifiée cellule-jour
+> par cellule-jour contre le produit dérivé : Tn/Tx identiques à 0,0000 °C, moyenne à 0,01 °C
+> (arrondi NUMERIC(6,2)). Voir `.superpowers/sdd/progress.md`.
 
 - **Table bronze** : `bronze.era5_daily_temp_stats(time, latitude, longitude, t2m_mean,
   t2m_min, t2m_max, source_file_id, created_at)` — hypertable chunks 1 an, compression
@@ -114,21 +121,18 @@ précédente).
 - **Silver** : `silver.stg_era5_daily_temp_stats` (append incrémental, dédup DISTINCT ON,
   arrondi 1 décimale), tests not_null/accepted_range/expression_is_true (`min≤mean≤max`).
 - **Jobs Dagster** : `era5_daily_temp_historical_load` (partitionné 1 an, clés
-  `"YYYY_YYYY"`, ex. `1950_1950`) pour le backfill 1950→présent ; `era5_daily_temp_update_job`
-  (smart update quotidien, schedule 03h30 UTC).
-- **Statut (2026-07-07)** : backfill **EN COURS** — 1ère tranche 1950-1959 lancée via
-  `launchPartitionBackfill` (backfill id `keaocyyd`, 10 runs, `dagster/concurrency_key:
-  era5_historical` sérialisé par le `QueuedRunCoordinator`). Rythme observé : la queue CDS
-  de ce dataset dérivé prend ~2 h par requête (3 requêtes/partition) → ~6 h/partition.
-  Tranches suivantes (1960-1969 … 2020-2025) à lancer une fois la tranche courante verte — voir
-  `.superpowers/sdd/progress.md` pour la procédure de reprise.
-- **Cutover mart (2026-07-13)** : `fct_era5_monthly_grid.temperature_*` dérive désormais de
-  `stg_era5_daily_temp_stats` (LEFT JOIN sur lat/lon/jour, pas de COALESCE de repli — un mois
-  hors backfill donne `temperature_*` NULL plutôt qu'une valeur biaisée 00:00 UTC).
+  `"YYYY_YYYY"`, ex. `1950_1950`, 1 requête/mois brut horaire, mois téléchargés en parallèle
+  `months_concurrency`) pour le backfill 1950→présent ; `era5_daily_temp_update_job`
+  (smart update quotidien, schedule 03h30 UTC — jours dérivés de la fenêtre réelle, anti-cache
+  CADS périmé).
+- **Statut (2026-07-13)** : backfill **COMPLET** — 1950→2025, 76 années,
+  319,9 M lignes en bronze, 0 incohérence min≤moy≤max. Débit archive brute : ~25 min/année.
+- **Cutover mart (2026-07-13, FAIT)** : `fct_era5_monthly_grid.temperature_*` dérive de
+  `stg_era5_daily_temp_stats` (LEFT JOIN sur lat/lon/jour, pas de COALESCE de repli).
   Précipitation/ETP/bilan_hydrique/nb_jours/mois_complet restent dérivés de
-  `stg_era5_timeseries`, inchangés. **Reste à faire** une fois le backfill 1950→présent
-  complet et audité : `dbt run --full-refresh --select fct_era5_monthly_grid`, rebuild
-  climatologie + indices SPI/STI en aval, ré-étiquetage junon.
+  `stg_era5_timeseries`, inchangés. Séquence appliquée : re-stage silver (TRUNCATE + reprocess
+  1950), `dbt run --full-refresh --select fct_era5_monthly_grid`, rebuild climatologie +
+  re-bootstrap indices SPI/STI, ré-étiquetage junon.
 
 ---
 

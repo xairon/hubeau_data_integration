@@ -24,8 +24,8 @@
 -- Table plain (PAS d'hypertable) : règle projet pour les tables mensuelles.
 --
 -- CUTOVER TEMPÉRATURE (2026-07-13) : temperature_moyenne/min/max viennent désormais de
--- stg_era5_daily_temp_stats (t2m_mean/min/max), calculées côté CDS à partir des 24 pas
--- horaires du jour — une vraie moyenne/Tn/Tx journalière. Avant, ces colonnes dérivaient
+-- stg_era5_daily_temp_stats (t2m_mean/min/max), agrégées LOCALEMENT à partir des 24 pas
+-- horaires bruts de reanalysis-era5-land — une vraie moyenne/Tn/Tx journalière. Avant, ces colonnes dérivaient
 -- de stg_era5_timeseries.temperature_2m, un échantillon instantané à 00:00 UTC (biais
 -- froid nocturne ~2-4°C, pas une vraie moyenne). Précipitation/ETP/bilan_hydrique/nb_jours/
 -- mois_complet restent inchangés, dérivés de stg_era5_timeseries (pas d'équivalent
@@ -54,7 +54,7 @@ WITH precip_daily AS (
 
 temp_daily AS (
     -- Même dédup défensive que precip_daily, appliquée à la vraie source journalière
-    -- (24 pas horaires agrégés côté CDS, pas un instantané 00:00 UTC).
+    -- (24 pas horaires bruts agrégés localement, pas un instantané 00:00 UTC).
     SELECT DISTINCT ON (ROUND(latitude, 1), ROUND(longitude, 1), time::date)
         ROUND(latitude, 1)  AS latitude,
         ROUND(longitude, 1) AS longitude,
