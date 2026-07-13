@@ -693,10 +693,17 @@ def era5_daily_temp_stats_historical(context: AssetExecutionContext):
     start_year, end_year = map(int, partition_key.split("_"))
 
     start_date = datetime(start_year, 1, 1)
-    end_date = datetime(end_year, 12, 31)
+    # Cape la borne haute à (aujourd'hui - lag de disponibilité) pour l'année EN COURS :
+    # sinon la partition de l'année courante (ex. 2026_2026) demanderait des mois futurs
+    # non encore publiés → 0 pas de temps → agrégation en échec, toute la partition perdue.
+    with open(CONFIG_PATH) as _f:
+        _cfg = yaml.safe_load(_f)
+    _lag = int(os.getenv("ERA5_DAILY_STATS_LAG_DAYS",
+                         _cfg.get("extraction", {}).get("availability_lag_days", 7)))
+    end_date = min(datetime(end_year, 12, 31), datetime.now() - timedelta(days=_lag))
     file_id = f"era5_daily_temp_hist_{start_year}_{end_year}"
 
-    context.log.info(f"Traitement historique daily temp stats: {start_year}-{end_year}")
+    context.log.info(f"Traitement historique daily temp stats: {start_year}-{end_year} (jusqu'au {end_date.date()})")
 
     rows = process_daily_stats_range(context, start_date, end_date, file_id)
 
