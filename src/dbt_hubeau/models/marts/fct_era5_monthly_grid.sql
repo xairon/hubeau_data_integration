@@ -85,7 +85,15 @@ SELECT
     COUNT(*) AS nb_jours,
     -- Mois complet = autant de jours que le mois calendaire en compte
     COUNT(*) = EXTRACT(DAY FROM (DATE_TRUNC('month', p.jour) + INTERVAL '1 month - 1 day'))::int
-        AS mois_complet
+        AS mois_complet,
+
+    -- Complétude TEMPÉRATURE découplée de la précipitation : le LEFT JOIN température peut
+    -- laisser des jours sans t2m (NULL) dans un mois par ailleurs precip-complet. Compté
+    -- séparément pour que la normale STI (climato) n'utilise que des mois température-complets
+    -- (COUNT ignore les t2m_mean NULL des jours non appariés par le LEFT JOIN).
+    COUNT(t.t2m_mean) AS nb_jours_temp,
+    COUNT(t.t2m_mean) = EXTRACT(DAY FROM (DATE_TRUNC('month', p.jour) + INTERVAL '1 month - 1 day'))::int
+        AS temp_complet
 
 FROM precip_daily p
 LEFT JOIN temp_daily t

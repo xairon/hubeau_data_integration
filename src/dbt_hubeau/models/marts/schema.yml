@@ -406,22 +406,53 @@ models:
       - name: temperature_moyenne
         description: >
           Moyenne mensuelle des vraies moyennes journalières (source
-          stg_era5_daily_temp_stats.t2m_mean, calculées côté CDS à partir des 24 pas
-          horaires du jour) — fini le biais d'échantillonnage 00:00 UTC (cf. docs/ERA5.md).
+          stg_era5_daily_temp_stats.t2m_mean, agrégées LOCALEMENT depuis l'archive brute
+          horaire reanalysis-era5-land — les 24 pas horaires du jour, PAS un produit CDS) —
+          fini le biais d'échantillonnage 00:00 UTC (cf. docs/ERA5.md). NULL possible.
         tests:
           - dbt_utils.accepted_range:
-              min_value: -20
-              max_value: 35
+              min_value: -25
+              max_value: 40
               config:
                 severity: warn
+                where: "temperature_moyenne IS NOT NULL"
       - name: temperature_min
         description: >
           Minimum mensuel des vraies températures minimales journalières (Tn, source
-          stg_era5_daily_temp_stats.t2m_min).
+          stg_era5_daily_temp_stats.t2m_min). NULL possible.
+        tests:
+          # Bornes larges : min de cellule d'altitude en hiver peut plonger. Objectif =
+          # attraper une régression d'unité (Kelvin ≈ 230-300, hors plage) sans warner sur le bruit.
+          - dbt_utils.accepted_range:
+              min_value: -45
+              max_value: 50
+              config:
+                severity: warn
+                where: "temperature_min IS NOT NULL"
       - name: temperature_max
         description: >
           Maximum mensuel des vraies températures maximales journalières (Tx, source
-          stg_era5_daily_temp_stats.t2m_max).
+          stg_era5_daily_temp_stats.t2m_max). NULL possible.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: -45
+              max_value: 50
+              config:
+                severity: warn
+                where: "temperature_max IS NOT NULL"
+      - name: nb_jours_temp
+        description: >
+          Nombre de jours du mois disposant d'une température journalière (t2m_mean non-NULL).
+          Découplé de nb_jours (précipitation) : le LEFT JOIN température peut être partiel.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 31
+      - name: temp_complet
+        description: >
+          TRUE si nb_jours_temp = nombre de jours calendaires du mois. Gouverne l'usage du mois
+          dans les normales de TEMPÉRATURE (STI) de fct_era5_climatology_grid, indépendamment
+          de mois_complet (qui reste basé sur la précipitation).
       - name: precipitation_totale
         tests:
           - dbt_utils.accepted_range:
@@ -456,6 +487,14 @@ models:
           config:
             severity: warn
             where: "bilan_hydrique IS NOT NULL"
+      # Invariant température : Tn_mensuel <= T_moyenne <= Tx_mensuel (au grain mensuel).
+      # where ignore les lignes température-NULL (LEFT JOIN non apparié) pour ne pas
+      # faussement échouer ; si temperature_moyenne est non-NULL, min/max le sont aussi.
+      - dbt_utils.expression_is_true:
+          expression: "temperature_min <= temperature_moyenne AND temperature_moyenne <= temperature_max"
+          config:
+            severity: warn
+            where: "temperature_moyenne IS NOT NULL"
 
   - name: fct_era5_climatology_grid
     description: >
@@ -473,6 +512,17 @@ models:
               values: [1, 3, 6, 12]
               quote: false
       - name: nb_annees
+        description: "Années de référence pour la normale de PRÉCIPITATION (mois_complet)."
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 25
+              max_value: 30
+              config:
+                severity: warn
+      - name: nb_annees_temp
+        description: >
+          Années de référence pour la normale de TEMPÉRATURE : ne compte que les fenêtres dont
+          tous les mois sont temp_complet=true. <= nb_annees. Sous-tend temp_moyenne/temp_stddev.
         tests:
           - dbt_utils.accepted_range:
               min_value: 25
