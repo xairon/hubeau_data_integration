@@ -21,10 +21,14 @@ sources:
           error_after: {count: 60, period: day}
         loaded_at_field: "time"
       - name: era5_daily_temp_stats
-        description: Données météo ERA5-Land brutes (températures journalières daily_mean/daily_minimum/daily_maximum)
-        # Le dataset CADS `derived-era5-land-daily-statistics` a une latence de publication de ~6-7 jours.
-        # Seuils calés pour ne sonner qu'en cas de blocage ingestion (lag normal ~7 j).
-        # loaded_at_field = `time` (date donnée).
+        description: >
+          Statistiques journalières de température (moyenne/min/max) agrégées LOCALEMENT à
+          partir de l'archive brute horaire `reanalysis-era5-land` (24 pas horaires/jour),
+          PAS un produit dérivé CDS.
+        # Source = archive horaire `reanalysis-era5-land` (même dataset que era5_france_timeseries),
+        # agrégée localement en Tn/Tx/Tmoy journalières. Latence de publication INHÉRENTE de la
+        # source ~2-3 semaines (borne d'intégration capée à J-lag). Seuils calés pour ne sonner
+        # qu'en cas de blocage ingestion, pas sur la latence normale. loaded_at_field = `time`.
         freshness:
           warn_after: {count: 30, period: day}
           error_after: {count: 60, period: day}

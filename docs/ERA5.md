@@ -120,19 +120,58 @@ source de `fct_era5_monthly_grid.temperature_*` (cf. section précédente).
   après 30 j, K→°C converti à l'insertion.
 - **Silver** : `silver.stg_era5_daily_temp_stats` (append incrémental, dédup DISTINCT ON,
   arrondi 1 décimale), tests not_null/accepted_range/expression_is_true (`min≤mean≤max`).
+  ⚠️ Le filtre incrémental est `time > MAX(time)` : un backfill d'années antérieures en
+  bronze **n'entre pas** en silver sans reprocess forcé — voir la procédure de cutover ci-dessous.
 - **Jobs Dagster** : `era5_daily_temp_historical_load` (partitionné 1 an, clés
   `"YYYY_YYYY"`, ex. `1950_1950`, 1 requête/mois brut horaire, mois téléchargés en parallèle
   `months_concurrency`) pour le backfill 1950→présent ; `era5_daily_temp_update_job`
   (smart update quotidien, schedule 03h30 UTC — jours dérivés de la fenêtre réelle, anti-cache
   CADS périmé).
 - **Statut (2026-07-13)** : backfill **COMPLET** — 1950→2025, 76 années,
-  319,9 M lignes en bronze, 0 incohérence min≤moy≤max. Débit archive brute : ~25 min/année.
+  319,9 M lignes en **bronze**, 0 incohérence min≤moy≤max. Débit archive brute : ~25 min/année.
+  ⚠️ « Complet en bronze » n'implique **pas** « complet en silver » : le silver ne reçoit ces
+  années que si le staging est reprocessé explicitement (procédure de cutover ci-dessous).
 - **Cutover mart (2026-07-13, FAIT)** : `fct_era5_monthly_grid.temperature_*` dérive de
   `stg_era5_daily_temp_stats` (LEFT JOIN sur lat/lon/jour, pas de COALESCE de repli).
   Précipitation/ETP/bilan_hydrique/nb_jours/mois_complet restent dérivés de
-  `stg_era5_timeseries`, inchangés. Séquence appliquée : re-stage silver (TRUNCATE + reprocess
-  1950), `dbt run --full-refresh --select fct_era5_monthly_grid`, rebuild climatologie +
-  re-bootstrap indices SPI/STI, ré-étiquetage junon.
+  `stg_era5_timeseries`, inchangés. Procédure de rebuild détaillée ci-dessous.
+
+### Procédure de cutover / rebuild du mart température (ordre IMPÉRATIF)
+
+> ⚠️ **Étape silver OBLIGATOIRE AVANT le mart — piège vérifié.** Un backfill de
+> `bronze.era5_daily_temp_stats` sur des années antérieures (1950→2025) **n'entre pas tout
+> seul en silver**. Le modèle `stg_era5_daily_temp_stats` est incrémental (`append`) avec le
+> filtre `AND time > (SELECT MAX(time) FROM {{ this }})`. Comme l'asset nightly peuple déjà le
+> silver avec du récent (année en cours), `MAX(time)` ≈ aujourd'hui : toute ligne backfillée a
+> `time < MAX(time)` et est **silencieusement ignorée** par l'`append` — **aucune erreur**,
+> mais le silver (donc `fct_era5_monthly_grid`) n'a de température que sur les années déjà
+> présentes, **NULL ailleurs**. Il faut donc forcer le reprocess du silver sur toute la plage
+> backfillée AVANT de rebâtir le mart. Ce piège vaut pour **tout** futur backfill de température,
+> pas seulement le cutover initial.
+
+1. **Re-stage silver sur toute la plage backfillée** (l'une OU l'autre commande) :
+   ```bash
+   # Option A (recommandée) — full-refresh : reconstruit toute la table silver depuis bronze,
+   # le filtre incrémental ne s'applique pas, aucun risque de conflit de PK.
+   docker exec brgm-dlt-worker dbt run --full-refresh --select stg_era5_daily_temp_stats
+
+   # Option B (celle appliquée le 2026-07-13) — TRUNCATE puis reprocess ciblé via la var projet.
+   # Le TRUNCATE est requis : le modèle est en `append`, réinjecter depuis 1950 dans une table
+   # non vide violerait la PK (latitude, longitude, time) sur l'overlap récent.
+   docker exec -it brgm-postgres psql -U postgres -d postgres \
+     -c "TRUNCATE silver.stg_era5_daily_temp_stats;"
+   docker exec brgm-dlt-worker dbt run --select stg_era5_daily_temp_stats \
+     --vars '{era5_daily_temp_reprocess_from_timestamp: "1950-01-01"}'
+   ```
+   > La var `era5_daily_temp_reprocess_from_timestamp` remplace le filtre `time > MAX(time)` par
+   > `time >= <ts>::timestamp` (même mécanisme que `era5_reprocess_from_timestamp` sur le modèle
+   > jumeau `stg_era5_timeseries`). Contrôle post-run : `SELECT MIN(time) FROM
+   > silver.stg_era5_daily_temp_stats;` doit renvoyer 1950 (et non l'année en cours).
+2. **Rebuild du mart mensuel** :
+   ```bash
+   docker exec brgm-dlt-worker dbt run --full-refresh --select fct_era5_monthly_grid
+   ```
+3. **Rebuild climatologie + re-bootstrap indices SPI/STI**, puis **ré-étiquetage junon**.
 
 ---
 
