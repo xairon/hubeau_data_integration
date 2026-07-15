@@ -173,6 +173,37 @@ source de `fct_era5_monthly_grid.temperature_*` (cf. section précédente).
    ```
 3. **Rebuild climatologie + re-bootstrap indices SPI/STI**, puis **ré-étiquetage junon**.
 
+### Cutover marts STATION (2026-07-15, FAIT)
+
+La température **niveau station** (`temperature_2m` des marts journaliers, `temperature_moyenne`
+des marts mensuels/annuels) dérivait encore de l'instantané 00:00 UTC (`stg_era5_timeseries`),
+alors que les marts grille étaient déjà passés aux vraies stats journalières → incohérence
+produit (temp grille ≠ temp station, écart jusqu'à ~5°C l'été). Bascule effectuée :
+
+- `int_era5_for_all_stations` : la température vient désormais d'un 2ᵉ LEFT JOIN sur
+  `stg_era5_daily_temp_stats` (t2m_mean, même grain cellule 0.1° × jour), exposée sous le nom
+  `temperature_2m` inchangé. Précipitation/ETP restent le pilote depuis `stg_era5_timeseries`.
+  **Sémantique assumée** : une ligne mêle température = vraie moyenne journalière et précip/ETP =
+  flux d'accumulation journaliers (chaque variable a sa représentation journalière correcte).
+  Nuance : `temperature_min`/`max` mensuels station restent des MIN/MAX de moyennes journalières
+  (pas de vrais Tn/Tx — cela imposerait d'ajouter t2m_min/max au grain station → piège ALTER
+  hypertable, hors périmètre).
+
+Séquence de rebuild (⚠️ **JAMAIS `--full-refresh` sur les 2 hypertables journalières** →
+phantom hypertables ; utiliser la var de fenêtre) :
+```bash
+# 1. int (plain, sûr)
+dbt run --full-refresh --select int_era5_for_all_stations
+# 2. hypertables journalières : reprocess historique via la fenêtre élargie (couvre 1967→)
+dbt run --select hubeau_daily_chroniques --vars '{"daily_recompute_window_days": "22000"}'
+dbt run --select hydro_daily_chroniques  --vars '{"daily_recompute_window_days": "22000"}'
+# 3. marts plain aval (agrègent depuis les hypertables)
+dbt run --full-refresh --select fct_monthly_chroniques fct_monthly_hydro \
+                                fct_yearly_stats fct_yearly_hydro dim_piezo_stations
+```
+Puis **flush Redis junon** (la température station remonte de +2-4°C l'été → cache obs à
+invalider) + passe visuelle. IPS/SSFI non impacté (ne consomme pas la température).
+
 ---
 
 ## Maintenance

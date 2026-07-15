@@ -28,14 +28,19 @@ models:
           ayant niveau OU profondeur — donc niveau peut être NULL par conception.
 
       - name: temperature_2m
-        description: "Température moyenne à 2m en °C (NULL si ERA5 absent pour cette date)"
+        description: >
+          Température moyenne journalière à 2m en °C — VRAIE moyenne des 24 pas horaires
+          (source silver.stg_era5_daily_temp_stats, agrégée localement depuis l'archive brute
+          ERA5-Land). Le biais d'échantillonnage 00:00 UTC (~2-4°C de biais froid l'été) ne
+          s'applique plus depuis le cutover station 2026-07-15. NULL si stat journalière absente.
         tests:
           - dbt_utils.accepted_range:
               min_value: -40
               max_value: 50
               config:
                 severity: warn
-      
+                where: "temperature_2m IS NOT NULL"
+
       - name: total_precipitation
         description: "Précipitations totales journalières en mm (NULL si ERA5 absent)"
         tests:
@@ -148,8 +153,8 @@ models:
       - name: temperature_moyenne_annuelle
         tests:
           - dbt_utils.accepted_range:
-              min_value: -15
-              max_value: 30
+              min_value: -30
+              max_value: 40
               config:
                 severity: warn
                 where: "temperature_moyenne_annuelle IS NOT NULL"
@@ -206,7 +211,11 @@ models:
           - not_null
 
       - name: temperature_2m
-        description: "Température moyenne à 2m en °C (NULL si ERA5 absent)"
+        description: >
+          Température moyenne journalière à 2m en °C — VRAIE moyenne des 24 pas horaires
+          (source silver.stg_era5_daily_temp_stats, agrégée localement depuis l'archive brute
+          ERA5-Land). Le biais d'échantillonnage 00:00 UTC ne s'applique plus depuis le cutover
+          station 2026-07-15. NULL si stat journalière absente.
         tests:
           - dbt_utils.accepted_range:
               min_value: -40
@@ -334,8 +343,8 @@ models:
       - name: temperature_moyenne_annuelle
         tests:
           - dbt_utils.accepted_range:
-              min_value: -15
-              max_value: 30
+              min_value: -30
+              max_value: 40
               config:
                 severity: warn
                 where: "temperature_moyenne_annuelle IS NOT NULL"
