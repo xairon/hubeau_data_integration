@@ -742,6 +742,16 @@ def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=Non
     return _resource
 
 
+# Fenêtre de rattrapage du chargement daily piézo.
+# Les chroniques piézo (données validées) sont publiées par Hub'Eau avec un lag
+# de publication variable qui a dépassé 10 jours (constaté 2026-07-15 : API plafonnée
+# au 05/07 alors qu'on est le 15). Une fenêtre de 7 j glissait AU-DESSUS de la zone
+# réellement publiée → 0 ligne fetchée et gap jamais rattrapé. 21 j couvre le lag
+# observé avec marge. NB : le clean et le fetch DOIVENT partager cette valeur
+# (nettoyer N jours ⇔ re-fetcher N jours), sinon `append` recrée des doublons.
+PIEZO_DAILY_LOOKBACK_DAYS = 21
+
+
 @asset(
     compute_kind="dlt",
     group_name="piezometry_chroniques_daily",
@@ -749,15 +759,15 @@ def create_hydrometry_obs_daily_resource(days_back: int = 7, dagster_context=Non
 )
 def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Dict[str, Any]]:
     """
-    Piezometry chroniques - Daily incremental load (last 7 days).
+    Piezometry chroniques - Daily incremental load (last PIEZO_DAILY_LOOKBACK_DAYS days).
     Used by scheduled daily pipeline.
 
     ⚠️ ÉCRIT LA MÊME TABLE que l'asset partitionné `piezometry_chroniques_raw`
     (bronze.piezometry_chroniques_raw). Cet asset nettoie/recharge seulement les
-    7 derniers jours ; le partitionné nettoie/recharge une année entière. Si un
-    rechargement de la partition de l'année courante tourne APRÈS ce daily, il
-    re-fetch la même donnée depuis l'API (pas de perte). Les doublons d'overlap
-    sont dédoublonnés en Silver (`stg_piezo_chroniques`).
+    N derniers jours (PIEZO_DAILY_LOOKBACK_DAYS) ; le partitionné nettoie/recharge
+    une année entière. Si un rechargement de la partition de l'année courante tourne
+    APRÈS ce daily, il re-fetch la même donnée depuis l'API (pas de perte). Les
+    doublons d'overlap sont dédoublonnés en Silver (`stg_piezo_chroniques`).
     """
     context.log.info("📅 [DAILY] Chargement incrémental piézométrie")
 
@@ -765,13 +775,15 @@ def piezometry_chroniques_daily_raw(context: AssetExecutionContext) -> Output[Di
     _clean_recent_data(
         table_name="piezometry_chroniques_raw",
         schema="bronze",
-        days_back=7,
+        days_back=PIEZO_DAILY_LOOKBACK_DAYS,
         date_column="date_mesure",
         logger=context.log
     )
 
     pipeline = _create_pipeline("hubeau_piezometry_chroniques_daily")
-    resource = create_piezometry_chroniques_daily_resource(days_back=7, dagster_context=context)
+    resource = create_piezometry_chroniques_daily_resource(
+        days_back=PIEZO_DAILY_LOOKBACK_DAYS, dagster_context=context
+    )
     
     start_time = time.time()
     load_info = pipeline.run(resource)
