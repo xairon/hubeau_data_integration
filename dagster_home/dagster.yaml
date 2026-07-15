@@ -38,8 +38,15 @@ run_coordinator:
       - {key: "dagster/concurrency_key", value: "dbt_pipeline", limit: 1}
       # --- ERA5 grille (update quotidien) : 1 ---
       - {key: "dagster/concurrency_key", value: "era5_weekly", limit: 1}
-      # --- Backfill historique ERA5 : jusqu'à 3 partitions CDS en parallèle (débit) ---
+      # --- Backfill historique ERA5 grille : jusqu'à 3 partitions CDS en parallèle (débit) ---
       - {key: "dagster/concurrency_key", value: "era5_historical", limit: 3}
+      # --- Écriture bronze.era5_daily_temp_stats : 1 SEUL writer à la fois ---
+      # Clé partagée par era5_daily_temp_update_job (nightly) ET era5_daily_temp_historical_load
+      # (backfill). Empêche le doublon quand la partition de l'année courante chevauche la
+      # fenêtre du nightly (table sans unicité, DELETE+INSERT non atomique). Incident 2026-07-07.
+      # limit 1 ⇒ le backfill temp n'utilise qu'un slot global (≤ l'ancien limit 3) : n'affame
+      # jamais la prod (clés DLT/dbt distinctes, max_concurrent_runs 5).
+      - {key: "dagster/concurrency_key", value: "era5_daily_temp_write", limit: 1}
 
 telemetry:
   enabled: false
