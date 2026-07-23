@@ -94,11 +94,13 @@ def test_compute_spei_sign_and_center():
 
 def test_compute_spei_invalid_params_nan():
     z = compute_spei(
-        np.array([10.0, 10.0, -999.0]),
-        np.array([40.0, np.nan, 40.0]),   # bad alpha
-        np.array([3.0, 3.0, 3.0]),
-        np.array([-10.0, -10.0, 5.0]),    # last: x <= gamma → out of support
+        np.array([10.0, 10.0, -999.0, 10.0, 10.0]),
+        np.array([40.0, np.nan, 40.0, -5.0, 40.0]),   # rows 1,3: bad alpha (nan, finite<=0)
+        np.array([3.0, 3.0, 3.0, 3.0, -1.0]),         # row 4: bad beta (finite<=0)
+        np.array([-10.0, -10.0, 5.0, -10.0, -10.0]),  # row 2: x <= gamma → out of support
     )
-    assert np.isfinite(z[0])
-    assert np.isnan(z[1])
-    assert np.isnan(z[2])
+    assert np.isfinite(z[0])   # valid row: finite result, not fabricated NaN
+    assert np.isnan(z[1])      # alpha = NaN
+    assert np.isnan(z[2])      # x <= gamma (out of support)
+    assert np.isnan(z[3])      # alpha = -5.0, finite but <= 0 (must not fabricate a value)
+    assert np.isnan(z[4])      # beta = -1.0, finite but <= 0 (must not fabricate a value)
