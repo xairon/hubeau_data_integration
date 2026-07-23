@@ -93,7 +93,10 @@ def _compute_range(pg, start_month, end_month):
         spi = compute_spi(df["precip_cumul"], df["gamma_alpha"], df["gamma_beta"], df["prob_zero"])
         sti = compute_sti(df["temp_fenetre"], df["temp_moyenne"], df["temp_stddev"])
         spei = compute_spei(df["bilan_cumul"], df["ll_alpha"], df["ll_beta"], df["ll_gamma"])
-        # Seuil WMO : référence trop courte → indices NULL
+        # Seuil WMO : référence trop courte → indices NULL. nb_annees vient de la
+        # climatologie précip/gamma (c) ; il vaut aussi pour le SPEI car la réf SPEI
+        # est fittée sur les mêmes mois `mois_complet`/fenêtre (même grille) — et une
+        # réf SPEI trop courte ou dégénérée est déjà tombée à NULL au fit (→ NaN ici).
         thin = df["nb_annees"].to_numpy() < MIN_YEARS_REF
         spi[thin] = np.nan
         sti[thin] = np.nan
