@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy import stats
+from scipy.special import gamma as _gamma_fn
 
 # Seuil WMO : nombre minimal d'années valides dans la référence pour un indice fiable.
 MIN_YEARS_REF = 25
@@ -48,4 +49,71 @@ def compute_sti(temp, temp_moyenne, temp_stddev):
     valid = np.isfinite(t) & np.isfinite(mu) & np.isfinite(sigma) & (sigma > 0)
     out = np.full(t.shape, np.nan)
     out[valid] = np.round((t[valid] - mu[valid]) / sigma[valid], 3)
+    return out
+
+
+# Fit fiable seulement au-delà d'un petit échantillon (L-moments d'ordre 2).
+_MIN_FIT_SAMPLES = 4
+
+
+def fit_loglogistic_lmoments(samples):
+    """Ajuste une log-logistique à 3 paramètres (loi de Fisk translatée) par
+    L-moments (PWM en position de tracé, Vicente-Serrano 2010).
+
+    Args: samples — échantillon 1D des cumuls D=P−ETP de référence (une cellule×
+        mois calendaire×fenêtre, ~30 valeurs annuelles).
+    Returns: (alpha, beta, gamma) ; (nan, nan, nan) si l'ajustement est dégénéré.
+    """
+    x = np.asarray(samples, dtype=float)
+    x = np.sort(x[np.isfinite(x)])
+    n = x.size
+    if n < _MIN_FIT_SAMPLES:
+        return (np.nan, np.nan, np.nan)
+
+    # PWM en position de tracé p_i = (i − 0.35)/n (convention SPEI de référence).
+    i = np.arange(1, n + 1)
+    p = (i - 0.35) / n
+    w0 = x.mean()
+    w1 = np.sum((1.0 - p) * x) / n
+    w2 = np.sum((1.0 - p) ** 2 * x) / n
+
+    denom = 6.0 * w1 - w0 - 6.0 * w2
+    if denom == 0 or not np.isfinite(denom):
+        return (np.nan, np.nan, np.nan)
+    beta = (2.0 * w1 - w0) / denom
+    # beta>0 requis ; 1/beta<1 requis pour que Γ(1−1/beta) converge (beta>1).
+    if not np.isfinite(beta) or beta <= 1.0:
+        return (np.nan, np.nan, np.nan)
+
+    g = _gamma_fn(1.0 + 1.0 / beta) * _gamma_fn(1.0 - 1.0 / beta)
+    alpha = (w0 - 2.0 * w1) * beta / g
+    if not np.isfinite(alpha) or alpha <= 0:
+        return (np.nan, np.nan, np.nan)
+    gamma_loc = w0 - alpha * g
+    return (float(alpha), float(beta), float(gamma_loc))
+
+
+def compute_spei(d_cumul, ll_alpha, ll_beta, ll_gamma):
+    """SPEI vectorisé : F log-logistique du cumul D → quantile normal.
+
+    NaN si un paramètre est invalide (alpha≤0, beta≤0, non fini) ou si D≤gamma
+    (hors du support de la loi).
+    """
+    x = np.asarray(d_cumul, dtype=float)
+    a = np.asarray(ll_alpha, dtype=float)
+    b = np.asarray(ll_beta, dtype=float)
+    gloc = np.asarray(ll_gamma, dtype=float)
+
+    valid = (
+        np.isfinite(x) & np.isfinite(a) & np.isfinite(b) & np.isfinite(gloc)
+        & (a > 0) & (b > 0) & (x > gloc)
+    )
+    out = np.full(x.shape, np.nan)
+    if not valid.any():
+        return out
+
+    ratio = (a[valid] / (x[valid] - gloc[valid])) ** b[valid]
+    cdf = 1.0 / (1.0 + ratio)
+    cdf = np.clip(cdf, *_CDF_CLIP)
+    out[valid] = np.round(stats.norm.ppf(cdf), 3)
     return out
