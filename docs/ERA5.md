@@ -94,9 +94,59 @@ CROSS JOIN LATERAL (
   `bronze.era5_france_timeseries` — le biais froid nocturne (~2-4°C) décrit plus bas ne
   s'applique plus aux marts grille. Précipitation/ETP/bilan_hydrique restent dérivés de
   `stg_era5_timeseries` (pas de source journalière vraie disponible pour ces variables).
-- `gold.fct_era5_climatology_grid` — normales 1991-2020 (gamma MoM + μ/σ) par cellule × mois × fenêtre.
-- `gold.fct_era5_indices_grid` — SPI/STI (fenêtres 1/3/6/12) calculés par l'asset Python
-  `fct_era5_indices_grid` (job `station_index_refresh`, nightly). Table vide → bootstrap complet.
+
+  > ⚠️ **Ne PAS en conclure que l'ETP est biaisée** — erreur déjà commise. La `potential_evaporation`
+  > d'ERA5 est un **flux d'accumulation** produit par le modèle ECMWF : la valeur à 00:00 UTC
+  > **EST** le cumul journalier correct, ce n'est pas un échantillon instantané. Le biais froid
+  > ne concernait que la *température*, grandeur à cycle diurne échantillonnée à un instant.
+  > `precipitation_totale`, `etp_totale` et `bilan_hydrique` sont donc **justes depuis toujours**,
+  > et le SPEI qui en dérive n'a jamais été bloqué par le cutover température.
+
+- `gold.fct_era5_climatology_grid` — normales 1991-2020 (gamma MoM + μ/σ) par cellule × mois ×
+  fenêtre. Sert le **SPI** (gamma) et le **STI** (z-score). Modèle dbt.
+- `gold.fct_era5_spei_climatology_grid` — paramètres de la **logistique généralisée (GLO)**
+  pour le SPEI (`glo_alpha`, `glo_k`, `glo_xi`), référence 1991-2020, par cellule × mois
+  calendaire × fenêtre. **Table gérée en Python, pas en dbt** : l'ajustement par L-moments a
+  besoin des ~30 échantillons annuels ET de la fonction Γ, que PostgreSQL n'a pas.
+  Les colonnes `ll_*` sont **obsolètes** (ancienne log-logistique, conservées sans être lues).
+- `gold.fct_era5_indices_grid` — **SPI/STI/SPEI** (fenêtres 1/3/6/12) calculés par l'asset
+  Python `fct_era5_indices_grid` (job `station_index_refresh`, nightly). Table vide →
+  bootstrap complet 1950→présent.
+
+### SPEI — pourquoi la GLO et non la log-logistique
+
+Le choix initial (log-logistique 3 paramètres, Vicente-Serrano 2010) n'ajustait que **74,6 %**
+des couples cellule × mois × fenêtre. L'instrumentation des motifs de rejet a montré que
+**100 % des rejets** venaient de la garde `β ≤ 1` et **0 %** d'un manque de données. Or
+`β = 1/τ₃` et |τ₃| < 1 toujours ⇒ `β ≤ 1` implique **τ₃ < 0** (asymétrie négative) : la
+log-logistique est une loi à asymétrie *positive*, structurellement incapable de représenter
+ces mailles. La **GLO** (`k = −τ₃`) accepte les deux signes → **100 % de couverture**.
+
+La bascule est **purement additive** : la log-logistique est exactement la GLO reparamétrée
+(`k = −1/β`), donc les valeurs sont identiques là où l'ancienne loi fonctionnait (vérifié :
+écart max 0,000 sur 35 614 mailles). Voir `time-serie-explo/docs/superpowers/specs/2026-07-23-climat-spei-design.md` §2.0.
+
+### ⚠️ Procédure de (re)construction du SPEI — ordre impératif
+
+1. **Référence d'abord** — elle n'est **PAS** dans le job nightly (c'est une référence fixe
+   1991-2020, inutile de la recalculer chaque nuit) :
+   ```bash
+   docker exec brgm-dlt-worker dagster asset materialize \
+     --select fct_era5_spei_climatology_grid -m hubeau_pipeline.definitions   # ~2,5 min
+   ```
+2. **Puis les indices** :
+   ```bash
+   docker exec brgm-dlt-worker dagster asset materialize \
+     --select fct_era5_indices_grid -m hubeau_pipeline.definitions
+   ```
+   ⚠️ Sur une table **déjà peuplée**, cet asset ne recalcule que les **3 derniers mois**
+   (`latest_index_month()` non nul → branche nightly). Le `spei` resterait donc NULL sur tout
+   l'historique. Un **backfill historique est obligatoire** après tout changement de méthode :
+   boucler `_compute_range` par tranches de 5 ans de 1950 à aujourd'hui (upsert
+   `ON CONFLICT DO UPDATE`, donc non destructif — spi/sti sont réécrits à l'identique).
+   Coût mesuré : ~12 000 lignes/s, **~50 min** pour les 41,96 M lignes.
+3. **Purger le cache junon** : `junon:obs_climat_*` (et `junon-redis-dev` pour l'env de dev),
+   sinon l'app sert les anciennes valeurs jusqu'à 24 h.
 
 ---
 

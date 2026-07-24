@@ -56,11 +56,36 @@ mypy src/                        # Type check (lenient: ignore_missing_imports=t
 ```
 
 ### Testing
-Python unit tests are **minimal**: a few pure-logic tests under `tests/` (`test_indices.py`, `test_monthly_index.py`) covering the IPS/SSFI classification. `tests/test_indices.py::GOLDEN_Z_TO_CLASS` is a **cross-repo sync contract** — the same golden table exists in the junon repo (`time-serie-explo/tests/test_drought_classification_contract.py`) so the duplicated IPS math can't drift silently. Run (cov plugin not always installed): `PYTHONPATH=src python3 -m pytest tests/ -o addopts=""`.
+
+Python unit tests cover the **pure computation layer only** (no DB, no network) — 37 tests
+under `tests/`:
+
+| File | Covers |
+|---|---|
+| `test_indices.py` | IPS/SSFI classification |
+| `test_monthly_index.py`, `test_monthly_index_persistence.py` | monthly index + persistence |
+| `test_reference_grid.py` | fixed reference grid |
+| `test_era5_indices.py` | SPI (gamma), STI (z-score), SPEI (GLO fit + CDF) |
+| `test_era5_spei_climatology.py` | SPEI reference fitting + rejection accounting |
+| `test_era5_indices_persistence.py` | SQL-constant contract of the indices table |
+
+`tests/test_indices.py::GOLDEN_Z_TO_CLASS` is a **cross-repo sync contract** — the same
+golden table exists in the junon repo
+(`time-serie-explo/tests/test_drought_classification_contract.py`) so the duplicated IPS
+math can't drift silently.
+
+```bash
+# `uv run pytest` does NOT work here: it rebuilds psycopg2cffi, which needs pg_config.
+# Use the interpreter directly (the cov plugin isn't always installed):
+PYTHONPATH=src python3 -m pytest tests/ -o addopts=""
+```
+
+> `tests/test_era5_daily_temp_aggregation.py` fails **at collection** because `xarray`
+> isn't installed in this environment. It is a pre-existing environment gap, unrelated to
+> the code — exclude it with `--ignore=tests/test_era5_daily_temp_aggregation.py` to get a
+> clean run.
 
 Data quality is otherwise managed through dbt tests (not_null, unique, relationships, accepted_values, accepted_range) defined in `schema.yml` files. Run via `docker exec brgm-dlt-worker dbt test`. Failing rows are persisted to the `dbt_audit` schema (`+store_failures`).
-
-pytest config exists in `pyproject.toml` (testpaths=`tests/`) but no test files are present.
 
 ## Architecture
 
@@ -98,7 +123,7 @@ Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_projec
 
 - **Piezometry**: Groundwater level stations + chroniques (year-partitioned 1967-present)
 - **Hydrometry**: River flow sites → stations → observations (year-partitioned 2000-present)
-- **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid. Grid-level climate marts: `gold.fct_era5_monthly_grid` (monthly aggregates per 0.1° cell), `gold.fct_era5_climatology_grid` (1991-2020 normals, gamma MoM + μ/σ), `gold.fct_era5_indices_grid` (SPI/STI drought/heat indices, windows 1/3/6/12 months)
+- **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid. Grid-level climate marts: `gold.fct_era5_monthly_grid` (monthly aggregates per 0.1° cell), `gold.fct_era5_climatology_grid` (1991-2020 normals, gamma MoM + μ/σ — SPI/STI), `gold.fct_era5_spei_climatology_grid` (1991-2020 generalized-logistic parameters for SPEI, Python-managed: the L-moment fit needs the Γ function, which PostgreSQL lacks), `gold.fct_era5_indices_grid` (SPI/STI/SPEI, windows 1/3/6/12 months)
 - **Reference**: TME hydrogeo entities (BDLISA)
 
 ### Pipeline Flow
@@ -123,7 +148,7 @@ The spatial join between stations and ERA5 grid is done in `int_station_era5_map
 ```
 Bronze materializes
   → bronze_to_transform_sensor    → dbt_transform_job       (ALL dbt models, incremental; dbt ref() DAG orders them)
-      ├ transform_to_index_sensor   → station_index_refresh   (fct_monthly_index + station_current_index + fct_era5_indices_grid — the latter is a Python asset, not a dbt model, computing SPI/STI from the climate grid marts)
+      ├ transform_to_index_sensor   → station_index_refresh   (fct_monthly_index + station_current_index + fct_era5_indices_grid — the latter is a Python asset, not a dbt model, computing SPI/STI/SPEI from the climate grid marts). NOTE: `fct_era5_spei_climatology_grid` is deliberately NOT in this nightly job — it is a fixed 1991-2020 reference, materialized on demand only.
       └ transform_to_quality_sensor → dbt_quality_job         (source freshness + dbt tests, non-blocking alerting)
 ```
 The two post-transform sensors fire in parallel on `dbt_transform_job` SUCCESS. A failing
@@ -146,7 +171,10 @@ dbt test fails the quality run (visible/alertable) but does NOT block the data r
   - `assets/{current_index,monthly_index,reference_stats}_assets.py` - IPS standardized index (station level / SSFI)
   - `jobs/` - job definitions (bronze, dbt staged pipelines, bootstrap, indices)
   - `sources/` - DLT source clients: `hubeau_csv_source.py` (API pagination + retry), `era5_source.py` (CADS API + NetCDF)
-  - `ml/` - IPS index computation (`indices.py` scipy-based; `current_index_persistence.py`, `monthly_index_persistence.py`, `reference_stats_persistence.py`)
+  - `ml/` - index computation, all pure/vectorised (numpy+scipy, no external index library):
+    - `indices.py` — IPS/SSFI; `current_index_persistence.py`, `monthly_index_persistence.py`, `reference_stats_persistence.py`
+    - `era5_indices.py` — SPI (gamma CDF), STI (z-score), **SPEI** (`fit_glo_detailed` / `compute_spei_glo`: generalized-logistic fitted by L-moments, Hosking estimators)
+    - `era5_spei_climatology_persistence.py` — the SPEI reference parameter table
   - `schedules.py` - 9 cron schedules
   - `sensors.py` - 3 event-driven sensors
   - `resources.py` - PostgreSQLResource (Pydantic-based), DLT resource
