@@ -56,19 +56,23 @@ def compute_sti(temp, temp_moyenne, temp_stddev):
 _MIN_FIT_SAMPLES = 4
 
 
-def fit_loglogistic_lmoments(samples):
-    """Ajuste une log-logistique à 3 paramètres (loi de Fisk translatée) par
-    L-moments (PWM en position de tracé, Vicente-Serrano 2010).
+# Motifs de rejet possibles en 4e position de _fit_loglogistic_detailed.
+# "n_insuffisant" : n < _MIN_FIT_SAMPLES.
+# "pwm_degenere" : dénominateur PWM nul ou non fini.
+# "beta_hors_domaine" : beta non fini ou beta <= 1.0.
+# "alpha_invalide" : alpha non fini ou alpha <= 0.
 
-    Args: samples — échantillon 1D des cumuls D=P−ETP de référence (une cellule×
-        mois calendaire×fenêtre, ~30 valeurs annuelles).
-    Returns: (alpha, beta, gamma) ; (nan, nan, nan) si l'ajustement est dégénéré.
+
+def _fit_loglogistic_detailed(samples):
+    """Comme fit_loglogistic_lmoments, mais expose en 4e position le motif de
+    rejet (None si succès). Logique de calcul strictement inchangée — cette
+    fonction ne fait qu'ajouter de l'observabilité, pas de nouvelles règles.
     """
     x = np.asarray(samples, dtype=float)
     x = np.sort(x[np.isfinite(x)])
     n = x.size
     if n < _MIN_FIT_SAMPLES:
-        return (np.nan, np.nan, np.nan)
+        return (np.nan, np.nan, np.nan, "n_insuffisant")
 
     # PWM en position de tracé p_i = (i − 0.35)/n (convention SPEI de référence).
     i = np.arange(1, n + 1)
@@ -79,18 +83,30 @@ def fit_loglogistic_lmoments(samples):
 
     denom = 6.0 * w1 - w0 - 6.0 * w2
     if denom == 0 or not np.isfinite(denom):
-        return (np.nan, np.nan, np.nan)
+        return (np.nan, np.nan, np.nan, "pwm_degenere")
     beta = (2.0 * w1 - w0) / denom
     # beta>0 requis ; 1/beta<1 requis pour que Γ(1−1/beta) converge (beta>1).
     if not np.isfinite(beta) or beta <= 1.0:
-        return (np.nan, np.nan, np.nan)
+        return (np.nan, np.nan, np.nan, "beta_hors_domaine")
 
     g = _gamma_fn(1.0 + 1.0 / beta) * _gamma_fn(1.0 - 1.0 / beta)
     alpha = (w0 - 2.0 * w1) * beta / g
     if not np.isfinite(alpha) or alpha <= 0:
-        return (np.nan, np.nan, np.nan)
+        return (np.nan, np.nan, np.nan, "alpha_invalide")
     gamma_loc = w0 - alpha * g
-    return (float(alpha), float(beta), float(gamma_loc))
+    return (float(alpha), float(beta), float(gamma_loc), None)
+
+
+def fit_loglogistic_lmoments(samples):
+    """Ajuste une log-logistique à 3 paramètres (loi de Fisk translatée) par
+    L-moments (PWM en position de tracé, Vicente-Serrano 2010).
+
+    Args: samples — échantillon 1D des cumuls D=P−ETP de référence (une cellule×
+        mois calendaire×fenêtre, ~30 valeurs annuelles).
+    Returns: (alpha, beta, gamma) ; (nan, nan, nan) si l'ajustement est dégénéré.
+    """
+    alpha, beta, gamma_loc, _reason = _fit_loglogistic_detailed(samples)
+    return (alpha, beta, gamma_loc)
 
 
 def compute_spei(d_cumul, ll_alpha, ll_beta, ll_gamma):

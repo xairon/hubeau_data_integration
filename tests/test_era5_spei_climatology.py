@@ -14,8 +14,14 @@ def test_fit_reference_frame_groups_and_fits():
         "mois_calendaire": [6] * 60 + [6] * 3,
         "bilan_cumul": list(samples) + [1.0, 2.0, 3.0],
     })
-    rows = fit_reference_frame(df, window=3)
+    rows, stats = fit_reference_frame(df, window=3)
     assert len(rows) == 1                        # degenerate cell dropped
     lat, lon, mc, fen, a, b, g, n = rows[0]
     assert (lat, lon, mc, fen, n) == (48.1, 2.3, 6, 3, 60)
     assert abs(b - beta) < 0.4
+
+    assert stats["groupes"] == 2                 # les deux groupes, rejeté inclus
+    assert stats["ok"] == len(rows) == 1
+    assert stats["n_annees_insuffisant"] == 1     # le groupe à 3 échantillons (< MIN_YEARS_REF)
+    for reason in ("pwm_degenere", "beta_hors_domaine", "alpha_invalide", "n_insuffisant"):
+        assert stats[reason] == 0

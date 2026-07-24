@@ -4,8 +4,9 @@ from scipy import stats
 
 from hubeau_pipeline.ml.era5_indices import (
     MIN_YEARS_REF,
-    compute_spi,
+    _fit_loglogistic_detailed,
     compute_spei,
+    compute_spi,
     compute_sti,
     fit_loglogistic_lmoments,
 )
@@ -77,6 +78,29 @@ def test_fit_loglogistic_recovers_known_params():
 def test_fit_loglogistic_degenerate_returns_nan():
     assert not np.isfinite(fit_loglogistic_lmoments(np.full(30, 5.0))[1])   # constant
     assert not np.isfinite(fit_loglogistic_lmoments(np.array([1.0, 2.0]))[1])  # n < 4
+
+
+def test_fit_loglogistic_detailed_n_insuffisant():
+    a, b, g, reason = _fit_loglogistic_detailed(np.array([1.0, 2.0]))
+    assert reason == "n_insuffisant"
+    assert not np.isfinite([a, b, g]).any()
+
+
+def test_fit_loglogistic_detailed_constant_sample_reason():
+    # Échantillon constant : PWM non dégénéré numériquement (arrondi flottant),
+    # mais le beta résultant est négatif → hors du domaine requis (beta > 1.0).
+    a, b, g, reason = _fit_loglogistic_detailed(np.full(30, 5.0))
+    assert reason == "beta_hors_domaine"
+    assert not np.isfinite([a, b, g]).any()
+
+
+def test_fit_loglogistic_detailed_valid_fit_reason_is_none():
+    alpha, beta, gamma_loc = 40.0, 3.0, -10.0
+    u = (np.arange(1, 61) - 0.5) / 60.0
+    x = gamma_loc + alpha * (u / (1.0 - u)) ** (1.0 / beta)
+    a, b, g, reason = _fit_loglogistic_detailed(x)
+    assert reason is None
+    assert np.isfinite([a, b, g]).all()
 
 
 def test_compute_spei_sign_and_center():
