@@ -1,7 +1,7 @@
 """Référence SPEI 1991-2020 → gold.fct_era5_spei_climatology_grid.
 
-Fit log-logistique (L-moments) du cumul bilan hydrique par cellule × mois
-calendaire × fenêtre. Rebuild rare (full), consommé par fct_era5_indices_grid.
+Fit logistique généralisée (GLO, L-moments) du cumul bilan hydrique par cellule
+× mois calendaire × fenêtre. Rebuild rare (full), consommé par fct_era5_indices_grid.
 """
 import logging
 
@@ -10,7 +10,7 @@ import pandas as pd
 from dagster import AssetExecutionContext, MetadataValue, asset
 from dagster_dbt import get_asset_key_for_model
 
-from ..ml.era5_indices import MIN_YEARS_REF, fit_loglogistic_lmoments
+from ..ml.era5_indices import GLO_REJECT_REASONS, MIN_YEARS_REF, fit_glo_detailed
 from ..ml.era5_spei_climatology_persistence import (
     init_spei_climatology_table,
     upsert_spei_climatology,
@@ -50,25 +50,43 @@ WHERE mois >= DATE '1991-01-01'
 
 
 def fit_reference_frame(df, window):
-    """Groupe df par (cellule, mois calendaire) et fitte la log-logistique.
+    """Groupe df par (cellule, mois calendaire) et fitte la logistique généralisée (GLO).
 
-    Retourne une liste de tuples upsertables ; les groupes trop courts
-    (< MIN_YEARS_REF) ou à fit dégénéré sont ignorés.
+    Retourne (rows, stats) : rows est la liste de tuples upsertables (groupes
+    acceptés) ; stats est un dict[str, int] exposant, pour tout groupe examiné,
+    la raison de rejet — "n_annees_insuffisant" (< MIN_YEARS_REF) ou l'un des
+    motifs de GLO_REJECT_REASONS (cf. ml.era5_indices.fit_glo_detailed) — afin
+    de pouvoir agréger la couverture a posteriori sans que les rejets ne
+    laissent aucune trace.
     """
     rows = []
+    stats = {"groupes": 0, "ok": 0, "n_annees_insuffisant": 0}
+    stats.update(dict.fromkeys(GLO_REJECT_REASONS, 0))
+
     for (lat, lon, mc), grp in df.groupby(
         ["era5_latitude", "era5_longitude", "mois_calendaire"], sort=False
     ):
+        stats["groupes"] += 1
         samples = grp["bilan_cumul"].to_numpy(dtype=float)
         n = np.isfinite(samples).sum()
         if n < MIN_YEARS_REF:
+            stats["n_annees_insuffisant"] += 1
             continue
-        alpha, beta, gamma_loc = fit_loglogistic_lmoments(samples)
-        if not np.isfinite([alpha, beta, gamma_loc]).all():
+        alpha, k, xi, reason = fit_glo_detailed(samples)
+        if reason is not None:
+            stats[reason] += 1
             continue
+        stats["ok"] += 1
         rows.append((float(lat), float(lon), int(mc), int(window),
-                     alpha, beta, gamma_loc, int(n)))
-    return rows
+                     alpha, k, xi, int(n)))
+    return rows, stats
+
+
+_ALL_REJECT_REASONS = ("n_annees_insuffisant", *GLO_REJECT_REASONS)
+
+
+def _pct(n, total):
+    return 0.0 if not total else round(100.0 * n / total, 1)
 
 
 @asset(
@@ -76,22 +94,48 @@ def fit_reference_frame(df, window):
     group_name="indices",
     deps=[get_asset_key_for_model([hubeau_dbt_assets], "fct_era5_monthly_grid")],
     description=(
-        "Paramètres log-logistiques SPEI (référence 1991-2020) par cellule ERA5 "
-        "× mois calendaire × fenêtre 1/3/6/12. Rebuild full."
+        "Paramètres GLO (logistique généralisée) SPEI (référence 1991-2020) par "
+        "cellule ERA5 × mois calendaire × fenêtre 1/3/6/12. Rebuild full."
     ),
 )
 def fct_era5_spei_climatology_grid(context: AssetExecutionContext, pg: PostgreSQLResource):
     init_spei_climatology_table(pg)
     total = 0
+    cumulative = {"groupes": 0, "ok": 0}
+    cumulative.update(dict.fromkeys(_ALL_REJECT_REASONS, 0))
+
     for window in WINDOWS:
         with pg.get_connection() as conn:
             df = pd.read_sql(
                 _REF_QUERY, conn,
                 params={"window": window, "window_minus_1": window - 1},
             )
-        rows = fit_reference_frame(df, window)
+        rows, stats = fit_reference_frame(df, window)
         upsert_spei_climatology(pg, rows)
         total += len(rows)
-        context.log.info("Fenêtre %d : %d cellules×mois fittées", window, len(rows))
-    context.add_output_metadata({"fitted_groups": MetadataValue.int(total)})
+
+        groupes = stats["groupes"]
+
+        reject_detail = ", ".join(
+            f"{reason}={stats[reason]} ({_pct(stats[reason], groupes):.1f}%)"
+            for reason in _ALL_REJECT_REASONS
+        )
+        context.log.info(
+            "Fenêtre %d : %d groupes, %d ok (%.1f%%) — rejets : %s",
+            window, groupes, stats["ok"], _pct(stats["ok"], groupes), reject_detail,
+        )
+        for key, value in stats.items():
+            cumulative[key] += value
+
+    metadata = {
+        f"rejets_{reason}": MetadataValue.int(cumulative[reason])
+        for reason in _ALL_REJECT_REASONS
+    }
+    metadata["groupes_total"] = MetadataValue.int(cumulative["groupes"])
+    metadata["fitted_groups"] = MetadataValue.int(total)
+    metadata["taux_couverture_pct"] = MetadataValue.float(
+        round(100.0 * cumulative["ok"] / cumulative["groupes"], 2)
+        if cumulative["groupes"] else 0.0
+    )
+    context.add_output_metadata(metadata)
     return total

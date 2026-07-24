@@ -11,7 +11,7 @@ import pandas as pd
 from dagster import AssetExecutionContext, AssetKey, MetadataValue, asset
 from dagster_dbt import get_asset_key_for_model
 
-from ..ml.era5_indices import MIN_YEARS_REF, compute_spei, compute_spi, compute_sti
+from ..ml.era5_indices import MIN_YEARS_REF, compute_spei_glo, compute_spi, compute_sti
 from ..ml.era5_indices_persistence import (
     init_era5_indices_table,
     latest_index_month,
@@ -54,7 +54,7 @@ SELECT
     r.precip_cumul, r.bilan_cumul, r.temp_fenetre,
     c.gamma_alpha, c.gamma_beta, c.prob_zero,
     c.temp_moyenne, c.temp_stddev, c.nb_annees,
-    s.ll_alpha, s.ll_beta, s.ll_gamma
+    s.glo_alpha, s.glo_k, s.glo_xi
 FROM rolled r
 JOIN gold.fct_era5_climatology_grid c
   ON c.era5_latitude = r.era5_latitude
@@ -92,7 +92,7 @@ def _compute_range(pg, start_month, end_month):
             continue
         spi = compute_spi(df["precip_cumul"], df["gamma_alpha"], df["gamma_beta"], df["prob_zero"])
         sti = compute_sti(df["temp_fenetre"], df["temp_moyenne"], df["temp_stddev"])
-        spei = compute_spei(df["bilan_cumul"], df["ll_alpha"], df["ll_beta"], df["ll_gamma"])
+        spei = compute_spei_glo(df["bilan_cumul"], df["glo_alpha"], df["glo_k"], df["glo_xi"])
         # Seuil WMO : référence trop courte → indices NULL. nb_annees vient de la
         # climatologie précip/gamma (c) ; il vaut aussi pour le SPEI car la réf SPEI
         # est fittée sur les mêmes mois `mois_complet`/fenêtre (même grille) — et une
