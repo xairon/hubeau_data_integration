@@ -8,10 +8,10 @@ import logging
 
 import numpy as np
 import pandas as pd
-from dagster import AssetExecutionContext, MetadataValue, asset
+from dagster import AssetExecutionContext, AssetKey, MetadataValue, asset
 from dagster_dbt import get_asset_key_for_model
 
-from ..ml.era5_indices import MIN_YEARS_REF, compute_spi, compute_sti
+from ..ml.era5_indices import MIN_YEARS_REF, compute_spei, compute_spi, compute_sti
 from ..ml.era5_indices_persistence import (
     init_era5_indices_table,
     latest_index_month,
@@ -37,6 +37,7 @@ WITH rolled AS (
     SELECT
         era5_latitude, era5_longitude, mois,
         SUM(precipitation_totale) OVER w AS precip_cumul,
+        SUM(bilan_hydrique)       OVER w AS bilan_cumul,
         AVG(temperature_moyenne)  OVER w AS temp_fenetre,
         COUNT(*)                  OVER w AS n_mois
     FROM gold.fct_era5_monthly_grid
@@ -50,15 +51,21 @@ WITH rolled AS (
 )
 SELECT
     r.era5_latitude, r.era5_longitude, r.mois,
-    r.precip_cumul, r.temp_fenetre,
+    r.precip_cumul, r.bilan_cumul, r.temp_fenetre,
     c.gamma_alpha, c.gamma_beta, c.prob_zero,
-    c.temp_moyenne, c.temp_stddev, c.nb_annees
+    c.temp_moyenne, c.temp_stddev, c.nb_annees,
+    s.ll_alpha, s.ll_beta, s.ll_gamma
 FROM rolled r
 JOIN gold.fct_era5_climatology_grid c
   ON c.era5_latitude = r.era5_latitude
  AND c.era5_longitude = r.era5_longitude
  AND c.mois_calendaire = EXTRACT(MONTH FROM r.mois)::int
  AND c.fenetre = %(window)s
+LEFT JOIN gold.fct_era5_spei_climatology_grid s
+  ON s.era5_latitude = r.era5_latitude
+ AND s.era5_longitude = r.era5_longitude
+ AND s.mois_calendaire = EXTRACT(MONTH FROM r.mois)::int
+ AND s.fenetre = %(window)s
 WHERE r.mois >= %(start_month)s
   AND r.n_mois = %(window)s
 """
@@ -85,16 +92,23 @@ def _compute_range(pg, start_month, end_month):
             continue
         spi = compute_spi(df["precip_cumul"], df["gamma_alpha"], df["gamma_beta"], df["prob_zero"])
         sti = compute_sti(df["temp_fenetre"], df["temp_moyenne"], df["temp_stddev"])
-        # Seuil WMO : référence trop courte → indices NULL
+        spei = compute_spei(df["bilan_cumul"], df["ll_alpha"], df["ll_beta"], df["ll_gamma"])
+        # Seuil WMO : référence trop courte → indices NULL. nb_annees vient de la
+        # climatologie précip/gamma (c) ; il vaut aussi pour le SPEI car la réf SPEI
+        # est fittée sur les mêmes mois `mois_complet`/fenêtre (même grille) — et une
+        # réf SPEI trop courte ou dégénérée est déjà tombée à NULL au fit (→ NaN ici).
         thin = df["nb_annees"].to_numpy() < MIN_YEARS_REF
         spi[thin] = np.nan
         sti[thin] = np.nan
+        spei[thin] = np.nan
         rows = [
             (lat, lon, mois, window,
-             None if np.isnan(s) else float(s),
-             None if np.isnan(t) else float(t))
-            for lat, lon, mois, s, t in zip(
-                df["era5_latitude"], df["era5_longitude"], df["mois"], spi, sti, strict=True
+             None if np.isnan(sp) else float(sp),
+             None if np.isnan(st) else float(st),
+             None if np.isnan(se) else float(se))
+            for lat, lon, mois, sp, st, se in zip(
+                df["era5_latitude"], df["era5_longitude"], df["mois"],
+                spi, sti, spei, strict=True
             )
         ]
         upsert_era5_indices(pg, rows)
@@ -108,6 +122,7 @@ def _compute_range(pg, start_month, end_month):
     deps=[
         get_asset_key_for_model([hubeau_dbt_assets], "fct_era5_monthly_grid"),
         get_asset_key_for_model([hubeau_dbt_assets], "fct_era5_climatology_grid"),
+        AssetKey("fct_era5_spei_climatology_grid"),
     ],
     description=(
         "SPI/STI par cellule ERA5 (fenêtres 1/3/6/12 mois, normale 1991-2020). "

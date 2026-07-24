@@ -21,6 +21,7 @@ from .bronze.era5_daily_temp_assets import (
 from .current_index_assets import station_current_index
 from .dbt_assets import hubeau_dbt_assets
 from .era5_indices_assets import fct_era5_indices_grid
+from .era5_spei_climatology_assets import fct_era5_spei_climatology_grid
 from .monthly_index_assets import fct_monthly_index
 from .reference_stats_assets import station_reference_stats
 
@@ -47,6 +48,7 @@ all_indices_assets = [
     station_current_index,
     fct_monthly_index,
     fct_era5_indices_grid,
+    fct_era5_spei_climatology_grid,
 ]
 
 all_assets = all_bronze_assets + all_dbt_assets + all_indices_assets

@@ -2,7 +2,13 @@
 import numpy as np
 from scipy import stats
 
-from hubeau_pipeline.ml.era5_indices import MIN_YEARS_REF, compute_spi, compute_sti
+from hubeau_pipeline.ml.era5_indices import (
+    MIN_YEARS_REF,
+    compute_spi,
+    compute_spei,
+    compute_sti,
+    fit_loglogistic_lmoments,
+)
 
 
 def test_spi_median_of_gamma_is_near_zero():
@@ -53,3 +59,48 @@ def test_sti_zero_sigma_gives_nan():
 
 def test_min_years_ref_constant():
     assert MIN_YEARS_REF == 25
+
+
+def test_fit_loglogistic_recovers_known_params():
+    # Synthetic sample drawn from a known 3-param log-logistic (fisk + loc):
+    # x = gamma_loc + alpha * (u/(1-u))**(1/beta), u ~ Uniform(0,1) on a fixed grid.
+    alpha, beta, gamma_loc = 40.0, 3.0, -10.0
+    u = (np.arange(1, 61) - 0.5) / 60.0            # 60 deterministic quantiles
+    x = gamma_loc + alpha * (u / (1.0 - u)) ** (1.0 / beta)
+    a, b, g = fit_loglogistic_lmoments(x)
+    assert np.isfinite([a, b, g]).all()
+    assert abs(a - alpha) < 4.0
+    assert abs(b - beta) < 0.4
+    assert abs(g - gamma_loc) < 6.0
+
+
+def test_fit_loglogistic_degenerate_returns_nan():
+    assert not np.isfinite(fit_loglogistic_lmoments(np.full(30, 5.0))[1])   # constant
+    assert not np.isfinite(fit_loglogistic_lmoments(np.array([1.0, 2.0]))[1])  # n < 4
+
+
+def test_compute_spei_sign_and_center():
+    # Median of the reference (x = gamma_loc + alpha) → F = 0.5 → SPEI ≈ 0.
+    alpha, beta, gamma_loc = 40.0, 3.0, -10.0
+    median = gamma_loc + alpha
+    z = compute_spei(
+        np.array([median, median + 300.0, gamma_loc + 1.0]),
+        np.full(3, alpha), np.full(3, beta), np.full(3, gamma_loc),
+    )
+    assert abs(z[0]) < 0.05          # centre
+    assert z[1] > 1.0                # wet surplus
+    assert z[2] < -1.0               # deep deficit
+
+
+def test_compute_spei_invalid_params_nan():
+    z = compute_spei(
+        np.array([10.0, 10.0, -999.0, 10.0, 10.0]),
+        np.array([40.0, np.nan, 40.0, -5.0, 40.0]),   # rows 1,3: bad alpha (nan, finite<=0)
+        np.array([3.0, 3.0, 3.0, 3.0, -1.0]),         # row 4: bad beta (finite<=0)
+        np.array([-10.0, -10.0, 5.0, -10.0, -10.0]),  # row 2: x <= gamma → out of support
+    )
+    assert np.isfinite(z[0])   # valid row: finite result, not fabricated NaN
+    assert np.isnan(z[1])      # alpha = NaN
+    assert np.isnan(z[2])      # x <= gamma (out of support)
+    assert np.isnan(z[3])      # alpha = -5.0, finite but <= 0 (must not fabricate a value)
+    assert np.isnan(z[4])      # beta = -1.0, finite but <= 0 (must not fabricate a value)

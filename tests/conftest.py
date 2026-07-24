@@ -80,3 +80,29 @@ if "hubeau_pipeline.resources" not in sys.modules:
     res_stub.PostgreSQLResource = object  # type: ignore[assignment]
     sys.modules["hubeau_pipeline.resources"] = res_stub
 
+# Stub psycopg2 (persistence modules only need execute_values at import time;
+# unit tests exercise pure logic, never a real DB connection).
+if "psycopg2" not in sys.modules:
+    psycopg2_stub = types.ModuleType("psycopg2")
+    psycopg2_extras_stub = types.ModuleType("psycopg2.extras")
+    psycopg2_extras_stub.execute_values = lambda *args, **kwargs: None
+    psycopg2_stub.extras = psycopg2_extras_stub
+    sys.modules["psycopg2"] = psycopg2_stub
+    sys.modules["psycopg2.extras"] = psycopg2_extras_stub
+
+# Stub dagster_dbt (get_asset_key_for_model not needed to exercise pure logic).
+if "dagster_dbt" not in sys.modules:
+    dagster_dbt_stub = types.ModuleType("dagster_dbt")
+    dagster_dbt_stub.get_asset_key_for_model = lambda *args, **kwargs: None
+    dagster_dbt_stub.DbtCliResource = object
+    dagster_dbt_stub.DbtProject = object
+    dagster_dbt_stub.dbt_assets = lambda *args, **kwargs: (lambda fn: fn)
+    sys.modules["dagster_dbt"] = dagster_dbt_stub
+
+# Stub hubeau_pipeline.assets.dbt_assets (compiles the dbt manifest as a side
+# effect of import — far too heavy for pure-Python asset unit tests).
+if "hubeau_pipeline.assets.dbt_assets" not in sys.modules:
+    dbt_assets_stub = types.ModuleType("hubeau_pipeline.assets.dbt_assets")
+    dbt_assets_stub.hubeau_dbt_assets = None
+    sys.modules["hubeau_pipeline.assets.dbt_assets"] = dbt_assets_stub
+
