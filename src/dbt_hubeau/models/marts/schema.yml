@@ -403,8 +403,10 @@ models:
   - name: fct_era5_monthly_grid
     description: >
       Agrégats météo mensuels ERA5 par point de grille 0.1° (toute la France, 1950→présent).
-      Base du module Climat junon. etp_totale et bilan_hydrique en mm positifs
-      (PEV ERA5 négative inversée à l'agrégation).
+      Base du module Climat junon. etp_totale = ET0 de référence Hargreaves (FAO-56)
+      calculée depuis les Tmin/Tmax journaliers vrais ; bilan_hydrique = précipitation −
+      etp_totale, tous deux en mm. La PEV brute d'ERA5-Land reste exposée en etp_pev_era5
+      pour traçabilité mais N'EST PLUS consommée (~2,15× l'ET0 de référence). Cf. docs/ERA5.md.
     columns:
       - name: era5_latitude
         tests: [not_null]
@@ -470,7 +472,24 @@ models:
               config:
                 severity: warn
       - name: etp_totale
-        description: "ETP mensuelle en mm POSITIFS (= SUM(-potential_evaporation))"
+        description: >
+          ET0 de référence mensuelle en mm, formule de Hargreaves (FAO-56 eq. 52) appliquée
+          aux Tmin/Tmax/Tmoy journaliers vrais, rayonnement extraterrestre Ra dérivé
+          analytiquement (latitude + jour de l'année). Bascule du 2026-07-24 : avant, cette
+          colonne valait SUM(-potential_evaporation) d'ERA5-Land, ~2,15× trop élevée pour une
+          ET0 de référence. Ordre de grandeur attendu : ~820 mm/an sur la France.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 400
+              config:
+                severity: warn
+      - name: etp_pev_era5
+        description: >
+          PEV brute d'ERA5-Land en mm positifs (= SUM(-potential_evaporation)). Conservée
+          pour traçabilité/comparaison uniquement — NE PAS l'utiliser comme ETP de référence
+          (elle n'est pas une ET0 FAO : surface sans stress hydrique, résistance
+          aérodynamique du modèle). ~1 740 mm/an sur la France.
         tests:
           - dbt_utils.accepted_range:
               min_value: -50

@@ -27,9 +27,16 @@
 -- stg_era5_daily_temp_stats (t2m_mean/min/max), agrégées LOCALEMENT à partir des 24 pas
 -- horaires bruts de reanalysis-era5-land — une vraie moyenne/Tn/Tx journalière. Avant, ces colonnes dérivaient
 -- de stg_era5_timeseries.temperature_2m, un échantillon instantané à 00:00 UTC (biais
--- froid nocturne ~2-4°C, pas une vraie moyenne). Précipitation/ETP/bilan_hydrique/nb_jours/
--- mois_complet restent inchangés, dérivés de stg_era5_timeseries (pas d'équivalent
--- journalier vrai dispo pour ces variables). Voir docs/ERA5.md.
+-- froid nocturne ~2-4°C, pas une vraie moyenne). Voir docs/ERA5.md.
+--
+-- CUTOVER ETP (2026-07-24) : etp_totale est désormais une ET0 de référence calculée par
+-- HARGREAVES (FAO-56) à partir des Tmin/Tmax/Tmoy journaliers vrais — rendue possible
+-- précisément par le cutover température ci-dessus. Auparavant etp_totale était
+-- SUM(-potential_evaporation) d'ERA5-Land, qui vaut ~2,15× l'ET0 de référence (mesuré :
+-- 1 756 vs 818 mm/an) et mettait la France en déficit permanent. Cette PEV brute reste
+-- exposée sous etp_pev_era5 pour traçabilité, mais n'est plus consommée.
+-- bilan_hydrique = precipitation_totale − etp_totale suit donc Hargreaves, et le SPEI
+-- avec lui. Précipitation/nb_jours/mois_complet restent dérivés de stg_era5_timeseries.
 
 WITH precip_daily AS (
     -- Arrondi défensif 0.1° + dédup : silver a déjà contenu des variantes float non
@@ -67,6 +74,53 @@ temp_daily AS (
     WHERE time >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '{{ var("era5_monthly_grid_lookback_months", 3) }} months')
     {% endif %}
     ORDER BY ROUND(latitude, 1), ROUND(longitude, 1), time::date, created_at DESC NULLS LAST
+),
+
+-- ETP de référence par HARGREAVES (FAO-56 eq. 52), en mm/jour :
+--   ET0 = 0.0023 · Ra · (Tmoy + 17.8) · √(Tmax − Tmin)
+-- Ra = rayonnement extraterrestre (FAO-56 eq. 21-25), fonction de la latitude et du
+-- jour de l'année uniquement — donc entièrement calculable ici, sans donnée de
+-- rayonnement/vent/humidité.
+--
+-- POURQUOI Hargreaves et non la `potential_evaporation` d'ERA5 : mesuré sur
+-- 30 888 mailles-mois (2015-2025), la PEV vaut **2,15× l'ET0 de référence**
+-- (1 756 vs 818 mm/an) et met la France en déficit hydrique permanent de −793 mm/an,
+-- au lieu de l'excédent de +146 mm/an que donne Hargreaves. La PEV d'ERA5 n'est PAS
+-- une ET0 de référence FAO : c'est l'évaporation d'une surface sans stress hydrique
+-- calculée avec la résistance aérodynamique du modèle, connue pour surestimer
+-- largement l'ET0. Hargreaves est le repli FAO-56 recommandé quand on ne dispose que
+-- de la température, et c'est la méthode employée par la littérature d'attribution
+-- (World Weather Attribution). Voir docs/ERA5.md.
+etp_daily AS (
+    SELECT
+        latitude,
+        longitude,
+        jour,
+        GREATEST(
+            0.0023
+            -- Ra converti de MJ/m²/j en mm/j équivalent (× 0.408)
+            * 0.408 * (24 * 60 / PI()) * 0.0820
+              * (1 + 0.033 * COS(2 * PI() * EXTRACT(DOY FROM jour)::numeric / 365))   -- dr
+              * (
+                  -- ωs · sin(φ) · sin(δ) + cos(φ) · cos(δ) · sin(ωs)
+                  ACOS(GREATEST(LEAST(
+                      -TAN(RADIANS(latitude))
+                      * TAN(0.409 * SIN(2 * PI() * EXTRACT(DOY FROM jour)::numeric / 365 - 1.39))
+                  , 1), -1))
+                  * SIN(RADIANS(latitude))
+                  * SIN(0.409 * SIN(2 * PI() * EXTRACT(DOY FROM jour)::numeric / 365 - 1.39))
+                  + COS(RADIANS(latitude))
+                  * COS(0.409 * SIN(2 * PI() * EXTRACT(DOY FROM jour)::numeric / 365 - 1.39))
+                  * SIN(ACOS(GREATEST(LEAST(
+                      -TAN(RADIANS(latitude))
+                      * TAN(0.409 * SIN(2 * PI() * EXTRACT(DOY FROM jour)::numeric / 365 - 1.39))
+                  , 1), -1)))
+                )
+            * (t2m_mean + 17.8)
+            * SQRT(GREATEST(t2m_max - t2m_min, 0))
+        , 0) AS et0_hargreaves
+    FROM temp_daily
+    WHERE t2m_mean IS NOT NULL AND t2m_min IS NOT NULL AND t2m_max IS NOT NULL
 )
 
 SELECT
@@ -79,8 +133,15 @@ SELECT
     MAX(t.t2m_max)  AS temperature_max,
 
     SUM(p.total_precipitation)        AS precipitation_totale,
-    SUM(-p.potential_evaporation)     AS etp_totale,
-    SUM(p.total_precipitation) - SUM(-p.potential_evaporation) AS bilan_hydrique,
+
+    -- ETP de référence (Hargreaves) : c'est CETTE colonne que consomment le bilan
+    -- hydrique, le SPEI et l'application.
+    SUM(x.et0_hargreaves)             AS etp_totale,
+    SUM(p.total_precipitation) - SUM(x.et0_hargreaves) AS bilan_hydrique,
+
+    -- PEV brute d'ERA5-Land, conservée pour traçabilité/comparaison. NE PAS l'utiliser
+    -- comme ETP de référence : ~2,15× trop élevée (cf. le commentaire de etp_daily).
+    SUM(-p.potential_evaporation)     AS etp_pev_era5,
 
     COUNT(*) AS nb_jours,
     -- Mois complet = autant de jours que le mois calendaire en compte
@@ -100,4 +161,8 @@ LEFT JOIN temp_daily t
     ON p.latitude = t.latitude
     AND p.longitude = t.longitude
     AND p.jour = t.jour
+LEFT JOIN etp_daily x
+    ON p.latitude = x.latitude
+    AND p.longitude = x.longitude
+    AND p.jour = x.jour
 GROUP BY p.latitude, p.longitude, DATE_TRUNC('month', p.jour)

@@ -95,12 +95,47 @@ CROSS JOIN LATERAL (
   s'applique plus aux marts grille. Précipitation/ETP/bilan_hydrique restent dérivés de
   `stg_era5_timeseries` (pas de source journalière vraie disponible pour ces variables).
 
-  > ⚠️ **Ne PAS en conclure que l'ETP est biaisée** — erreur déjà commise. La `potential_evaporation`
-  > d'ERA5 est un **flux d'accumulation** produit par le modèle ECMWF : la valeur à 00:00 UTC
-  > **EST** le cumul journalier correct, ce n'est pas un échantillon instantané. Le biais froid
-  > ne concernait que la *température*, grandeur à cycle diurne échantillonnée à un instant.
-  > `precipitation_totale`, `etp_totale` et `bilan_hydrique` sont donc **justes depuis toujours**,
-  > et le SPEI qui en dérive n'a jamais été bloqué par le cutover température.
+  > ⚠️ **Ne PAS conclure que l'ETP était biaisée *par le 00h UTC*** — erreur déjà commise. La
+  > `potential_evaporation` d'ERA5 est un **flux d'accumulation** produit par le modèle ECMWF :
+  > la valeur à 00:00 UTC **EST** le cumul journalier correct, ce n'est pas un échantillon
+  > instantané. Le biais froid ne concernait que la *température*. (La PEV avait un tout autre
+  > problème — son niveau — traité ci-dessous.)
+
+### ⚠️ ETP : Hargreaves (2026-07-24), et NON la PEV d'ERA5
+
+`etp_totale` est une **ET0 de référence calculée par la formule de Hargreaves (FAO-56)** à
+partir des Tmin/Tmax/Tmoy journaliers vrais — possible seulement depuis le cutover
+température. Le rayonnement extraterrestre `Ra` est calculé analytiquement (latitude +
+jour de l'année), donc aucune donnée de vent/humidité/rayonnement n'est nécessaire.
+
+**Pourquoi on a abandonné la `potential_evaporation` d'ERA5-Land.** Mesuré sur 30 888
+mailles-mois (2015-2025, mêmes mailles) :
+
+| | Hargreaves | PEV ERA5-Land | ratio |
+|---|---|---|---|
+| ETP annuelle | **818 mm** | **1 756 mm** | **×2,15** |
+| Bilan P−ETP | **+146 mm/an** | **−793 mm/an** | — |
+
+818 mm/an est cohérent avec l'ET0 de référence pour la France (littérature : 700-900 mm) ;
+1 756 mm/an ne l'est pas, et mettait le pays en déficit hydrique permanent. La PEV d'ERA5
+n'est **pas** une ET0 de référence FAO : c'est l'évaporation d'une surface sans stress
+hydrique calculée avec la résistance aérodynamique du modèle, connue pour surestimer
+largement l'ET0. Hargreaves est le repli recommandé par la FAO-56 en l'absence de
+rayonnement/vent/humidité, et c'est la méthode employée par la littérature d'attribution
+(World Weather Attribution utilise « ERA5 + Hargreaves »), ce qui rend notre SPEI
+comparable aux publications.
+
+La PEV brute reste exposée en `etp_pev_era5` pour traçabilité — **ne pas la consommer**.
+
+> **Incohérence assumée grille ↔ station.** La chaîne *station*
+> (`int_era5_for_all_stations` → `hubeau_daily_chroniques` / `hydro_daily_chroniques` /
+> `fct_monthly_*`) continue d'exposer la **PEV brute** sous `potential_evaporation`. Elle
+> sert de forçage aux modèles Pastas (TFN) : la changer invaliderait tous les calages
+> existants. C'est une décision délibérée, pas un oubli. Conséquence : une « ETP » du module
+> Climat (Hargreaves) et une « ETP » de la page Station (PEV) ne sont pas la même grandeur
+> et diffèrent d'un facteur ~2.
+> Note : `/observatory/era5/*` reconstruit sa `potential_evaporation` journalière depuis
+> `etp_totale` (`-(etp_totale/nb_jours)`) — cet endpoint suit donc **Hargreaves**.
 
 - `gold.fct_era5_climatology_grid` — normales 1991-2020 (gamma MoM + μ/σ) par cellule × mois ×
   fenêtre. Sert le **SPI** (gamma) et le **STI** (z-score). Modèle dbt.
