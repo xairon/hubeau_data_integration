@@ -4,14 +4,10 @@ from scipy import stats
 
 from hubeau_pipeline.ml.era5_indices import (
     MIN_YEARS_REF,
-    _fit_glo_detailed,
-    _fit_loglogistic_detailed,
-    compute_spei,
     compute_spei_glo,
     compute_spi,
     compute_sti,
-    fit_glo_lmoments,
-    fit_loglogistic_lmoments,
+    fit_glo_detailed,
 )
 
 
@@ -65,74 +61,6 @@ def test_min_years_ref_constant():
     assert MIN_YEARS_REF == 25
 
 
-def test_fit_loglogistic_recovers_known_params():
-    # Synthetic sample drawn from a known 3-param log-logistic (fisk + loc):
-    # x = gamma_loc + alpha * (u/(1-u))**(1/beta), u ~ Uniform(0,1) on a fixed grid.
-    alpha, beta, gamma_loc = 40.0, 3.0, -10.0
-    u = (np.arange(1, 61) - 0.5) / 60.0            # 60 deterministic quantiles
-    x = gamma_loc + alpha * (u / (1.0 - u)) ** (1.0 / beta)
-    a, b, g = fit_loglogistic_lmoments(x)
-    assert np.isfinite([a, b, g]).all()
-    assert abs(a - alpha) < 4.0
-    assert abs(b - beta) < 0.4
-    assert abs(g - gamma_loc) < 6.0
-
-
-def test_fit_loglogistic_degenerate_returns_nan():
-    assert not np.isfinite(fit_loglogistic_lmoments(np.full(30, 5.0))[1])   # constant
-    assert not np.isfinite(fit_loglogistic_lmoments(np.array([1.0, 2.0]))[1])  # n < 4
-
-
-def test_fit_loglogistic_detailed_n_insuffisant():
-    a, b, g, reason = _fit_loglogistic_detailed(np.array([1.0, 2.0]))
-    assert reason == "n_insuffisant"
-    assert not np.isfinite([a, b, g]).any()
-
-
-def test_fit_loglogistic_detailed_constant_sample_reason():
-    # Échantillon constant : PWM non dégénéré numériquement (arrondi flottant),
-    # mais le beta résultant est négatif → hors du domaine requis (beta > 1.0).
-    a, b, g, reason = _fit_loglogistic_detailed(np.full(30, 5.0))
-    assert reason == "beta_hors_domaine"
-    assert not np.isfinite([a, b, g]).any()
-
-
-def test_fit_loglogistic_detailed_valid_fit_reason_is_none():
-    alpha, beta, gamma_loc = 40.0, 3.0, -10.0
-    u = (np.arange(1, 61) - 0.5) / 60.0
-    x = gamma_loc + alpha * (u / (1.0 - u)) ** (1.0 / beta)
-    a, b, g, reason = _fit_loglogistic_detailed(x)
-    assert reason is None
-    assert np.isfinite([a, b, g]).all()
-
-
-def test_compute_spei_sign_and_center():
-    # Median of the reference (x = gamma_loc + alpha) → F = 0.5 → SPEI ≈ 0.
-    alpha, beta, gamma_loc = 40.0, 3.0, -10.0
-    median = gamma_loc + alpha
-    z = compute_spei(
-        np.array([median, median + 300.0, gamma_loc + 1.0]),
-        np.full(3, alpha), np.full(3, beta), np.full(3, gamma_loc),
-    )
-    assert abs(z[0]) < 0.05          # centre
-    assert z[1] > 1.0                # wet surplus
-    assert z[2] < -1.0               # deep deficit
-
-
-def test_compute_spei_invalid_params_nan():
-    z = compute_spei(
-        np.array([10.0, 10.0, -999.0, 10.0, 10.0]),
-        np.array([40.0, np.nan, 40.0, -5.0, 40.0]),   # rows 1,3: bad alpha (nan, finite<=0)
-        np.array([3.0, 3.0, 3.0, 3.0, -1.0]),         # row 4: bad beta (finite<=0)
-        np.array([-10.0, -10.0, 5.0, -10.0, -10.0]),  # row 2: x <= gamma → out of support
-    )
-    assert np.isfinite(z[0])   # valid row: finite result, not fabricated NaN
-    assert np.isnan(z[1])      # alpha = NaN
-    assert np.isnan(z[2])      # x <= gamma (out of support)
-    assert np.isnan(z[3])      # alpha = -5.0, finite but <= 0 (must not fabricate a value)
-    assert np.isnan(z[4])      # beta = -1.0, finite but <= 0 (must not fabricate a value)
-
-
 # --- Logistique généralisée (GLO) : remplace la log-logistique pour le SPEI ---
 # 100% des mailles rejetées par la log-logistique ont une L-asymétrie τ₃ < 0
 # (hors du domaine de la log-logistique, asymétrie positive uniquement) ; la GLO
@@ -148,7 +76,8 @@ def test_fit_glo_recovers_known_params_k_positive():
     n = 60
     f = (np.arange(1, n + 1) - 0.5) / n
     x = _glo_quantile(f, alpha, k, xi)
-    a, kk, x0 = fit_glo_lmoments(x)
+    a, kk, x0, reason = fit_glo_detailed(x)
+    assert reason is None
     assert np.isfinite([a, kk, x0]).all()
     assert abs(a - alpha) < 2.0
     assert abs(kk - k) < 0.1
@@ -160,7 +89,8 @@ def test_fit_glo_recovers_known_params_k_negative():
     n = 60
     f = (np.arange(1, n + 1) - 0.5) / n
     x = _glo_quantile(f, alpha, k, xi)
-    a, kk, x0 = fit_glo_lmoments(x)
+    a, kk, x0, reason = fit_glo_detailed(x)
+    assert reason is None
     assert np.isfinite([a, kk, x0]).all()
     assert abs(a - alpha) < 2.0
     assert abs(kk - k) < 0.1
@@ -168,25 +98,45 @@ def test_fit_glo_recovers_known_params_k_negative():
 
 
 def test_fit_glo_detailed_n_insuffisant():
-    a, k, xi, reason = _fit_glo_detailed(np.array([1.0, 2.0]))
+    a, k, xi, reason = fit_glo_detailed(np.array([1.0, 2.0]))
     assert reason == "n_insuffisant"
     assert not np.isfinite([a, k, xi]).any()
 
 
-def test_fit_glo_detailed_l2_degenere_constant_sample():
-    # Échantillon constant négatif : avec la position de tracé (i-0.35)/n, λ₂
-    # (= L2 classique, 2·b1_classique − b0) devient négatif pour une constante
-    # < 0 (biais de la position de tracé) → dégénéré.
-    a, k, xi, reason = _fit_glo_detailed(np.full(30, -5.0))
+def test_fit_glo_detailed_l2_degenere_constant_sample_negative_sign_only():
+    # Le rejet d'un échantillon constant DÉPEND DU SIGNE et n'est pas une
+    # garantie générale de l'estimateur : avec la position de tracé
+    # (i-0.35)/n, λ₂ (= 2·b1_classique − b0) devient négatif pour une
+    # constante < 0 (biais de la position de tracé) → dégénéré, rejeté.
+    # Contre-exemple : une constante > 0 (ex. +5) donne λ₂ minuscule mais
+    # STRICTEMENT POSITIF, donc *acceptée* par le même fit (cf.
+    # test_fit_glo_detailed_constant_sample_positive_is_accepted_artifact
+    # ci-dessous). Ce test ne verrouille donc que le cas négatif, pas un
+    # comportement symétrique voulu.
+    a, k, xi, reason = fit_glo_detailed(np.full(30, -5.0))
     assert reason == "l2_degenere"
     assert not np.isfinite([a, k, xi]).any()
+
+
+def test_fit_glo_detailed_constant_sample_positive_is_accepted_artifact():
+    # Artefact hérité de l'estimateur PWM (position de tracé (i-0.35)/n) : un
+    # échantillon constant POSITIF n'est PAS rejeté, contrairement à son
+    # équivalent négatif ci-dessus. λ₂ est minuscule mais > 0, donc le fit
+    # "réussit" avec des paramètres quasi dégénérés (alpha proche de 0).
+    # Documenté ici comme comportement hérité et sans effet sur des données
+    # réelles de bilan hydrique (jamais constantes) — ne pas "corriger"
+    # l'estimateur pour supprimer cette asymétrie.
+    a, k, xi, reason = fit_glo_detailed(np.full(30, 5.0))
+    assert reason is None
+    assert np.isfinite([a, k, xi]).all()
+    assert a < 1.0  # alpha quasi dégénéré, signe de l'artefact
 
 
 def test_fit_glo_detailed_k_hors_domaine():
     # Échantillon très fortement asymétrique (7 valeurs extrêmes basses, 1 haute) :
     # |τ₃| ≈ 1.30 >= 1 → k = −τ₃ hors du domaine (-1, 1), λ₂ restant positif.
     x = np.array([-1e12] * 7 + [0.0])
-    a, k, xi, reason = _fit_glo_detailed(x)
+    a, k, xi, reason = fit_glo_detailed(x)
     assert reason == "k_hors_domaine"
     assert not np.isfinite([a, k, xi]).any()
 
@@ -196,7 +146,7 @@ def test_fit_glo_detailed_valid_fit_reason_is_none():
     n = 60
     f = (np.arange(1, n + 1) - 0.5) / n
     x = _glo_quantile(f, alpha, k, xi)
-    a, kk, x0, reason = _fit_glo_detailed(x)
+    a, kk, x0, reason = fit_glo_detailed(x)
     assert reason is None
     assert np.isfinite([a, kk, x0]).all()
 

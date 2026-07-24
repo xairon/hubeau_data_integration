@@ -10,7 +10,7 @@ import pandas as pd
 from dagster import AssetExecutionContext, MetadataValue, asset
 from dagster_dbt import get_asset_key_for_model
 
-from ..ml.era5_indices import MIN_YEARS_REF, _fit_glo_detailed
+from ..ml.era5_indices import GLO_REJECT_REASONS, MIN_YEARS_REF, fit_glo_detailed
 from ..ml.era5_spei_climatology_persistence import (
     init_spei_climatology_table,
     upsert_spei_climatology,
@@ -49,24 +49,19 @@ WHERE mois >= DATE '1991-01-01'
 """
 
 
-# Motifs de rejet suivis dans les stats retournées par fit_reference_frame,
-# en plus de "n_annees_insuffisant" (garde MIN_YEARS_REF, distincte du
-# "n_insuffisant" interne au fit — cf. _fit_glo_detailed).
-_FIT_REJECT_REASONS = ("l2_degenere", "k_hors_domaine", "alpha_invalide", "n_insuffisant")
-
-
 def fit_reference_frame(df, window):
     """Groupe df par (cellule, mois calendaire) et fitte la logistique généralisée (GLO).
 
     Retourne (rows, stats) : rows est la liste de tuples upsertables (groupes
     acceptés) ; stats est un dict[str, int] exposant, pour tout groupe examiné,
     la raison de rejet — "n_annees_insuffisant" (< MIN_YEARS_REF) ou l'un des
-    motifs de _fit_glo_detailed — afin de pouvoir agréger la couverture
-    a posteriori sans que les rejets ne laissent aucune trace.
+    motifs de GLO_REJECT_REASONS (cf. ml.era5_indices.fit_glo_detailed) — afin
+    de pouvoir agréger la couverture a posteriori sans que les rejets ne
+    laissent aucune trace.
     """
     rows = []
     stats = {"groupes": 0, "ok": 0, "n_annees_insuffisant": 0}
-    stats.update(dict.fromkeys(_FIT_REJECT_REASONS, 0))
+    stats.update(dict.fromkeys(GLO_REJECT_REASONS, 0))
 
     for (lat, lon, mc), grp in df.groupby(
         ["era5_latitude", "era5_longitude", "mois_calendaire"], sort=False
@@ -77,7 +72,7 @@ def fit_reference_frame(df, window):
         if n < MIN_YEARS_REF:
             stats["n_annees_insuffisant"] += 1
             continue
-        alpha, k, xi, reason = _fit_glo_detailed(samples)
+        alpha, k, xi, reason = fit_glo_detailed(samples)
         if reason is not None:
             stats[reason] += 1
             continue
@@ -87,7 +82,11 @@ def fit_reference_frame(df, window):
     return rows, stats
 
 
-_ALL_REJECT_REASONS = ("n_annees_insuffisant", *_FIT_REJECT_REASONS)
+_ALL_REJECT_REASONS = ("n_annees_insuffisant", *GLO_REJECT_REASONS)
+
+
+def _pct(n, total):
+    return 0.0 if not total else round(100.0 * n / total, 1)
 
 
 @asset(
@@ -117,16 +116,13 @@ def fct_era5_spei_climatology_grid(context: AssetExecutionContext, pg: PostgreSQ
 
         groupes = stats["groupes"]
 
-        def _pct(n, _groupes=groupes):
-            return (100.0 * n / _groupes) if _groupes else 0.0
-
         reject_detail = ", ".join(
-            f"{reason}={stats[reason]} ({_pct(stats[reason]):.1f}%)"
+            f"{reason}={stats[reason]} ({_pct(stats[reason], groupes):.1f}%)"
             for reason in _ALL_REJECT_REASONS
         )
         context.log.info(
             "Fenêtre %d : %d groupes, %d ok (%.1f%%) — rejets : %s",
-            window, groupes, stats["ok"], _pct(stats["ok"]), reject_detail,
+            window, groupes, stats["ok"], _pct(stats["ok"], groupes), reject_detail,
         )
         for key, value in stats.items():
             cumulative[key] += value

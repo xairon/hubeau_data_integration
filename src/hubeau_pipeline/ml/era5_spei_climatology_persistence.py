@@ -8,7 +8,8 @@ annuels ET de la fonction Γ, hors de portée du SQL dbt.
 Historique : la loi ajustée était une log-logistique (colonnes ll_alpha/ll_beta/
 ll_gamma), remplacée par la GLO (glo_alpha/glo_k/glo_xi) car ~27% des mailles ont
 une L-asymétrie τ₃ négative, hors du domaine de la log-logistique. Les colonnes
-ll_* sont conservées (obsolètes, non détruites — table en prod) ; la migration
+ll_* sont OBSOLÈTES depuis la bascule GLO du 2026-07-24 — conservées telles
+quelles (non détruites, table en prod, plus jamais écrites) ; la migration
 ADD COLUMN IF NOT EXISTS est idempotente.
 """
 from psycopg2.extras import execute_values
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS gold.fct_era5_spei_climatology_grid (
     era5_longitude  numeric(6,3) NOT NULL,
     mois_calendaire smallint     NOT NULL,
     fenetre         smallint     NOT NULL,
+    -- ll_* : obsolètes depuis la bascule GLO du 2026-07-24, conservées (données en prod).
     ll_alpha        double precision,
     ll_beta         double precision,
     ll_gamma        double precision,
