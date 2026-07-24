@@ -4,10 +4,13 @@ from scipy import stats
 
 from hubeau_pipeline.ml.era5_indices import (
     MIN_YEARS_REF,
+    _fit_glo_detailed,
     _fit_loglogistic_detailed,
     compute_spei,
+    compute_spei_glo,
     compute_spi,
     compute_sti,
+    fit_glo_lmoments,
     fit_loglogistic_lmoments,
 )
 
@@ -128,3 +131,114 @@ def test_compute_spei_invalid_params_nan():
     assert np.isnan(z[2])      # x <= gamma (out of support)
     assert np.isnan(z[3])      # alpha = -5.0, finite but <= 0 (must not fabricate a value)
     assert np.isnan(z[4])      # beta = -1.0, finite but <= 0 (must not fabricate a value)
+
+
+# --- Logistique généralisée (GLO) : remplace la log-logistique pour le SPEI ---
+# 100% des mailles rejetées par la log-logistique ont une L-asymétrie τ₃ < 0
+# (hors du domaine de la log-logistique, asymétrie positive uniquement) ; la GLO
+# accepte les deux signes de k = −τ₃.
+
+def _glo_quantile(f, alpha, k, xi):
+    # x(F) = ξ + α·(1 − ((1−F)/F)^k)/k — fonction quantile GLO (Hosking).
+    return xi + alpha * (1.0 - ((1.0 - f) / f) ** k) / k
+
+
+def test_fit_glo_recovers_known_params_k_positive():
+    alpha, k, xi = 40.0, 0.3, -10.0
+    n = 60
+    f = (np.arange(1, n + 1) - 0.5) / n
+    x = _glo_quantile(f, alpha, k, xi)
+    a, kk, x0 = fit_glo_lmoments(x)
+    assert np.isfinite([a, kk, x0]).all()
+    assert abs(a - alpha) < 2.0
+    assert abs(kk - k) < 0.1
+    assert abs(x0 - xi) < 3.0
+
+
+def test_fit_glo_recovers_known_params_k_negative():
+    alpha, k, xi = 40.0, -0.3, -10.0
+    n = 60
+    f = (np.arange(1, n + 1) - 0.5) / n
+    x = _glo_quantile(f, alpha, k, xi)
+    a, kk, x0 = fit_glo_lmoments(x)
+    assert np.isfinite([a, kk, x0]).all()
+    assert abs(a - alpha) < 2.0
+    assert abs(kk - k) < 0.1
+    assert abs(x0 - xi) < 3.0
+
+
+def test_fit_glo_detailed_n_insuffisant():
+    a, k, xi, reason = _fit_glo_detailed(np.array([1.0, 2.0]))
+    assert reason == "n_insuffisant"
+    assert not np.isfinite([a, k, xi]).any()
+
+
+def test_fit_glo_detailed_l2_degenere_constant_sample():
+    # Échantillon constant négatif : avec la position de tracé (i-0.35)/n, λ₂
+    # (= L2 classique, 2·b1_classique − b0) devient négatif pour une constante
+    # < 0 (biais de la position de tracé) → dégénéré.
+    a, k, xi, reason = _fit_glo_detailed(np.full(30, -5.0))
+    assert reason == "l2_degenere"
+    assert not np.isfinite([a, k, xi]).any()
+
+
+def test_fit_glo_detailed_k_hors_domaine():
+    # Échantillon très fortement asymétrique (7 valeurs extrêmes basses, 1 haute) :
+    # |τ₃| ≈ 1.30 >= 1 → k = −τ₃ hors du domaine (-1, 1), λ₂ restant positif.
+    x = np.array([-1e12] * 7 + [0.0])
+    a, k, xi, reason = _fit_glo_detailed(x)
+    assert reason == "k_hors_domaine"
+    assert not np.isfinite([a, k, xi]).any()
+
+
+def test_fit_glo_detailed_valid_fit_reason_is_none():
+    alpha, k, xi = 40.0, 0.3, -10.0
+    n = 60
+    f = (np.arange(1, n + 1) - 0.5) / n
+    x = _glo_quantile(f, alpha, k, xi)
+    a, kk, x0, reason = _fit_glo_detailed(x)
+    assert reason is None
+    assert np.isfinite([a, kk, x0]).all()
+
+
+def test_compute_spei_glo_sign_and_center():
+    # Médiane de la référence (F=0.5 → x=ξ) → SPEI ≈ 0.
+    alpha, k, xi = 40.0, 0.3, -10.0
+    median = xi
+    high = _glo_quantile(np.array([0.95]), alpha, k, xi)[0]
+    low = _glo_quantile(np.array([0.05]), alpha, k, xi)[0]
+    z = compute_spei_glo(
+        np.array([median, high, low]),
+        np.full(3, alpha), np.full(3, k), np.full(3, xi),
+    )
+    assert abs(z[0]) < 0.05   # centre
+    assert z[1] > 1.0         # excédent
+    assert z[2] < -1.0        # déficit
+
+
+def test_compute_spei_glo_k_near_zero_logistic_case():
+    # k≈0 : loi logistique pure, F(x) = 1/(1+exp(−(x−ξ)/α)).
+    alpha, xi = 40.0, -10.0
+    z = compute_spei_glo(np.array([xi]), np.array([alpha]), np.array([1e-8]), np.array([xi]))
+    assert abs(z[0]) < 1e-6
+
+
+def test_compute_spei_glo_out_of_support_gives_nan():
+    # k > 0 : support borné supérieurement par ξ + α/k ; au-delà, 1 − k(x−ξ)/α <= 0.
+    alpha, k, xi = 40.0, 0.3, -10.0
+    x_max_support = xi + alpha / k
+    z = compute_spei_glo(
+        np.array([x_max_support + 100.0]),
+        np.array([alpha]), np.array([k]), np.array([xi]),
+    )
+    assert np.isnan(z[0])
+
+
+def test_compute_spei_glo_invalid_params_nan():
+    z = compute_spei_glo(
+        np.array([10.0, 10.0, 10.0, 10.0]),
+        np.array([np.nan, -5.0, 40.0, 40.0]),   # rows 0,1: bad alpha (nan, finite<=0)
+        np.array([0.3, 0.3, np.nan, 1.5]),      # rows 2,3: bad k (nan, |k|>=1)
+        np.array([-10.0, -10.0, -10.0, -10.0]),
+    )
+    assert np.isnan(z).all()

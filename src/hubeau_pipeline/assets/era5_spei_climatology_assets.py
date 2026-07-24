@@ -1,7 +1,7 @@
 """Référence SPEI 1991-2020 → gold.fct_era5_spei_climatology_grid.
 
-Fit log-logistique (L-moments) du cumul bilan hydrique par cellule × mois
-calendaire × fenêtre. Rebuild rare (full), consommé par fct_era5_indices_grid.
+Fit logistique généralisée (GLO, L-moments) du cumul bilan hydrique par cellule
+× mois calendaire × fenêtre. Rebuild rare (full), consommé par fct_era5_indices_grid.
 """
 import logging
 
@@ -10,7 +10,7 @@ import pandas as pd
 from dagster import AssetExecutionContext, MetadataValue, asset
 from dagster_dbt import get_asset_key_for_model
 
-from ..ml.era5_indices import MIN_YEARS_REF, _fit_loglogistic_detailed
+from ..ml.era5_indices import MIN_YEARS_REF, _fit_glo_detailed
 from ..ml.era5_spei_climatology_persistence import (
     init_spei_climatology_table,
     upsert_spei_climatology,
@@ -51,17 +51,17 @@ WHERE mois >= DATE '1991-01-01'
 
 # Motifs de rejet suivis dans les stats retournées par fit_reference_frame,
 # en plus de "n_annees_insuffisant" (garde MIN_YEARS_REF, distincte du
-# "n_insuffisant" interne au fit — cf. _fit_loglogistic_detailed).
-_FIT_REJECT_REASONS = ("pwm_degenere", "beta_hors_domaine", "alpha_invalide", "n_insuffisant")
+# "n_insuffisant" interne au fit — cf. _fit_glo_detailed).
+_FIT_REJECT_REASONS = ("l2_degenere", "k_hors_domaine", "alpha_invalide", "n_insuffisant")
 
 
 def fit_reference_frame(df, window):
-    """Groupe df par (cellule, mois calendaire) et fitte la log-logistique.
+    """Groupe df par (cellule, mois calendaire) et fitte la logistique généralisée (GLO).
 
     Retourne (rows, stats) : rows est la liste de tuples upsertables (groupes
     acceptés) ; stats est un dict[str, int] exposant, pour tout groupe examiné,
     la raison de rejet — "n_annees_insuffisant" (< MIN_YEARS_REF) ou l'un des
-    motifs de _fit_loglogistic_detailed — afin de pouvoir agréger la couverture
+    motifs de _fit_glo_detailed — afin de pouvoir agréger la couverture
     a posteriori sans que les rejets ne laissent aucune trace.
     """
     rows = []
@@ -77,13 +77,13 @@ def fit_reference_frame(df, window):
         if n < MIN_YEARS_REF:
             stats["n_annees_insuffisant"] += 1
             continue
-        alpha, beta, gamma_loc, reason = _fit_loglogistic_detailed(samples)
+        alpha, k, xi, reason = _fit_glo_detailed(samples)
         if reason is not None:
             stats[reason] += 1
             continue
         stats["ok"] += 1
         rows.append((float(lat), float(lon), int(mc), int(window),
-                     alpha, beta, gamma_loc, int(n)))
+                     alpha, k, xi, int(n)))
     return rows, stats
 
 
@@ -95,8 +95,8 @@ _ALL_REJECT_REASONS = ("n_annees_insuffisant", *_FIT_REJECT_REASONS)
     group_name="indices",
     deps=[get_asset_key_for_model([hubeau_dbt_assets], "fct_era5_monthly_grid")],
     description=(
-        "Paramètres log-logistiques SPEI (référence 1991-2020) par cellule ERA5 "
-        "× mois calendaire × fenêtre 1/3/6/12. Rebuild full."
+        "Paramètres GLO (logistique généralisée) SPEI (référence 1991-2020) par "
+        "cellule ERA5 × mois calendaire × fenêtre 1/3/6/12. Rebuild full."
     ),
 )
 def fct_era5_spei_climatology_grid(context: AssetExecutionContext, pg: PostgreSQLResource):
