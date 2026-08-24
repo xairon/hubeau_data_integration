@@ -1,99 +1,121 @@
 # Hub'Eau Data Pipeline
 
-Entrepôt de données hydrologiques françaises : ingestion automatique, transformation et
-exposition. Collecte les niveaux piézométriques (nappes souterraines), les débits
-hydrométriques (rivières), les données climatiques ERA5 et les référentiels associés,
-selon une architecture Medallion (Bronze → Silver → Gold) sur PostgreSQL/TimescaleDB,
-orchestrée par Dagster. Les tables Gold sont consommées directement en SQL par les
-applications aval (observatoire Junon).
+A data warehouse for French hydrological data: automated ingestion, transformation and
+exposure. It collects piezometric levels (groundwater), hydrometric discharge (rivers), ERA5
+climate reanalysis and the associated reference data, on a Medallion architecture
+(Bronze → Silver → Gold) over PostgreSQL/TimescaleDB, orchestrated by Dagster. Gold tables are
+consumed directly in SQL by downstream applications — chiefly the Junon observatory.
 
-## Stack technique
+**Status** — active. Documentation verified on 2026-08-24 against commit `0360237`.
 
-| Composant | Version | Rôle |
+> **A downstream application depends on this stack's Docker network.** The Junon observatory
+> (`time-serie-explo`) reads the Gold tables directly, joining the network Compose creates for
+> this project — `hubeau_data_integration_default` — and reaching PostgreSQL at host
+> `brgm-postgres`. Two consequences: bring this stack up **before** Junon, and keep the
+> checkout directory named `hubeau_data_integration`, because Compose derives that network
+> name from it. Renaming the directory or setting `COMPOSE_PROJECT_NAME` silently breaks Junon.
+
+New here? Read this page, then [docs/README.md](docs/README.md) for the documentation map.
+
+## Stack
+
+| Component | Version | Role |
 |-----------|---------|------|
-| Dagster | 1.11 | Orchestration (schedules + sensors) |
-| DLT | 0.4.12 | Ingestion (APIs Hub'Eau, ERA5) |
-| dbt | 1.7.0 | Transformation SQL (staging → marts) |
-| PostgreSQL | 16 | Base de données |
-| TimescaleDB | pg16 | Séries temporelles (hypertables, compression) |
-| PostGIS | 3.4 | Géospatial (jointures spatiales) |
+| Dagster | 1.11.14 | Orchestration (schedules + sensors) |
+| DLT | 0.4.12 | Ingestion (Hub'Eau and ERA5 APIs) |
+| dbt | 1.7.0 | SQL transformation (staging → marts) |
+| PostgreSQL | 16 | Database |
+| TimescaleDB | — | Time series (hypertables, compression) |
+| PostGIS | — | Geospatial (spatial joins) |
 
-## Démarrage
-
-### Prérequis
-
-- Docker avec Docker Compose v2
-- ~10 Go de RAM, ~50 Go de disque (jeu de données complet)
-- Une clé API [Copernicus CDS](https://cds.climate.copernicus.eu/) pour l'ingestion ERA5
-
-### Installation
+PostgreSQL, TimescaleDB and PostGIS all come from the single `timescale/timescaledb-ha:pg16`
+image. That tag is rolling, so the extension versions move without the compose file changing —
+a fresh pull on 2026-08-24 gave PostgreSQL 16.14, TimescaleDB 2.29.2 and PostGIS 3.6.4. Read
+the versions from the database rather than trusting a table:
 
 ```bash
-git clone <repository-url>
+docker exec brgm-postgres psql -U postgres -tAc \
+  "SELECT extname, extversion FROM pg_extension ORDER BY extname;"
+```
+
+## Getting started
+
+### Requirements
+
+- Docker with Compose v2
+- ~10 GB RAM, ~50 GB disk for the full dataset
+- A [Copernicus CDS](https://cds.climate.copernicus.eu/) API key for ERA5 ingestion
+
+### Install
+
+```bash
+git clone https://scm.univ-tours.fr/ringuet/hubeau_data_integration.git
 cd hubeau_data_integration
 
-# 1. Créer les volumes Docker externes (obligatoire, une seule fois)
+# 1. Create the external Docker volumes (required, once)
 bash scripts/init_volumes.sh
 
-# 2. Configurer l'environnement
+# 2. Configure the environment
 cp .env.example .env
-# Éditer .env : mots de passe et clé Copernicus
+# Edit .env: passwords and the Copernicus key
 
-# 3. Construire et lancer la stack
+# 3. Build and start
 docker compose up -d --build
 
-# 4. Vérifier l'état des services (~60 s de démarrage)
+# 4. Check the services (~60 s to come up)
 docker compose ps
 ```
 
 ### Interfaces
 
-| Service | URL | Rôle |
+| Service | URL | Role |
 |---------|-----|------|
-| Dagster | http://localhost:49500 | Orchestration et supervision |
-| Adminer | http://localhost:49501 | Administration PostgreSQL |
-| PostgreSQL | localhost:49502 | Accès direct à la base |
-| dbt docs | http://localhost:49505 | Documentation dbt (à lancer manuellement, voir ci-dessous) |
+| Dagster | http://localhost:49500 | Orchestration and monitoring |
+| Adminer | http://localhost:49501 | PostgreSQL administration |
+| PostgreSQL | localhost:49502 | Direct database access |
+| dbt docs | http://localhost:49505 | dbt documentation (started manually, see below) |
 
-### Chargement initial des données
+### Load the data
 
-Le job `full_bootstrap` charge l'ensemble (référentiels → stations → chroniques par
-année → ERA5 → dbt). Il est restartable (état persisté dans `ops.bootstrap_state`).
+**Read [docs/QUICKSTART.md](docs/QUICKSTART.md) before launching anything.** It gives three
+targets — a 15-minute smoke test needing no API key, a regional demo dataset where the climate
+indices actually render, and the full production load — with the exact jobs to run, in order,
+and how to verify each step.
 
-Dagster UI → **Jobs** → `full_bootstrap` → **Launchpad** → **Launch Run**.
+The short version: `full_bootstrap` loads everything (reference data → stations → time series
+by year → ERA5 → dbt) and is restartable, its progress persisted in `ops.bootstrap_state`.
+Dagster UI → **Jobs** → `full_bootstrap` → **Launchpad** → **Launch Run**. Budget **days** and
+tens of gigabytes: piezometry goes back to 1967, hydrometry to 2000, ERA5-Land to 1950. Almost
+nobody wants that on a first install.
 
-Le bootstrap complet dure plusieurs heures (données depuis 1967 pour la piézométrie,
-2000 pour l'hydrométrie). Pour un test rapide, restreindre le périmètre via
-`BOOTSTRAP_PARTITIONS` (voir [docs/CONFIGURATION.md](docs/CONFIGURATION.md)).
-
-### Vérification
+### Verify
 
 ```bash
-# Volume des tables par schéma
+# Row counts per schema
 docker exec -it brgm-postgres psql -U postgres -d postgres -c "
-SELECT schemaname, tablename, n_live_tup AS rows
+SELECT schemaname, relname AS table_name, n_live_tup AS rows
 FROM pg_stat_user_tables
 WHERE schemaname IN ('bronze', 'silver', 'gold')
 ORDER BY schemaname, n_live_tup DESC;"
 
-# Tests de qualité dbt
-docker exec brgm-dlt-worker dbt test
+# dbt data quality tests
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt test
 ```
 
-## Commandes courantes
+## Everyday commands
 
 ```bash
-# dbt (dans le conteneur worker)
-docker exec brgm-dlt-worker dbt run                       # Pipeline complet
-docker exec brgm-dlt-worker dbt run --select model_name   # Un modèle
-docker exec brgm-dlt-worker dbt test                      # Tests qualité
-docker exec brgm-dlt-worker dbt docs generate             # Documentation
-docker exec brgm-dlt-worker dbt docs serve --port 8080    # Servir les docs sur :49505
+# dbt (inside the worker container)
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run                       # full pipeline
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select model_name   # one model
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt test                      # quality tests
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt docs generate             # documentation
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt docs serve --port 8080    # served on :49505
 
 # Docker
-docker compose logs -f dlt_worker     # Logs du worker
-docker compose restart dlt_worker     # Redémarrer après modification du code Python
-docker compose build --no-cache dlt_worker && docker compose up -d  # Rebuild complet
+docker compose logs -f dlt_worker     # worker logs
+docker compose restart dlt_worker     # after a Python change
+docker compose build --no-cache dlt_worker && docker compose up -d   # full rebuild
 
 # PostgreSQL
 docker exec -it brgm-postgres psql -U postgres -d postgres
@@ -101,16 +123,32 @@ docker exec -it brgm-postgres psql -U postgres -d postgres
 
 ## Documentation
 
-| Document | Contenu |
-|----------|---------|
-| [Architecture](docs/ARCHITECTURE.md) | Couches Medallion, orchestration, infrastructure Docker |
-| [Configuration](docs/CONFIGURATION.md) | Variables d'environnement, paramétrage, déploiement |
-| [Schéma BDD](docs/SCHEMA_BDD.md) | Structure des tables PostgreSQL (Bronze, Silver, Gold) |
-| [Opérations](docs/OPERATIONS.md) | Runbook : bootstrap, exploitation, incidents, sauvegarde |
-| [ERA5](docs/ERA5.md) | Ingestion des données climatiques |
-| [TimescaleDB](docs/TIMESCALEDB.md) | Hypertables, compression, types d'index |
-| [Déploiement sandbox](docs/deploy-sandbox.md) | Déploiement Portainer + GitOps |
+The full map, with what each document is for, is in **[docs/README.md](docs/README.md)**.
 
-## Licence
+| Document | Contents |
+|----------|----------|
+| [Architecture](docs/ARCHITECTURE.md) | Medallion layers, orchestration, Docker infrastructure |
+| [Configuration](docs/CONFIGURATION.md) | Environment variables, settings, production |
+| [Database schema](docs/DATABASE_SCHEMA.md) | PostgreSQL tables (Bronze, Silver, Gold) |
+| [Operations](docs/OPERATIONS.md) | Runbook: bootstrap, daily checks, incidents, backup |
+| [ERA5](docs/ERA5.md) | Climate ingestion, PET and drought-index decisions |
+| [TimescaleDB](docs/TIMESCALEDB.md) | Hypertables, compression, index types |
+| [Sandbox deployment](docs/DEPLOY_SANDBOX.md) | Portainer + GitOps deployment |
 
-MIT
+`CLAUDE.md` at the root is the working guide for coding agents.
+
+## Data sources
+
+The pipeline redistributes data it does not own. **Copernicus requires a verbatim
+acknowledgement** in anything derived from ERA5, including the drought indices; Hub'Eau and
+BDLISA expect attribution. The exact notices are in
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) — read it before publishing anything.
+
+> Generated using Copernicus Climate Change Service information, 2026.
+> Neither the European Commission nor ECMWF is responsible for any use that may be made of the
+> Copernicus information or data it contains.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The licence covers **the code**, not the data it fetches: each
+source keeps its own terms.

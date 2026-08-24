@@ -1,18 +1,21 @@
-# Config TME (Référentiel des Entités Hydrogéologiques)
+# TME config (hydrogeological entities reference)
 
-Configuration pour l'ingestion du référentiel TME (Tableau Multi-Échelles).
+Configuration for ingesting the TME reference dataset (Tableau Multi-Échelles).
 
-- **bdlisa_entites.yml** : Configuration pour le téléchargement du fichier TME depuis le ZIP national ou URL custom.
-- Voir le [Guide d'onboarding](../../docs/ONBOARDING.md) pour l'intégration dans le pipeline.
+- **bdlisa_entites.yml** — where the TME file is fetched from: the national BDLISA ZIP, or a
+  custom URL.
+- See the [quickstart](../../docs/QUICKSTART.md) for how this fits into a first load, and
+  [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for where TME lands in the Medallion layers.
 
-## Source des données
+## Where the data comes from
 
-Le pipeline charge le fichier TME.csv depuis :
-1. Fichier local `TME.csv` (prioritaire)
-2. ZIP national BDLISA (fallback)
-3. URL custom configurée dans `bdlisa_entites.yml`
+The pipeline loads `TME.csv` from, in order:
 
-## Note
+1. a local `TME.csv` file (takes precedence)
+2. the national BDLISA ZIP (fallback)
+3. a custom URL configured in `bdlisa_entites.yml`
 
-BDLISA complet (géométries) et les nomenclatures Sandre ont été retirés du pipeline.  
-Seul le référentiel TME de base est intégré.
+## Scope
+
+Full BDLISA (with geometries) and the Sandre nomenclatures were removed from the pipeline.
+Only the base TME reference is ingested.

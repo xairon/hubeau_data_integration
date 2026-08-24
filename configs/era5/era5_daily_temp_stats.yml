@@ -47,7 +47,11 @@ resource:
 
   # Zone géographique : France métropolitaine (identique à l'ingestion horaire existante)
   # Format: [North, West, South, East]
+  # Production: metropolitan France.
   area: [51.5, -5.5, 41.0, 10.0]
+  # Demo/dev alternative — one region, ~620 cells instead of ~11,500. Keep it in step with
+  # the same setting in era5_france_meteo.yml. See docs/QUICKSTART.md (target B).
+  #   area: [48.6, 0.5, 46.3, 3.2]   # Centre-Val de Loire
 
 extraction:
   # Période historique complète

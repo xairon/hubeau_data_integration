@@ -1,3 +1,7 @@
+# Ports bind to 127.0.0.1 by default. Set BIND_ADDR=0.0.0.0 to publish on every interface —
+# and understand what that means: the Dagster UI has no authentication at all, and Adminer is
+# a ready-made SQL admin console. On a shared network, anyone able to reach this host could
+# launch jobs or browse the database. Prefer a reverse proxy or a VPN over BIND_ADDR=0.0.0.0.
 # Hub'Eau Pipeline - Docker Compose Configuration
 # Zero-config deployment: git clone → docker compose build → docker compose up -d
 # Optional .env file for custom values (fallback to defaults if not present)
@@ -34,7 +38,7 @@ services:
       - postgres_data:/home/postgres/pgdata
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
-      - "49502:5432" # PostgreSQL - fixed port
+      - "${BIND_ADDR:-127.0.0.1}:49502:5432" # PostgreSQL
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
       interval: 10s
@@ -76,15 +80,11 @@ services:
         condition: service_healthy
       dagster_postgres:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # NB: pas de bloc deploy.resources.devices nvidia — aucune dépendance GPU
+    # (ni torch ni cuda dans pyproject.toml ou src/). La réservation présente
+    # auparavant faisait échouer `docker compose up` sur toute machine sans
+    # nvidia-container-toolkit, avec « could not select device driver "nvidia" ».
     environment:
-      NVIDIA_VISIBLE_DEVICES: all
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
       PYTHONDONTWRITEBYTECODE: 1
@@ -100,11 +100,6 @@ services:
       PG_DB: ${PG_DB:-postgres}
       PG_USER: ${PG_USER:-postgres}
       PG_PASSWORD: ${PG_PASSWORD}
-      POSTGIS_HOST: ${POSTGIS_HOST:-postgres}
-      POSTGIS_PORT: ${POSTGIS_PORT:-5432}
-      POSTGIS_DB: ${POSTGIS_DB:-postgres}
-      POSTGIS_USER: ${POSTGIS_USER:-postgres}
-      POSTGIS_PASSWORD: ${POSTGIS_PASSWORD}
       # Hub'Eau schema
       HUBEAU_SCHEMA: ${HUBEAU_SCHEMA:-hubeau}
       HUBEAU_SCHEMA_DIR: /app/scripts/schema
@@ -129,7 +124,7 @@ services:
       - ./dagster_home:/app/dagster_home
     command: [ "dagster", "code-server", "start", "-h", "0.0.0.0", "-p", "4000", "-m", "hubeau_pipeline.definitions" ]
     ports:
-      - "49505:8080"   # dbt docs serve (lancer manuellement: docker exec -it brgm-dlt-worker dbt docs serve --port 8080)
+      - "${BIND_ADDR:-127.0.0.1}:49505:8080"   # dbt docs serve (lancer manuellement: docker exec -it brgm-dlt-worker dbt docs serve --port 8080)
     expose:
       - "4000"
     healthcheck:
@@ -165,7 +160,7 @@ services:
       - ./dagster_home:/app/dagster_home
     command: [ "dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster_home/workspace.yaml" ]
     ports:
-      - "49500:3000" # Dagster UI - fixed port
+      - "${BIND_ADDR:-127.0.0.1}:49500:3000" # Dagster UI
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:3000/server_info || exit 1" ]
       interval: 30s
@@ -212,7 +207,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "49501:8080" # Adminer UI
+      - "${BIND_ADDR:-127.0.0.1}:49501:8080" # Adminer UI
     volumes:
       - ./docker/adminer/adminer.css:/var/www/html/adminer.css:ro
     mem_limit: 256M
