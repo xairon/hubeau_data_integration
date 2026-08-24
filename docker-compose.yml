@@ -76,15 +76,11 @@ services:
         condition: service_healthy
       dagster_postgres:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # NB: pas de bloc deploy.resources.devices nvidia — aucune dépendance GPU
+    # (ni torch ni cuda dans pyproject.toml ou src/). La réservation présente
+    # auparavant faisait échouer `docker compose up` sur toute machine sans
+    # nvidia-container-toolkit, avec « could not select device driver "nvidia" ».
     environment:
-      NVIDIA_VISIBLE_DEVICES: all
       DAGSTER_HOME: /app/dagster_home
       PYTHONPATH: /app/src:/app
       PYTHONDONTWRITEBYTECODE: 1

@@ -18,8 +18,18 @@ New here? Read this page, then [docs/README.md](docs/README.md) for the document
 | DLT | 0.4.12 | Ingestion (Hub'Eau and ERA5 APIs) |
 | dbt | 1.7.0 | SQL transformation (staging → marts) |
 | PostgreSQL | 16 | Database |
-| TimescaleDB | pg16 | Time series (hypertables, compression) |
-| PostGIS | 3.4 | Geospatial (spatial joins) |
+| TimescaleDB | — | Time series (hypertables, compression) |
+| PostGIS | — | Geospatial (spatial joins) |
+
+PostgreSQL, TimescaleDB and PostGIS all come from the single `timescale/timescaledb-ha:pg16`
+image. That tag is rolling, so the extension versions move without the compose file changing —
+a fresh pull on 2026-08-24 gave PostgreSQL 16.14, TimescaleDB 2.29.2 and PostGIS 3.6.4. Read
+the versions from the database rather than trusting a table:
+
+```bash
+docker exec brgm-postgres psql -U postgres -tAc \
+  "SELECT extname, extversion FROM pg_extension ORDER BY extname;"
+```
 
 ## Getting started
 
@@ -81,18 +91,18 @@ WHERE schemaname IN ('bronze', 'silver', 'gold')
 ORDER BY schemaname, n_live_tup DESC;"
 
 # dbt data quality tests
-docker exec brgm-dlt-worker dbt test
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt test
 ```
 
 ## Everyday commands
 
 ```bash
 # dbt (inside the worker container)
-docker exec brgm-dlt-worker dbt run                       # full pipeline
-docker exec brgm-dlt-worker dbt run --select model_name   # one model
-docker exec brgm-dlt-worker dbt test                      # quality tests
-docker exec brgm-dlt-worker dbt docs generate             # documentation
-docker exec brgm-dlt-worker dbt docs serve --port 8080    # served on :49505
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run                       # full pipeline
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select model_name   # one model
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt test                      # quality tests
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt docs generate             # documentation
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt docs serve --port 8080    # served on :49505
 
 # Docker
 docker compose logs -f dlt_worker     # worker logs

@@ -204,14 +204,14 @@ hypertable.
 ```bash
 # Option A (recommended) — full refresh: rebuilds Silver from Bronze, the incremental
 # filter does not apply, no PK conflict possible.
-docker exec brgm-dlt-worker dbt run --full-refresh --select stg_era5_daily_temp_stats
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --full-refresh --select stg_era5_daily_temp_stats
 
 # Option B — TRUNCATE then targeted reprocess. The TRUNCATE is required: the model is
 # `append`, so re-inserting from 1950 into a non-empty table violates the
 # (latitude, longitude, time) PK on the recent overlap.
 docker exec -it brgm-postgres psql -U postgres -d postgres \
   -c "TRUNCATE silver.stg_era5_daily_temp_stats;"
-docker exec brgm-dlt-worker dbt run --select stg_era5_daily_temp_stats \
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_era5_daily_temp_stats \
   --vars '{era5_daily_temp_reprocess_from_timestamp: "1950-01-01"}'
 ```
 
@@ -222,7 +222,7 @@ model `stg_era5_timeseries`. Check afterwards that
 year, then rebuild the mart:
 
 ```bash
-docker exec brgm-dlt-worker dbt run --full-refresh --select fct_era5_monthly_grid
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --full-refresh --select fct_era5_monthly_grid
 ```
 
 ### Rebuilding the station marts

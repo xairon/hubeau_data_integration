@@ -27,16 +27,20 @@ docker compose restart dlt_worker     # after Python changes
 docker compose down && docker compose build --no-cache && docker compose up -d   # after dependency changes
 ```
 
-dbt runs inside the worker:
+dbt runs inside the worker, and **every dbt command needs `-w /app/src/dbt_hubeau`**. The
+worker's WORKDIR is `/app`, but the dbt project lives in `/app/src/dbt_hubeau`; without the
+flag dbt reports `project path </app/dbt_project.yml> not found` and does nothing. With it,
+`dbt debug` answers *All checks passed!*.
+
 
 ```bash
-docker exec brgm-dlt-worker dbt run                                     # full pipeline
-docker exec brgm-dlt-worker dbt run --select model_name                 # one model
-docker exec brgm-dlt-worker dbt run --select model_name+                # model + downstream
-docker exec brgm-dlt-worker dbt run --full-refresh --select model_name  # force rebuild
-docker exec brgm-dlt-worker dbt test                                    # data quality tests
-docker exec brgm-dlt-worker dbt source freshness
-docker exec brgm-dlt-worker dbt docs generate
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run                                     # full pipeline
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select model_name                 # one model
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select model_name+                # model + downstream
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --full-refresh --select model_name  # force rebuild
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt test                                    # data quality tests
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt source freshness
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt docs generate
 ```
 
 Database: `docker exec -it brgm-postgres psql -U postgres -d postgres`
@@ -174,7 +178,7 @@ configs.
 | Dagster UI | http://localhost:49500 |
 | Adminer | http://localhost:49501 |
 | PostgreSQL | localhost:49502 |
-| dbt docs | http://localhost:49505 (manual: `docker exec brgm-dlt-worker dbt docs serve --port 8080`) |
+| dbt docs | http://localhost:49505 (manual: `docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt docs serve --port 8080`) |
 
 ## Traps that have already cost time
 

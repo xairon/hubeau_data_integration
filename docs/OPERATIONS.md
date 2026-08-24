@@ -77,7 +77,7 @@ An ERA5 lag of about five days is expected — see the incident section.
 ### dbt tests
 
 ```bash
-docker exec brgm-dlt-worker dbt test
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt test
 ```
 
 ### Logs
@@ -118,17 +118,17 @@ everything without re-ingesting from the APIs.
 ### Replay a time window
 
 ```bash
-docker exec brgm-dlt-worker dbt run --select stg_piezo_chroniques \
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_piezo_chroniques \
   --vars '{"piezometry_reprocess_from_date": "2020-01-01"}'
 
-docker exec brgm-dlt-worker dbt run --select stg_hydrometry_obs_elab \
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_hydrometry_obs_elab \
   --vars '{"hydrometry_reprocess_from_date": "2020-01-01"}'
 ```
 
 ### Full refresh of one incremental model
 
 ```bash
-docker exec brgm-dlt-worker dbt run --full-refresh --select hubeau_daily_chroniques
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --full-refresh --select hubeau_daily_chroniques
 ```
 
 ### Recompute the station ↔ ERA5 mapping
@@ -137,7 +137,7 @@ Needed after TME data changes or when stations are added — the incremental map
 revisit existing rows.
 
 ```bash
-docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
   --vars '{"recompute_station_era5_mapping": true}'
 ```
 
@@ -177,7 +177,7 @@ The incremental mapping does not recompute existing rows.
 docker exec -it brgm-postgres psql -U postgres -d postgres -c \
   "SELECT COUNT(*), COUNT(libelle_eh) FROM bronze.tme_entites_hydrogeo;"
 
-docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
   --vars '{"recompute_station_era5_mapping": true}'
 ```
 
@@ -213,8 +213,18 @@ Identify the missing period and re-run `era5_historical_load` on the matching pa
 Expected — the ingestion window overlaps by 7 days. Silver deduplicates:
 
 ```bash
-docker exec brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
 ```
+
+### `dbt` says the project path is not found
+
+```
+Encountered an error: project path </app/dbt_project.yml> not found
+```
+
+The worker's WORKDIR is `/app`; the dbt project is in `/app/src/dbt_hubeau`. Add
+`-w /app/src/dbt_hubeau` to the `docker exec`. Every dbt command in this documentation
+already carries it — check yours against them.
 
 ### A container will not start
 
