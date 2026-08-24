@@ -1,370 +1,220 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Working guide for coding agents in this repository. Reader-facing documentation lives in
+[docs/](docs/README.md) — this file does not repeat it, it points at it.
 
-## Project Overview
+## What this is
 
-Hub'Eau Data Pipeline: a production data warehouse for French hydrological data using a **Medallion Architecture** (Bronze → Silver → Gold). Ingests data from Hub'Eau APIs and ERA5 climate reanalysis, transforms via dbt, and exposes Gold tables to downstream applications (the Junon observatory) directly in SQL.
+A production data warehouse for French hydrological data, on a Medallion architecture
+(Bronze → Silver → Gold). It ingests the Hub'Eau APIs and the ERA5 climate reanalysis,
+transforms with dbt, and exposes Gold tables to downstream applications — chiefly the Junon
+observatory — directly in SQL.
 
-**Stack**: Dagster (orchestration), DLT (ingestion), dbt 1.7.0 (transformation), PostgreSQL 16 + TimescaleDB + PostGIS, Docker Compose
+Stack: Dagster (orchestration), DLT (ingestion), dbt 1.7.0 (transformation),
+PostgreSQL 16 + TimescaleDB + PostGIS, Docker Compose.
 
-## Essential Commands
+Full picture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); tables in
+[docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md).
 
-### Stack Operations
+## Essential commands
+
 ```bash
-# First time: create external volumes (required before first docker compose up)
+# First time only: create the external volumes
 bash scripts/init_volumes.sh
 
-# Start everything
-docker compose up -d --build
-
-# Restart worker after Python code changes (dbt model changes are auto-detected)
-docker compose restart dlt_worker
-
-# Full rebuild (when dependencies change)
-docker compose down && docker compose build --no-cache && docker compose up -d
+docker compose up -d --build          # start everything
+docker compose restart dlt_worker     # after Python changes
+docker compose down && docker compose build --no-cache && docker compose up -d   # after dependency changes
 ```
 
-### dbt (run inside worker container)
+dbt runs inside the worker:
+
 ```bash
-docker exec brgm-dlt-worker dbt run                          # Full pipeline
-docker exec brgm-dlt-worker dbt run --select model_name      # Single model
-docker exec brgm-dlt-worker dbt run --select model_name+     # Model + downstream
-docker exec brgm-dlt-worker dbt test                          # Data quality tests
-docker exec brgm-dlt-worker dbt test --select model_name      # Test single model
-docker exec brgm-dlt-worker dbt source freshness              # Check source freshness
-docker exec brgm-dlt-worker dbt run --full-refresh --select model_name  # Force rebuild
-docker exec brgm-dlt-worker dbt docs generate                 # Generate documentation
-
-# Force rebuild of incremental ERA5 mapping (needed after TME data changes)
-docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'
+docker exec brgm-dlt-worker dbt run                                     # full pipeline
+docker exec brgm-dlt-worker dbt run --select model_name                 # one model
+docker exec brgm-dlt-worker dbt run --select model_name+                # model + downstream
+docker exec brgm-dlt-worker dbt run --full-refresh --select model_name  # force rebuild
+docker exec brgm-dlt-worker dbt test                                    # data quality tests
+docker exec brgm-dlt-worker dbt source freshness
+docker exec brgm-dlt-worker dbt docs generate
 ```
 
-### Database
+Database: `docker exec -it brgm-postgres psql -U postgres -d postgres`
+(`\dt bronze.*`, `\dt silver.*`, `\dt gold.*`).
+
+Lint and types (config in `pyproject.toml`: line-length 120, target py311):
+
 ```bash
-docker exec -it brgm-postgres psql -U postgres -d postgres
-# \dt bronze.*   \dt silver.*   \dt gold.*
+ruff check src/          # pycodestyle, pyflakes, isort, bugbear
+ruff check --fix src/
+black src/
+mypy src/                # lenient: ignore_missing_imports = true
 ```
 
-### Linting & Formatting
-```bash
-# Configured in pyproject.toml: line-length=120, target=py311
-ruff check src/                  # Lint (pycodestyle, pyflakes, isort, bugbear)
-ruff check --fix src/            # Lint + auto-fix
-black src/                       # Format
-mypy src/                        # Type check (lenient: ignore_missing_imports=true)
-```
+## Tests
 
-### Testing
-
-Python unit tests cover the **pure computation layer only** (no DB, no network) — 37 tests
-under `tests/`:
+Python unit tests cover the **pure computation layer only** — no database, no network.
 
 | File | Covers |
-|---|---|
+|------|--------|
 | `test_indices.py` | IPS/SSFI classification |
-| `test_monthly_index.py`, `test_monthly_index_persistence.py` | monthly index + persistence |
-| `test_reference_grid.py` | fixed reference grid |
+| `test_monthly_index.py`, `test_monthly_index_persistence.py` | Monthly index and its persistence |
+| `test_reference_grid.py` | Fixed reference grid |
 | `test_era5_indices.py` | SPI (gamma), STI (z-score), SPEI (GLO fit + CDF) |
-| `test_era5_spei_climatology.py` | SPEI reference fitting + rejection accounting |
+| `test_era5_spei_climatology.py` | SPEI reference fitting and rejection accounting |
 | `test_era5_indices_persistence.py` | SQL-constant contract of the indices table |
-
-`tests/test_indices.py::GOLDEN_Z_TO_CLASS` is a **cross-repo sync contract** — the same
-golden table exists in the junon repo
-(`time-serie-explo/tests/test_drought_classification_contract.py`) so the duplicated IPS
-math can't drift silently.
+| `test_era5_daily_temp_aggregation.py` | Hourly → daily aggregation (needs `xarray`) |
 
 ```bash
 # `uv run pytest` does NOT work here: it rebuilds psycopg2cffi, which needs pg_config.
-# Use the interpreter directly (the cov plugin isn't always installed):
+# Use the interpreter directly (the coverage plugin is not always installed):
 PYTHONPATH=src python3 -m pytest tests/ -o addopts=""
 ```
 
-> `tests/test_era5_daily_temp_aggregation.py` fails **at collection** because `xarray`
-> isn't installed in this environment. It is a pre-existing environment gap, unrelated to
-> the code — exclude it with `--ignore=tests/test_era5_daily_temp_aggregation.py` to get a
-> clean run.
-
-Data quality is otherwise managed through dbt tests (not_null, unique, relationships, accepted_values, accepted_range) defined in `schema.yml` files. Run via `docker exec brgm-dlt-worker dbt test`. Failing rows are persisted to the `dbt_audit` schema (`+store_failures`).
-
-## Architecture
-
-### How Dagster Definitions Wire Together
-
-Entry point: `src/hubeau_pipeline/__init__.py` → exports `defs` from `definitions.py`.
-
-`definitions.py` assembles a single `Definitions()` object:
-- **assets** = `all_assets` (14 bronze DLT assets + 1 `hubeau_dbt_assets` which auto-discovers all dbt models from the manifest)
-- **jobs** = `all_jobs` (from `jobs/__init__.py`)
-- **schedules** = `all_schedules` (7 schedules, controlled by `DAGSTER_ENABLE_SCHEDULES` env var)
-- **sensors** = `all_sensors` (3 sensors, controlled by `DAGSTER_ENABLE_SENSORS` env var)
-- **resources** = `pg` (PostgreSQLResource), `dlt` (DagsterDltResource), `dbt` (DbtCliResource), `noop_io_manager` (NoOpIOManager for DLT assets that write directly to PostgreSQL)
-
-### Docker Architecture
-
-Two custom images, communicating via GRPC (defined in `dagster_home/workspace.yaml`):
-
-- **Worker** (`docker/worker/Dockerfile`): ~2GB, includes GDAL/GEOS, runs `dagster code-server` on port 4000. Uses `uv` package manager for fast builds. Generates dbt manifest at build time via `dbt deps && dbt parse`. Source code hot-reloaded via volume mounts. All runs execute here via GRPC.
-- **Orchestrator** (`docker/orchestrator/Dockerfile`): ~500MB, lightweight, runs `dagster-webserver` + `dagster-daemon`. **NO user code** — only Dagster packages (`docker/orchestrator/requirements.txt`). Connects to worker via GRPC. Only rebuild when upgrading Dagster version.
-
-### Medallion Layers & dbt Schema Mapping
-
-| Layer | dbt folder | PostgreSQL schema | Materialization |
-|-------|-----------|-------------------|-----------------|
-| Bronze | (DLT, not dbt) | `bronze` | DLT MERGE |
-| Silver | `staging/` (7 models) | `silver` | table |
-| Rejects | `rejects/` (3 models) | `silver_rejects` | table |
-| Gold (intermediate) | `intermediate/` (6 models) | `gold` | table (some incremental) |
-| Gold (marts) | `marts/` (12 models) | `gold` | table |
-
-Schema mapping is controlled by `generate_schema_name.sql` macro and `dbt_project.yml` model configs.
-
-### Data Domains
-
-- **Piezometry**: Groundwater level stations + chroniques (year-partitioned 1967-present)
-- **Hydrometry**: River flow sites → stations → observations (year-partitioned 2000-present)
-- **Climate**: ERA5 reanalysis data (temperature, precip, wind, humidity) on a France-wide grid. Grid-level climate marts: `gold.fct_era5_monthly_grid` (monthly aggregates per 0.1° cell), `gold.fct_era5_climatology_grid` (1991-2020 normals, gamma MoM + μ/σ — SPI/STI), `gold.fct_era5_spei_climatology_grid` (1991-2020 generalized-logistic parameters for SPEI, Python-managed: the L-moment fit needs the Γ function, which PostgreSQL lacks), `gold.fct_era5_indices_grid` (SPI/STI/SPEI, windows 1/3/6/12 months)
-- **Reference**: TME hydrogeo entities (BDLISA)
-
-### Pipeline Flow
-
-```
-Bronze (DLT assets) → Silver (dbt staging/) → Gold (dbt intermediate/ → marts/)
-```
-
-**Main fact tables**: `hubeau_daily_chroniques` (piezometry + ERA5 weather), `hydro_daily_chroniques` (hydrometry + ERA5 weather)
-
-The spatial join between stations and ERA5 grid is done in `int_station_era5_mapping` (KNN nearest grid point). This model is incremental with special rebuild logic via `recompute_station_era5_mapping` var.
-
-### Daily Orchestration (UTC)
-
-**Schedules drive INGESTION only** (Bronze):
-```
-3h00  ERA5 Smart Update         (era5_weekly_job)
-4h00  Hub'Eau Bronze piezo+hydro (daily_piezometry_bronze_job + daily_hydrometry_bronze_job)
-```
-
-**Sensors drive the whole dbt + index + quality chain** (event-driven, `sensors.py`) — NO time-based dbt schedules:
-```
-Bronze materializes
-  → bronze_to_transform_sensor    → dbt_transform_job       (ALL dbt models, incremental; dbt ref() DAG orders them)
-      ├ transform_to_index_sensor   → station_index_refresh   (fct_monthly_index + station_current_index + fct_era5_indices_grid — the latter is a Python asset, not a dbt model, computing SPI/STI/SPEI from the climate grid marts). NOTE: `fct_era5_spei_climatology_grid` is deliberately NOT in this nightly job — it is a fixed 1991-2020 reference, materialized on demand only.
-      └ transform_to_quality_sensor → dbt_quality_job         (source freshness + dbt tests, non-blocking alerting)
-```
-The two post-transform sensors fire in parallel on `dbt_transform_job` SUCCESS. A failing
-dbt test fails the quality run (visible/alertable) but does NOT block the data refresh.
-`dbt_transform_job` uses `.without_checks()` (tests run in the quality job, not inline).
-
-**Other schedules**: Monthly (1st, 2h00) reference data (TME). Weekly — dbt docs (Sun 5h), IPS baseline `station_reference_stats` (Sun 7h), completeness check (Mon 6h).
-
-### Bootstrap
-
-`full_bootstrap_job` orchestrates complete initial load: reference data → stations → chroniques (iterates year partitions) → ERA5 → dbt. Tracks state in `ops.bootstrap_state` table for restartability. Controlled by env vars: `BOOTSTRAP_PARTITIONS`, `BOOTSTRAP_FORCE_RERUN`, `BOOTSTRAP_CONTINUE_ON_ERROR`.
-
-## Code Organization
-
-### Key Directories
-
-- `src/hubeau_pipeline/` - Dagster pipeline (Python)
-  - `assets/bronze/` - DLT ingestion assets (one file per data source)
-  - `assets/dbt_assets.py` - Bridges dbt models as Dagster assets via `@dbt_assets` decorator
-  - `assets/{current_index,monthly_index,reference_stats}_assets.py` - IPS standardized index (station level / SSFI)
-  - `jobs/` - job definitions (bronze, dbt staged pipelines, bootstrap, indices)
-  - `sources/` - DLT source clients: `hubeau_csv_source.py` (API pagination + retry), `era5_source.py` (CADS API + NetCDF)
-  - `ml/` - index computation, all pure/vectorised (numpy+scipy, no external index library):
-    - `indices.py` — IPS/SSFI; `current_index_persistence.py`, `monthly_index_persistence.py`, `reference_stats_persistence.py`
-    - `era5_indices.py` — SPI (gamma CDF), STI (z-score), **SPEI** (`fit_glo_detailed` / `compute_spei_glo`: generalized-logistic fitted by L-moments, Hosking estimators)
-    - `era5_spei_climatology_persistence.py` — the SPEI reference parameter table
-  - `schedules.py` - 9 cron schedules
-  - `sensors.py` - 3 event-driven sensors
-  - `resources.py` - PostgreSQLResource (Pydantic-based), DLT resource
-  - `io/io_managers.py` - NoOpIOManager for DLT (data goes to PostgreSQL, not filesystem)
-- `src/dbt_hubeau/` - dbt project
-  - `models/{staging,intermediate,marts,rejects}/` - SQL models with `schema.yml` tests
-  - `macros/` - `cast_silver.sql` (type helpers), `timescaledb.sql` (hypertable creation), `make_point.sql` (PostGIS geometry), `constraints.sql` (PK/FK), `generate_schema_name.sql`
-  - `profiles.yml` - PostgreSQL connection (env var templated)
-  - `packages.yml` - depends on `dbt_utils`
-- `configs/` - YAML configs for API endpoints (`hubeau/`), ERA5 parameters (`era5/`), BDLISA (`bdlisa/`)
-- `docker/` - Dockerfiles, init SQL (`postgres/init.sql`), Adminer, sandbox image variants
-- `dagster_home/` - Dagster metadata, `workspace.yaml` (GRPC connection to worker)
-
-### CI/CD
-
-GitLab CI (`.gitlab-ci.yml`): Generates dbt documentation and deploys to GitLab Pages on `main` branch pushes.
-
-## Important Patterns
-
-### DLT Ingestion
-All DLT assets use cursor-based pagination, exponential backoff retry (5 attempts for 5xx), MERGE deduplication, and year-based partitioning for chroniques data.
-
-### dbt Incremental Strategy
-Staging models use delete+insert with configurable lookback windows (default 7 days, set in `dbt_project.yml` vars). The `on-run-start` hooks in `dbt_project.yml` create indexes and configure TimescaleDB decompression settings.
-
-### TimescaleDB
-`bronze.piezometry_chroniques_raw` and `bronze.era5_france_timeseries` are hypertables. Compression policies achieve 90%+ savings on data >90 days old. The `timescaledb.sql` macro handles hypertable creation.
-
-### Hot Reload & Deployment
-- **Python code** (`src/hubeau_pipeline/`): Volume-mounted in worker only. After changes:
-  1. `docker compose restart dlt_worker` (picks up volume-mounted code)
-  2. Reload code location via Dagster UI or GraphQL `reloadRepositoryLocation`
-  3. No need to touch orchestrator — it has NO user code (standard Dagster architecture)
-- **dbt models** (`src/dbt_hubeau/models/`): Volume-mounted, auto-detected by Dagster (reload definitions in UI)
-- **Config files** (`configs/`): Volume-mounted, changes apply immediately
-- **Orchestrator image rebuild**: Only needed when upgrading Dagster version (edit `docker/orchestrator/requirements.txt`)
-
-> **Architecture**: The orchestrator image (webserver + daemon) contains ONLY Dagster packages — no user code. All runs execute on the worker via GRPC. This is the standard Dagster Docker deployment pattern.
-
-## Key Constraints
-
-- Python 3.11+, dbt pinned to 1.7.0 (Dagster compatibility, enforced via `require-dbt-version` in `dbt_project.yml`), DLT pinned to 0.4.12
-- Docker volumes are **external** (not deleted by `docker compose down -v`) - must be created first via `scripts/init_volumes.sh`
-- GDAL/GEOS required in worker for geospatial processing (`pyogrio`, `geopandas`)
-- The `timescale/timescaledb-ha:pg16` image uses Patroni - do NOT add `command:` overrides in docker-compose
-
-## Access Points
-
-| Service | URL | Notes |
-|---------|-----|-------|
-| Dagster UI | http://localhost:49500 | Pipeline orchestration |
-| PostgreSQL | localhost:49502 | Direct DB access |
-| Adminer | http://localhost:49501 | Lightweight DB admin |
-| dbt docs | http://localhost:49505 | Manual: `docker exec brgm-dlt-worker dbt docs serve --port 8080` |
-
-> The monitoring stack (Grafana/Prometheus/cAdvisor/postgres_exporter), CloudBeaver, and Superset+Redis were removed to slim the stack. Remaining services: postgres, postgres_tuning, dagster (webserver/daemon/postgres), dlt_worker, adminer.
-
-## Common Issues
-
-- **Missing TME labels in Gold tables**: Rebuild incremental mapping: `docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ --vars '{"recompute_station_era5_mapping": true}'`
-- **Hub'Eau API 503**: API overloaded, wait 15-30 min and retry via Dagster UI
-- **ERA5 CDS timeouts**: Retry (built-in backoff). Check [CDS Status](https://cds.climate.copernicus.eu/) if persistent
-- **Zombie inserts from killed `dagster asset materialize` CLI**: launching materializations via `docker exec ... dagster asset materialize` bypasses the run queue; if the CLI client is killed, the step keeps running in the worker and keeps inserting (duplicate keys observed 2026-07-07 on `era5_daily_temp_stats`). Always launch runs via the Dagster UI or GraphQL (QueuedRunCoordinator serializes them)
-- **Bronze duplicates**: Expected from 7-day overlap window. Silver layer deduplicates automatically. Note: the `*_daily_raw` assets and the year-partitioned `*_chroniques_raw`/`*_obs_elab_raw` assets write the SAME Bronze table — daily cleans 7 days, partition cleans a full year; reloading the current-year partition re-fetches from the API (no loss), and Silver dedups any overlap
-- **Worker won't start**: Check `docker compose logs dlt_worker`. Common: port conflict, stale image (`docker compose build --no-cache dlt_worker`)
-- **Phantom hypertables (table is hypertable but shouldn't be)**: The event trigger `timescaledb_ddl_command_end` is **DISABLED** to prevent dbt's `ALTER TABLE RENAME` from re-applying hypertable metadata. This is the permanent fix, now **versioned in `docker/postgres/init.sql`** so every from-scratch deploy reproduces it (idempotent DO block; verified on a fresh `timescaledb-ha` container). If somehow re-enabled: `ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;`. Manual cleanup: `DROP TABLE schema.table CASCADE` then `dbt run --select model_name` (NOT `--full-refresh`). Clean orphaned policies: `SELECT delete_job(id) FROM _timescaledb_config.bgw_job WHERE ...`
-- **dbt daily mart runs 1h+ instead of minutes**: Check if `unique_key` is set on an `append` model — dbt 1.7.0 ignores `append` strategy when `unique_key` is present and generates `DELETE...USING` which seq-scans all hypertable chunks. Fix: remove `unique_key` from the model config
-- **Bronze daily cleanup fails with `text >= date`**: DLT stores all Bronze columns as `text`. The `_clean_recent_data()` function must cast date columns explicitly (`{}::date >= CURRENT_DATE`). If you see `operator does not exist: text >= date`, check that the `::date` cast is present
-- **Dagster sensor crash loop (trailing_unconsumed_events)**: `multi_asset_sensor` must call `context.advance_all_cursors()` on EVERY evaluation, not just when yielding a RunRequest. Without this, events accumulate to the 25-event limit and crash the daemon
-- **DLT SchemaNotFoundError or CannotCoerceColumnException**: DLT state lives in 4 places — ALL must be cleaned for a fresh pipeline start: (1) filesystem `docker exec brgm-dlt-worker rm -rf /var/dlt/pipelines/<name>`, (2) `DELETE FROM bronze._dlt_version WHERE schema_name = '<name>'`, (3) `DELETE FROM bronze._dlt_pipeline_state WHERE pipeline_name = '<name>'`, (4) `DELETE FROM bronze._dlt_loads WHERE schema_name = '<name>'`. Cleaning only some locations causes cascading errors
-- **FK violation on `int_hydro_daily_measurements` (orphan `code_station`)**: Hub'Eau API can return obs for stations absent from its stations endpoint. `stg_hydrometry_obs_elab` only filters on `code_site` (because `code_station` is nullable, 46% of obs). The FK to stations is enforced one level down via `INNER JOIN stg_hydrometry_stations` inside `int_hydro_daily_measurements`. Self-healing: orphans are re-aggregated once Hub'Eau catches up (within 7-day lookback). Piezo is not affected — `stg_piezo_chroniques` already filters at the staging layer (`code_bss` is non-nullable)
-
-## Skills Reference
-
-Skills are invoked via `/skill-name` or the Skill tool. Always check if a skill applies before starting work.
-
-### Development Workflow Skills
-
-These skills form a structured development pipeline. Follow the chain that matches your task.
-
-**Typical feature chain**: `/brainstorming` → `/writing-plans` → `/executing-plans` or `/subagent-driven-development` → `/verification-before-completion` → `/commit` → `/requesting-code-review`
-
-| Skill | Invoke when... | Why |
-|-------|---------------|-----|
-| `superpowers:brainstorming` | Starting any new feature, design, or creative task | Turns ideas into validated designs via collaborative Q&A. Produces a design doc in `docs/plans/`. **Must precede implementation.** |
-| `superpowers:writing-plans` | You have a spec/design and need implementation steps | Creates a step-by-step plan file from the design. Follows brainstorming. |
-| `superpowers:executing-plans` | You have a written plan ready to implement | Executes plans step by step with checkpoints. For sequential work. |
-| `superpowers:subagent-driven-development` | A plan has independent tasks that can run in parallel | Dispatches subagents for parallel execution. Ideal for multi-model dbt changes or independent asset + job work. |
-| `superpowers:dispatching-parallel-agents` | Facing 2+ independent tasks (research, implementation) | Parallel agent coordination. Use when tasks have zero dependencies between them. |
-| `superpowers:test-driven-development` | Implementing any feature or bugfix | Write tests first, then implementation. For this project: write dbt `schema.yml` tests before model SQL, or Python tests before asset code. |
-| `superpowers:systematic-debugging` | Any bug, test failure, or unexpected behavior | Structured root-cause analysis. Use when dbt tests fail, jobs error, or data quality issues appear. |
-| `superpowers:verification-before-completion` | About to claim work is complete | Final checklist before marking done. Prevents missed edge cases. **Always use before committing.** |
-| `superpowers:finishing-a-development-branch` | Implementation is complete, all tests pass | Prepares branch for merge: cleanup, final review, squash guidance. |
-| `superpowers:using-git-worktrees` | Starting feature work that needs isolation | Creates a git worktree so you can work without affecting main. Useful for multi-day features. |
-
-### Code Review & Git Skills
-
-| Skill | Invoke when... | Why |
-|-------|---------------|-----|
-| `commit-commands:commit` (`/commit`) | Ready to commit staged changes | Creates well-formatted git commits with proper messages. |
-| `commit-commands:commit-push-pr` (`/commit-push-pr`) | Ready to commit, push, and open a PR in one step | Full workflow: commit → push → create PR with summary. |
-| `commit-commands:clean_gone` | Branches have piled up locally | Cleans all local branches whose remote tracking branch is `[gone]`. |
-| `code-review:code-review` | Need to review a PR (yours or someone else's) | Structured code review with checklist. |
-| `superpowers:requesting-code-review` | Completed a feature, want review | Prepares code for review, highlights key changes. |
-| `superpowers:receiving-code-review` | Received code review feedback | Structured approach to addressing reviewer comments. |
-
-### Feature Development
-
-| Skill | Invoke when... | Why |
-|-------|---------------|-----|
-| `feature-dev:feature-dev` | Developing a feature with guided codebase exploration | Full guided workflow: understand codebase → design → implement → test. Combines exploration with implementation. Good starting point when you're not sure which specific workflow to use. |
-
-### Scientific & Data Skills (relevant to this project)
-
-This project handles hydrological time series, geospatial data, and climate reanalysis. These skills are directly useful:
-
-**Geospatial & Data Processing**
-
-| Skill | Invoke when... | Why for this project |
-|-------|---------------|---------------------|
-| `scientific-skills:geopandas` | Working with spatial data, geometries, PostGIS | Project uses geopandas extensively: BDLISA GeoPackage loading, station coordinates, spatial joins. Use for any `assets/bronze/bdlisa_*.py` or PostGIS work. |
-| `scientific-skills:polars` | Processing large DataFrames (alternative to pandas) | Faster than pandas for large chroniques datasets. Consider for new DLT sources or data transformation scripts. |
-| `scientific-skills:dask` | Data too large for single-machine pandas | Distributed processing for full historical chroniques (millions of rows). |
-| `scientific-skills:zarr-python` | Working with chunked N-D arrays, cloud storage | Useful if ERA5 data needs intermediate storage in chunked format before PostgreSQL load. |
-
-**Analysis & Visualization**
-
-| Skill | Invoke when... | Why for this project |
-|-------|---------------|---------------------|
-| `scientific-skills:exploratory-data-analysis` | Exploring data quality, distributions, anomalies | Run EDA on Gold tables to validate data pipeline output, detect outliers in chroniques, check ERA5 coverage. |
-| `scientific-skills:statistical-analysis` | Trend analysis, seasonality, hypothesis testing | Analyze piezometric trends, validate seasonal patterns, statistical tests on data quality. |
-| `scientific-skills:statsmodels` | Regression, time series decomposition | Trend detection in water levels, seasonal decomposition of hydrometric data, autocorrelation analysis. |
-| `scientific-skills:scikit-learn` | Anomaly detection, clustering, classification | Detect anomalous measurements in chroniques, cluster stations by behavior, classify data quality. |
-| `scientific-skills:plotly` | Interactive charts and maps | Interactive station maps, time series exploration. |
-| `scientific-skills:matplotlib` | Static publication-quality plots | Detailed custom plots when Plotly is overkill. |
-| `scientific-skills:seaborn` | Statistical visualization with pandas | Heatmaps of data coverage, distribution plots, correlation matrices between hydro variables. |
-| `scientific-skills:scientific-visualization` | Publication-ready multi-panel figures | Meta-skill for combining matplotlib/seaborn/plotly into polished figures. |
-| `scientific-skills:networkx` | Graph/network analysis | Model hydrological networks: upstream/downstream station relationships, aquifer connectivity. |
-
-**Research & Documentation**
-
-| Skill | Invoke when... | Why for this project |
-|-------|---------------|---------------------|
-| `scientific-skills:scientific-writing` | Writing technical reports or documentation | Document data pipeline methodology, data quality reports, architecture decisions. |
-| `scientific-skills:hypothesis-generation` | Formulating research questions from data | Generate hypotheses about groundwater trends, climate impact on hydrology. |
-| `scientific-skills:literature-review` | Reviewing scientific literature | Research Hub'Eau API changes, ERA5 methodology, hydrological analysis methods. |
-
-**Export & Reporting**
-
-| Skill | Invoke when... | Why for this project |
-|-------|---------------|---------------------|
-| `scientific-skills:xlsx` | Creating/editing spreadsheets | Export Gold table summaries, station inventories, data quality reports to Excel. |
-| `scientific-skills:pdf` | PDF generation or manipulation | Generate PDF reports from pipeline data, extract data from PDF sources. |
-| `scientific-skills:docx` | Creating Word documents | Technical documentation, data delivery reports. |
-| `scientific-skills:pptx` | Creating presentations | Pipeline status presentations, data analysis results. |
-| `scientific-skills:scientific-slides` | Research talk slide decks | Present hydro data analysis findings, pipeline architecture talks. |
-| `scientific-skills:markitdown` | Converting files to Markdown | Convert existing docs to Markdown for the repository. |
-
-### Frontend & BI
-
-| Skill | Invoke when... | Why for this project |
-|-------|---------------|---------------------|
-| `frontend-design:frontend-design` | Building web interfaces | Custom dashboards, data quality monitoring UIs, admin panels. |
-
-### Meta & Maintenance Skills
-
-| Skill | Invoke when... | Why |
-|-------|---------------|-----|
-| `claude-md-management:revise-claude-md` | End of a productive session with new learnings | Updates this CLAUDE.md with patterns discovered during work. |
-| `claude-md-management:claude-md-improver` | CLAUDE.md feels outdated or incomplete | Audits and improves CLAUDE.md files. |
-| `claude-code-setup:claude-automation-recommender` | Want to set up hooks/automations | Analyzes codebase and recommends Claude Code automations (pre-commit hooks, etc.). |
-| `superpowers:writing-skills` | Creating or editing custom skills | For building project-specific skills (e.g., a "dbt-model-generator" skill). |
-
-### Common Workflow Examples
-
-**Adding a new data source (e.g., new Hub'Eau API endpoint)**:
-1. `/brainstorming` — design the asset, schema, API config
-2. `/writing-plans` — plan: YAML config → DLT source → Dagster asset → dbt staging model → tests
-3. `/test-driven-development` — write `schema.yml` tests first, then model SQL
-4. `/verification-before-completion` — verify end-to-end
-5. `/commit-push-pr` — ship it
-
-**Debugging a dbt test failure**:
-1. `/systematic-debugging` — trace from failing test → model SQL → source data → root cause
-
-**Analyzing data quality on Gold tables**:
-1. `scientific-skills:exploratory-data-analysis` — profile data distributions
-2. `scientific-skills:statistical-analysis` — test for anomalies and trends
-3. `scientific-skills:plotly` or `seaborn` — visualize findings
-
-**Creating a data export/report**:
-1. `scientific-skills:xlsx` or `pdf` — generate formatted output from Gold tables
-2. `scientific-skills:scientific-writing` — write methodology section if needed
+`test_era5_daily_temp_aggregation.py` fails **at collection** on a host without `xarray`.
+`xarray` is a declared dependency (`pyproject.toml:74`) and is present in the worker image,
+so this only bites when running the suite on a bare host. Exclude it there with
+`--ignore=tests/test_era5_daily_temp_aggregation.py` for a clean run — 37 tests.
+
+`tests/test_indices.py::GOLDEN_Z_TO_CLASS` is a **cross-repository sync contract**: the same
+golden table exists in the Junon repository
+(`time-serie-explo/tests/test_drought_classification_contract.py`), so the duplicated IPS math
+cannot drift silently. Change one, change the other.
+
+Everything else is covered by dbt tests (not_null, unique, relationships, accepted_values,
+accepted_range) declared in the `schema.yml` files. Failing rows are persisted to the
+`dbt_audit` schema (`+store_failures`).
+
+## How the Dagster definitions wire together
+
+Entry point `src/hubeau_pipeline/__init__.py` exports `defs` from `definitions.py`, which
+assembles one `Definitions()`:
+
+- **assets** — `all_assets`: 14 Bronze DLT assets, plus `hubeau_dbt_assets` which
+  auto-discovers every dbt model from the manifest, plus the Python index assets
+- **jobs** — `all_jobs` from `jobs/__init__.py`
+- **schedules** — `all_schedules`: 8 schedules, gated by `DAGSTER_ENABLE_SCHEDULES`
+- **sensors** — `all_sensors`: 3 sensors, gated by `DAGSTER_ENABLE_SENSORS`
+- **resources** — `pg` (PostgreSQLResource), `dlt` (DagsterDltResource), `dbt`
+  (DbtCliResource), `noop_io_manager` (DLT writes straight to PostgreSQL)
+
+Schedules drive **ingestion only**. Sensors drive the whole dbt + index + quality chain;
+there is deliberately no time-based dbt schedule. `dbt_transform_job` uses `.without_checks()`
+so tests run in the quality job rather than inline: a failing test fails the quality run,
+which is visible and alertable, but never blocks the data refresh.
+
+`fct_era5_spei_climatology_grid` is deliberately **not** in the nightly index job — it is a
+fixed 1991–2020 reference, materialized on demand.
+
+## dbt layout
+
+| Layer | Folder | Schema | Models |
+|-------|--------|--------|--------|
+| Bronze | (DLT, not dbt) | `bronze` | — |
+| Silver | `staging/` | `silver` | 8 |
+| Rejects | `rejects/` | `silver_rejects` | 3 |
+| Gold intermediate | `intermediate/` | `gold` | 6 |
+| Gold marts | `marts/` | `gold` | 12 |
+
+Routing is handled by the `generate_schema_name.sql` macro plus the `dbt_project.yml` model
+configs.
+
+## Code organization
+
+- `src/hubeau_pipeline/`
+  - `assets/bronze/` — DLT ingestion assets, one file per source
+  - `assets/dbt_assets.py` — bridges dbt models as Dagster assets (`@dbt_assets`)
+  - `assets/{current_index,monthly_index,reference_stats}_assets.py` — station-level IPS/SSFI
+  - `assets/era5_{indices,spei_climatology}_assets.py` — gridded SPI/STI/SPEI
+  - `jobs/`, `sources/` (`hubeau_csv_source.py`, `era5_source.py`), `schedules.py` (8),
+    `sensors.py` (3), `resources.py`, `io/io_managers.py`
+  - `ml/` — index computation, pure and vectorized (numpy + scipy, no external index library):
+    `indices.py` (IPS/SSFI), `era5_indices.py` (SPI gamma CDF, STI z-score, SPEI via
+    `fit_glo_detailed` / `compute_spei_glo` — generalized logistic fitted by L-moments,
+    Hosking estimators), plus the `*_persistence.py` modules
+- `src/dbt_hubeau/` — `models/`, `macros/` (`cast_silver.sql`, `timescaledb.sql`,
+  `make_point.sql`, `constraints.sql`, `generate_schema_name.sql`), `profiles.yml`,
+  `packages.yml` (depends on `dbt_utils`)
+- `configs/` — YAML for the API endpoints (`hubeau/`), ERA5 (`era5/`), BDLISA (`bdlisa/`)
+- `docker/` — Dockerfiles, `postgres/init.sql`, Adminer, sandbox image variants
+- `dagster_home/` — Dagster metadata and `workspace.yaml` (gRPC connection to the worker)
+
+## Patterns worth knowing
+
+- **DLT ingestion** — cursor pagination, exponential backoff (5 attempts on 5xx), MERGE dedup,
+  year partitioning for time series.
+- **dbt incremental** — staging uses delete+insert with configurable lookback (7 days by
+  default, in `dbt_project.yml` vars). The `on-run-start` hooks create indexes and set the
+  TimescaleDB decompression parameters.
+- **ERA5 ingests three variables only**: `2m_temperature`, `total_precipitation`,
+  `potential_evaporation` (`configs/era5/era5_france_meteo.yml`). No wind, no humidity — which
+  is exactly why reference PET is computed by Hargreaves rather than Penman-Monteith. See
+  [docs/ERA5.md](docs/ERA5.md).
+- **Hot reload** — Python and dbt code is volume-mounted in the worker only. Restart the
+  worker, then reload the code location in the Dagster UI. The orchestrator holds no user code
+  and only needs rebuilding when Dagster itself is upgraded.
+
+## Constraints
+
+- Python 3.11+; dbt pinned to 1.7.0 (Dagster compatibility, enforced by `require-dbt-version`);
+  DLT pinned to 0.4.12.
+- Docker volumes are **external** — `docker compose down -v` does not delete them, and
+  `scripts/init_volumes.sh` must run before the first `up`.
+- GDAL/GEOS are required in the worker for `pyogrio` / `geopandas`.
+- The `timescale/timescaledb-ha:pg16` image uses Patroni — do **not** add `command:` overrides
+  in docker-compose.
+- `BOOTSTRAP_*` and `ERA5_AVAILABILITY_LAG_DAYS` are **not** forwarded to the worker by the
+  main `docker-compose.yml`; setting them in `.env` silently does nothing. See
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## Access points
+
+| Service | URL |
+|---------|-----|
+| Dagster UI | http://localhost:49500 |
+| Adminer | http://localhost:49501 |
+| PostgreSQL | localhost:49502 |
+| dbt docs | http://localhost:49505 (manual: `docker exec brgm-dlt-worker dbt docs serve --port 8080`) |
+
+## Traps that have already cost time
+
+- **Phantom hypertables.** The `timescaledb_ddl_command_end` event trigger is **disabled** so
+  dbt's `ALTER TABLE RENAME` cannot re-apply hypertable metadata. This is the permanent fix,
+  versioned in `docker/postgres/init.sql` (idempotent DO block) so a from-scratch deploy
+  reproduces it. If it somehow gets re-enabled:
+  `ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;`. Manual cleanup is
+  `DROP TABLE schema.table CASCADE` then `dbt run --select model_name` — **not**
+  `--full-refresh`.
+- **Zombie inserts from a killed CLI materialization.** `docker exec ... dagster asset
+  materialize` bypasses the run queue; if the CLI client dies, the step keeps running in the
+  worker and keeps inserting (duplicate keys observed on `era5_daily_temp_stats`). Launch runs
+  from the Dagster UI or GraphQL so the QueuedRunCoordinator serializes them.
+- **A daily mart that takes an hour instead of minutes.** Check whether `unique_key` is set on
+  an `append` model: dbt 1.7.0 ignores the `append` strategy when `unique_key` is present and
+  generates `DELETE ... USING`, which sequentially scans every hypertable chunk. Remove
+  `unique_key`.
+- **`operator does not exist: text >= date`.** DLT stores every Bronze column as `text`, so
+  `_clean_recent_data()` must cast date columns explicitly (`{}::date >= CURRENT_DATE`).
+- **Sensor crash loop (`trailing_unconsumed_events`).** A `multi_asset_sensor` must call
+  `context.advance_all_cursors()` on **every** evaluation, not only when it yields a
+  `RunRequest`. Otherwise events pile up to the 25-event limit and take down the daemon.
+- **DLT `SchemaNotFoundError` / `CannotCoerceColumnException`.** DLT state lives in four
+  places and all four must be cleaned for a fresh start: the filesystem
+  (`rm -rf /var/dlt/pipelines/<name>` in the worker), `bronze._dlt_version`,
+  `bronze._dlt_pipeline_state`, `bronze._dlt_loads`. Cleaning only some causes cascading
+  errors.
+- **FK violation on `int_hydro_daily_measurements` (orphan `code_station`).** Hub'Eau can
+  return observations for stations missing from its stations endpoint. `stg_hydrometry_obs_elab`
+  only filters on `code_site`, because `code_station` is nullable in 46 % of observations; the
+  FK is enforced one level down by the `INNER JOIN stg_hydrometry_stations` inside
+  `int_hydro_daily_measurements`. It self-heals once Hub'Eau catches up, within the 7-day
+  lookback. Piezometry is unaffected — `stg_piezo_chroniques` filters at the staging layer.
+- **Bronze duplicates are expected** (7-day overlap window); Silver deduplicates. Note that the
+  `*_daily_raw` assets and the year-partitioned `*_chroniques_raw` / `*_obs_elab_raw` assets
+  write the *same* Bronze table: daily cleans 7 days, the partition cleans a full year.
+- **Missing TME labels in Gold**: rebuild the incremental mapping with
+  `--vars '{"recompute_station_era5_mapping": true}'`.
+- **A Bronze temperature backfill does not reach Silver on its own** — see the trap section in
+  [docs/ERA5.md](docs/ERA5.md#backfilling-temperature--the-silver-trap).
+
+More operational incidents in [docs/OPERATIONS.md](docs/OPERATIONS.md#5-common-incidents).

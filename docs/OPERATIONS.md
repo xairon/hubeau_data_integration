@@ -1,256 +1,232 @@
-# Operations & Maintenance
+# Operations runbook
 
-> Procédures d'exploitation, dépannage et sauvegarde du pipeline Hub'Eau.
+Running the pipeline day to day: initial load, routine checks, code updates, reprocessing,
+incidents, backup and restore.
 
----
-
-## Table des matières
-
-1. [Bootstrap initial](#1-bootstrap-initial)
-2. [Opérations quotidiennes](#2-opérations-quotidiennes)
-3. [Mise à jour du code](#3-mise-à-jour-du-code)
-4. [Retraitement de données](#4-retraitement-de-données)
-5. [Incidents courants](#5-incidents-courants)
-6. [Sauvegarde et restauration](#6-sauvegarde-et-restauration)
+1. [Initial bootstrap](#1-initial-bootstrap)
+2. [Daily checks](#2-daily-checks)
+3. [Updating the code](#3-updating-the-code)
+4. [Reprocessing data](#4-reprocessing-data)
+5. [Common incidents](#5-common-incidents)
+6. [Backup and restore](#6-backup-and-restore)
 
 ---
 
-## 1. Bootstrap initial
+## 1. Initial bootstrap
 
-### Bootstrap complet (base vide)
+### Full bootstrap (empty database)
 
-Lancer le job `full_bootstrap` depuis Dagster UI :
-1. Ouvrir http://localhost:49500 → Jobs → `full_bootstrap`
-2. Cliquer sur "Launchpad" → "Launch Run"
+Run the `full_bootstrap` job from the Dagster UI:
 
-Ce job charge dans l'ordre : référentiel TME (BDLISA) → stations → chroniques (par année) → ERA5 → dbt.
+1. Open http://localhost:49500 → **Jobs** → `full_bootstrap`
+2. **Launchpad** → **Launch Run**
 
-**Attention** : le bootstrap complet prend plusieurs heures (toutes les données depuis 1967/2000).
+It loads in order: TME reference data (BDLISA) → stations → time series (year by year) →
+ERA5 → dbt. It is restartable: progress is persisted in `ops.bootstrap_state`, so a
+re-launch resumes instead of starting over.
 
-### Chargement progressif (pour tester)
+**Budget several hours.** The full history means 1967 onward for piezometry, 2000 onward for
+hydrometry.
 
-1. `reference_data_bronze` — référentiel TME
-2. `piezometry_stations_bronze` + `hydrometry_stations_bronze` — métadonnées stations
-3. Un job de chroniques pour une année récente (`piezometry_chroniques_bronze` / `hydrometry_chroniques_bronze`)
-4. `dbt_transform` — transformations Silver + Gold
+### Progressive load (for a test environment)
 
-### Variables de contrôle du bootstrap
+1. `reference_data_bronze` — TME reference data
+2. `piezometry_stations_bronze` + `hydrometry_stations_bronze` — station metadata
+3. One time-series job for a recent year (`piezometry_chroniques_bronze` /
+   `hydrometry_chroniques_bronze`)
+4. `dbt_transform` — Silver + Gold transformations
 
-| Variable | Effet |
-|----------|-------|
-| `BOOTSTRAP_PARTITIONS` | Allowlist `job:partition` (ex: `chroniques:piezometry:2020,era5:1990-1991`) |
-| `BOOTSTRAP_FORCE_RERUN` | Relancer même si déjà complété |
-| `BOOTSTRAP_CONTINUE_ON_ERROR` | Continuer après erreur (best-effort) |
+### Restricting what the bootstrap loads
+
+| Variable | Effect |
+|----------|--------|
+| `BOOTSTRAP_PARTITIONS` | Allowlist of `job:partition` (e.g. `chroniques:piezometry:2020,era5:1990-1991`) |
+| `BOOTSTRAP_FORCE_RERUN` | Re-run even if already marked complete |
+| `BOOTSTRAP_CONTINUE_ON_ERROR` | Keep going after an error (best effort) |
+
+> These three are **not** forwarded to the worker container by `docker-compose.yml`. Setting
+> them in `.env` does nothing. Pass them on the command line, or add them to the worker's
+> `environment:` block — see [CONFIGURATION.md](CONFIGURATION.md#making-the-no-variables-actually-work).
+
+```bash
+docker compose run --rm \
+  -e BOOTSTRAP_PARTITIONS=chroniques:piezometry:2020,era5:1990-1991 \
+  -e BOOTSTRAP_FORCE_RERUN=true \
+  dlt_worker dagster job execute -m hubeau_pipeline.definitions -j full_bootstrap
+```
 
 ---
 
-## 2. Opérations quotidiennes
+## 2. Daily checks
 
-### Vérifier la fraîcheur des données
+### Data freshness
 
 ```sql
-SELECT
-  'piezometry' as domain,
-  MAX(date_mesure) as latest_date,
-  NOW() - MAX(date_mesure) as lag
+SELECT 'piezometry' AS domain, MAX(date_mesure) AS latest_date, NOW() - MAX(date_mesure) AS lag
 FROM bronze.piezometry_chroniques_raw
 UNION ALL
-SELECT
-  'hydrometry',
-  MAX(date_obs_elab),
-  NOW() - MAX(date_obs_elab)
+SELECT 'hydrometry', MAX(date_obs_elab), NOW() - MAX(date_obs_elab)
 FROM bronze.hydrometry_obs_elab_raw
 UNION ALL
-SELECT
-  'era5',
-  MAX(time),
-  NOW() - MAX(time)
+SELECT 'era5', MAX(time), NOW() - MAX(time)
 FROM bronze.era5_france_timeseries;
 ```
 
-### Vérifier les tests dbt
+An ERA5 lag of about five days is expected — see the incident section.
+
+### dbt tests
 
 ```bash
 docker exec brgm-dlt-worker dbt test
 ```
 
-### Vérifier les logs Dagster
+### Logs
 
 ```bash
-# Logs du worker (exécution des jobs)
-docker compose logs -f dlt_worker
-
-# Logs du daemon (schedules/sensors)
-docker compose logs -f dagster_daemon
+docker compose logs -f dlt_worker       # job execution
+docker compose logs -f dagster_daemon   # schedules and sensors
 ```
 
 ---
 
-## 3. Mise à jour du code
+## 3. Updating the code
 
-### Après modification des modèles dbt (Silver/Gold)
+| What changed | What to run |
+|--------------|-------------|
+| Python code | `docker compose restart dlt_worker` |
+| YAML configs (`configs/`) | nothing — bind-mounted, re-read on each run |
+| dbt models | `docker compose build dlt_worker && docker compose up -d` (regenerates the manifest) |
+| `pyproject.toml` | `docker compose down && docker compose build --no-cache dlt_worker && docker compose up -d` |
+
+After a dbt model change, re-run the pipeline from the Dagster UI: **Jobs** → `dbt_transform`
+→ **Launch Run**.
+
+If the *shape* of the schema changed and you want a clean rebuild:
 
 ```bash
-# 1. Rebuild le worker (régénère le manifest dbt)
-docker compose build dlt_worker
-docker compose up -d
-
-# 2. (Optionnel) Drop et recréer les schémas si le schéma a changé
 docker exec -i brgm-postgres psql -U postgres -d postgres -c \
   "DROP SCHEMA IF EXISTS silver CASCADE; DROP SCHEMA IF EXISTS gold CASCADE; DROP SCHEMA IF EXISTS silver_rejects CASCADE;"
-
-# 3. Relancer le pipeline dbt complet
-# Via Dagster UI : Jobs → dbt_transform → Launch Run
 ```
 
-### Après modification du code Python
-
-```bash
-docker compose restart dlt_worker
-```
-
-### Après modification des dépendances (pyproject.toml)
-
-```bash
-docker compose down
-docker compose build --no-cache dlt_worker
-docker compose up -d
-```
-
-### Après modification des configs YAML
-
-Rien à faire — les fichiers sont montés en volume et lus à chaque exécution.
+This drops derived data only — Bronze is untouched, so a `dbt_transform` run rebuilds
+everything without re-ingesting from the APIs.
 
 ---
 
-## 4. Retraitement de données
+## 4. Reprocessing data
 
-### Retraitement d'une fenêtre temporelle (dbt)
+### Replay a time window
 
 ```bash
-# Piézométrie : rejouer depuis une date
 docker exec brgm-dlt-worker dbt run --select stg_piezo_chroniques \
   --vars '{"piezometry_reprocess_from_date": "2020-01-01"}'
 
-# Hydrométrie : rejouer depuis une date
 docker exec brgm-dlt-worker dbt run --select stg_hydrometry_obs_elab \
   --vars '{"hydrometry_reprocess_from_date": "2020-01-01"}'
 ```
 
-### Full-refresh d'un modèle incrémental
+### Full refresh of one incremental model
 
 ```bash
 docker exec brgm-dlt-worker dbt run --full-refresh --select hubeau_daily_chroniques
 ```
 
-### Recalculer le mapping stations-ERA5
+### Recompute the station ↔ ERA5 mapping
 
-Nécessaire après modification des données TME ou ajout de stations :
+Needed after TME data changes or when stations are added — the incremental mapping does not
+revisit existing rows.
 
 ```bash
 docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
   --vars '{"recompute_station_era5_mapping": true}'
-```
-
-### Relancer une partition de bootstrap
-
-```bash
-# Exemple : rejouer piézo 2020 et ERA5 1990-1991
-BOOTSTRAP_PARTITIONS=chroniques:piezometry:2020,era5:1990-1991
-BOOTSTRAP_FORCE_RERUN=true
-# Puis relancer full_bootstrap depuis Dagster UI
 ```
 
 ---
 
-## 5. Incidents courants
+## 5. Common incidents
 
-### Hub'Eau API 503 (Service Unavailable)
+### Hub'Eau API returns 503
 
-**Symptômes** : Job échoue avec `HTTPError 503`
-**Cause** : API temporairement surchargée
-**Solution** :
-1. Vérifier [hubeau.eaufrance.fr](https://hubeau.eaufrance.fr/) pour les annonces
-2. Attendre 15-30 min et relancer le job depuis Dagster UI
-3. Le retry automatique (5 tentatives, backoff exponentiel) gère la plupart des cas
+Temporarily overloaded API. The built-in retry (5 attempts, exponential backoff) absorbs
+most of it. Otherwise check [hubeau.eaufrance.fr](https://hubeau.eaufrance.fr/) for notices,
+wait 15–30 minutes and re-launch the job from the Dagster UI.
 
-### ERA5 CDS Timeout
+### ERA5 CDS timeout
 
-**Symptômes** : `TimeoutError` ou `ConnectionError` pendant le téléchargement ERA5
-**Cause** : Requête trop volumineuse ou serveur CDS surchargé
-**Solution** :
-1. Relancer le job (retry intégré)
-2. Vérifier le [statut CDS](https://cds.climate.copernicus.eu/)
-3. Si une plage trop large échoue, relancer sur des périodes plus courtes
+`TimeoutError` or `ConnectionError` while downloading. Re-launch (retry is built in), check
+the [CDS status](https://cds.climate.copernicus.eu/), and if a wide range keeps failing,
+re-run it as shorter periods.
 
-### TimescaleDB "tuple decompression limit exceeded"
+### `tuple decompression limit exceeded`
 
-**Symptômes** : `tuple decompression limit exceeded by operation`
-**Cause** : DML incrémental sur hypertable compressée, limite par défaut dépassée
-**Solution** :
+Incremental DML against a compressed hypertable, past the default limit.
+
 ```sql
 ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0;
 ```
-Puis `docker compose restart dlt_worker`. Ce réglage est normalement déjà dans `docker/postgres/init.sql`.
 
-### Libellés TME NULL dans les tables Gold
+Then `docker compose restart dlt_worker`. This setting normally ships in
+`docker/postgres/init.sql` — hitting the error means it did not apply.
 
-**Symptômes** : `libelle_eh`, `code_eh` NULL dans `hubeau_daily_chroniques` ou `int_station_era5_mapping`
-**Cause** : Le mapping incrémental ne recalcule pas les lignes existantes
-**Solution** :
+### NULL TME labels in Gold tables
+
+`libelle_eh` / `code_eh` NULL in `hubeau_daily_chroniques` or `int_station_era5_mapping`.
+The incremental mapping does not recompute existing rows.
+
 ```bash
-# 1. Vérifier que bronze.tme_entites_hydrogeo contient des données
 docker exec -it brgm-postgres psql -U postgres -d postgres -c \
   "SELECT COUNT(*), COUNT(libelle_eh) FROM bronze.tme_entites_hydrogeo;"
 
-# 2. Forcer le recalcul complet
 docker exec brgm-dlt-worker dbt run --select int_station_era5_mapping+ \
   --vars '{"recompute_station_era5_mapping": true}'
 ```
 
-### Données piézo/hydro qui s'arrêtent avant aujourd'hui
+### Piezo/hydro data stops short of today
 
-**Cause** : Le job daily n'a pas tourné (scheduler désactivé, container arrêté, erreur)
-**Diagnostic** :
+The daily job did not run — scheduler off, container down, or a failed run.
+
 ```sql
 SELECT MAX(date_mesure) FROM bronze.piezometry_chroniques_raw;
 SELECT MAX(date_obs_elab::date) FROM bronze.hydrometry_obs_elab_raw;
 ```
-**Solution** : Vérifier les runs dans Dagster UI → Runs, et relancer les jobs daily manuellement.
 
-### Dernière date ERA5 = aujourd'hui - 5 jours
+Check **Runs** in the Dagster UI and re-launch the daily jobs by hand. If schedules are off,
+see `DAGSTER_ENABLE_SCHEDULES` in [CONFIGURATION.md](CONFIGURATION.md#dagster).
 
-C'est **normal**. Le Copernicus CDS publie les données avec un délai de ~5 jours.
-Configurable via `ERA5_AVAILABILITY_LAG_DAYS` (défaut: 5).
+### Latest ERA5 date is today minus five days
 
-### Trous dans les données ERA5
+Expected. Copernicus CDS publishes with roughly five days of latency; the window is set by
+`ERA5_AVAILABILITY_LAG_DAYS` (default 5).
 
-**Diagnostic** :
+### Gaps in ERA5
+
 ```sql
 SELECT date_trunc('month', time), COUNT(*)
 FROM bronze.era5_france_timeseries
 GROUP BY 1 ORDER BY 1;
 ```
-**Solution** : Identifier la période manquante et relancer le job `era5_historical_load` avec la partition correspondante.
 
-### Duplicates dans les tables Bronze
+Identify the missing period and re-run `era5_historical_load` on the matching partition.
 
-**Cause** : Fenêtre de chevauchement de 7 jours, normal
-**Solution** : Lancer dbt — la couche Silver déduplique automatiquement :
+### Duplicates in Bronze
+
+Expected — the ingestion window overlaps by 7 days. Silver deduplicates:
+
 ```bash
 docker exec brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
 ```
 
-### Container qui ne démarre pas
+### A container will not start
 
 ```bash
-docker compose logs <service_name>
-# Causes fréquentes : conflit de port, image corrompue
-docker compose build --no-cache <service_name>
-docker compose up -d <service_name>
+docker compose logs <service>
+docker compose build --no-cache <service>
+docker compose up -d <service>
 ```
 
-### Connexion PostgreSQL refusée
+Usual causes: port conflict, corrupted image.
+
+### PostgreSQL connection refused
 
 ```bash
 docker exec brgm-postgres pg_isready
@@ -258,76 +234,67 @@ docker compose logs postgres
 docker compose restart postgres
 ```
 
-### Disque plein
+### Disk full
 
 ```bash
-docker system df    # Diagnostic
-docker system prune # Nettoyage (images/containers inutilisés)
+docker system df
+docker system prune
 ```
 
 ---
 
-## 6. Sauvegarde et restauration
+## 6. Backup and restore
 
-### Backup automatisé quotidien (recommandé)
+### Daily backup (recommended)
 
-Ajouter au crontab :
 ```bash
-# Backup quotidien à 2h, rétention 7 jours
+# crontab: 02:00 daily, 7-day retention
 0 2 * * * docker exec brgm-postgres pg_dumpall -c -U postgres | gzip > /backups/hubeau_$(date +\%Y\%m\%d).sql.gz
 find /backups -name "hubeau_*.sql.gz" -mtime +7 -delete
 ```
 
-### Backup manuel
+### Manual backup
 
 ```bash
-# Dump complet
+# Everything
 docker exec brgm-postgres pg_dumpall -c -U postgres | gzip > backup_$(date +%Y%m%d).sql.gz
 
-# Dump d'un schéma spécifique (plus rapide)
+# One schema (much faster)
 docker exec brgm-postgres pg_dump -U postgres -n bronze postgres | gzip > backup_bronze.sql.gz
-docker exec brgm-postgres pg_dump -U postgres -n gold postgres | gzip > backup_gold.sql.gz
+docker exec brgm-postgres pg_dump -U postgres -n gold   postgres | gzip > backup_gold.sql.gz
 ```
 
-### Restauration
+### Restore
 
 ```bash
-# Restore complet
 gunzip -c backup_20260305.sql.gz | docker exec -i brgm-postgres psql -U postgres
-
-# Restore d'un schéma
-gunzip -c backup_bronze.sql.gz | docker exec -i brgm-postgres psql -U postgres postgres
+gunzip -c backup_bronze.sql.gz   | docker exec -i brgm-postgres psql -U postgres postgres
 ```
 
-### Backup des volumes Docker
+### Docker volumes
+
+The data volumes are external (`brgm_postgres_data`, `brgm_dagster_pg_data`) and survive
+`docker compose down -v`.
 
 ```bash
-# Arrêter les containers
+# Backup
 docker compose stop
-
-# Backup du volume PostgreSQL
 docker run --rm -v brgm_postgres_data:/data -v $(pwd):/backup alpine \
   tar czf /backup/postgres_data.tar.gz /data
-
-# Redémarrer
 docker compose up -d
-```
 
-### Restauration d'un volume
-
-```bash
+# Restore
 docker compose down
-docker volume rm brgm_postgres_data
-docker volume create brgm_postgres_data
+docker volume rm brgm_postgres_data && docker volume create brgm_postgres_data
 docker run --rm -v brgm_postgres_data:/data -v $(pwd):/backup alpine \
   tar xzf /backup/postgres_data.tar.gz -C /
 docker compose up -d
 ```
 
-### Objectifs de reprise
+### Recovery objectives
 
-| Scénario | RTO | RPO | Méthode |
-|----------|-----|-----|---------|
-| Crash container | 1 min | 0 | Auto-restart Docker |
-| Corruption volume | 30 min | 1 jour | Restauration backup |
-| Reconstruction complète | 4-8 h | N/A | Re-run tous les pipelines |
+| Scenario | RTO | RPO | Method |
+|----------|-----|-----|--------|
+| Container crash | 1 min | 0 | Docker auto-restart |
+| Volume corruption | 30 min | 1 day | Restore from backup |
+| Full rebuild | 4–8 h | n/a | Re-run every pipeline |
