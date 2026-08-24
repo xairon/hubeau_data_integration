@@ -255,39 +255,92 @@ docker system prune
 
 ## 6. Backup and restore
 
-### Daily backup (recommended)
+### Moving or archiving the whole warehouse
+
+Use the two scripts. They were tested end to end on TimescaleDB 2.29.2 **with a compressed
+chunk present**: `pg_restore` returned exit code 0 with zero errors, and the chunk came back
+still compressed, the hypertable still a hypertable, the compression policy still registered.
+
+```bash
+bash scripts/dump_warehouse.sh ./backups          # -> backups/hubeau-warehouse-<stamp>.dump
+bash scripts/restore_warehouse.sh ./backups/hubeau-warehouse-<stamp>.dump --into-throwaway
+```
+
+The second command is not optional ceremony. It starts a disposable container, restores into
+it, prints the row counts and the hypertable state, then deletes the container. It touches
+nothing. **A dump you have never restored is a hope, not a backup** — and it costs a minute.
+
+To restore for real, into the running stack:
+
+```bash
+bash scripts/restore_warehouse.sh ./backups/hubeau-warehouse-<stamp>.dump
+```
+
+The dump is a PostgreSQL custom-format archive, so it carries everything: hypertables,
+compression state and policies, PostGIS geometries, indexes, constraints, and the
+`ops.bootstrap_state` progress table. Restore it on any host running the same
+`timescale/timescaledb-ha:pg16` image and the stack starts where it left off.
+
+**Sizing.** Measured ratio on this project: a dump weighs about **8 %** of the live database
+(80 MB → 7.5 MB). ERA5 costs roughly **178 bytes per row** in the database. Measure your own
+before you plan a transfer:
+
+```bash
+docker exec brgm-postgres psql -U postgres -d postgres -c "
+SELECT pg_size_pretty(pg_database_size('postgres')) AS database,
+       (SELECT pg_size_pretty(sum(total_bytes))
+        FROM hypertable_detailed_size('bronze.era5_france_timeseries')) AS era5;"
+```
+
+**What is worth keeping.** Silver and Gold are derived — dbt rebuilds them from Bronze in
+minutes. Bronze is what costs: Hub'Eau can be re-fetched but slowly, and ERA5 means going back
+through the Copernicus queue, which is days. If you have to choose, Bronze is the layer to
+save.
+
+### Handing data to people who will not run PostgreSQL
+
+```bash
+bash scripts/export_flat.sh ./export tsv        # gzipped TSV, no dependency
+bash scripts/export_flat.sh ./export parquet    # needs the duckdb binary on the host
+```
+
+This exports the Gold layer as flat files: readable by pandas, R, DuckDB, Excel. It is a
+**delivery format, not a backup** — it loses hypertables, indexes, geometry types and any way
+to restart the pipeline. Geometry columns come out as WKB hex; wrap them in `ST_AsText` on the
+consumer side if that matters.
+
+### Scheduled backup
 
 ```bash
 # crontab: 02:00 daily, 7-day retention
-0 2 * * * docker exec brgm-postgres pg_dumpall -c -U postgres | gzip > /backups/hubeau_$(date +\%Y\%m\%d).sql.gz
-find /backups -name "hubeau_*.sql.gz" -mtime +7 -delete
+0 2 * * * cd /path/to/hubeau_data_integration && bash scripts/dump_warehouse.sh /backups >> /var/log/hubeau-backup.log 2>&1
+30 2 * * * find /backups -name 'hubeau-warehouse-*.dump' -mtime +7 -delete
 ```
 
-### Manual backup
+### Per-schema dumps
+
+Faster than a full dump when you only want one layer:
 
 ```bash
-# Everything
-docker exec brgm-postgres pg_dumpall -c -U postgres | gzip > backup_$(date +%Y%m%d).sql.gz
-
-# One schema (much faster)
-docker exec brgm-postgres pg_dump -U postgres -n bronze postgres | gzip > backup_bronze.sql.gz
-docker exec brgm-postgres pg_dump -U postgres -n gold   postgres | gzip > backup_gold.sql.gz
+docker exec brgm-postgres pg_dump -U postgres -Fc -n bronze -f /tmp/bronze.dump postgres
+docker exec brgm-postgres pg_dump -U postgres -Fc -n gold   -f /tmp/gold.dump   postgres
+docker cp brgm-postgres:/tmp/bronze.dump ./backups/
 ```
 
-### Restore
-
-```bash
-gunzip -c backup_20260305.sql.gz | docker exec -i brgm-postgres psql -U postgres
-gunzip -c backup_bronze.sql.gz   | docker exec -i brgm-postgres psql -U postgres postgres
-```
+> `pg_dump` prints `warning: there are circular foreign-key constraints on this table:
+> continuous_agg`. It is harmless — it refers to TimescaleDB's own catalog, not to your data,
+> and the restore is unaffected.
 
 ### Docker volumes
+
+An alternative to a dump: copy the volume itself. It is faster on very large databases but
+only restores onto the same PostgreSQL major version and the same TimescaleDB version.
 
 The data volumes are external (`brgm_postgres_data`, `brgm_dagster_pg_data`) and survive
 `docker compose down -v`.
 
 ```bash
-# Backup
+# Backup — the stack must be stopped, or the copy is inconsistent
 docker compose stop
 docker run --rm -v brgm_postgres_data:/data -v $(pwd):/backup alpine \
   tar czf /backup/postgres_data.tar.gz /data
@@ -306,5 +359,6 @@ docker compose up -d
 | Scenario | RTO | RPO | Method |
 |----------|-----|-----|--------|
 | Container crash | 1 min | 0 | Docker auto-restart |
-| Volume corruption | 30 min | 1 day | Restore from backup |
-| Full rebuild | 4–8 h | n/a | Re-run every pipeline |
+| Volume corruption | 30 min | 1 day | `restore_warehouse.sh` from the last dump |
+| Host decommissioned | 1 h | last dump | Copy the dump, start the stack elsewhere, restore |
+| Full rebuild from the sources | days | n/a | Re-run every pipeline, including the Copernicus queue |
