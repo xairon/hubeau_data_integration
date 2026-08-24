@@ -48,7 +48,7 @@ The CDS was rebuilt in 2024 and the credential format changed.
 | | Old CDS (retired) | Current CDS |
 |---|---|---|
 | API URL | `https://cds.climate.copernicus.eu/api/v2` | `https://cds.climate.copernicus.eu/api` |
-| Credential | `UID:api-key` (e.g. `12345:abcd-...`) | a single UUID, e.g. `8f14e45f-ceea-467a-9f0b-1c2d3e4f5a6b` |
+| Credential | `UID:api-key` (e.g. `12345:abcd-...`) | a single UUID, e.g. `00000000-0000-0000-0000-000000000000` |
 
 This project targets the **current** CDS: `cds_api_url` is set to
 `https://cds.climate.copernicus.eu/api` in `configs/era5/era5_france_meteo.yml` and
@@ -62,7 +62,7 @@ One place: `COPERNICUS_API_KEY` in the `.env` file at the repository root.
 ```bash
 cp .env.example .env
 # then edit:
-COPERNICUS_API_KEY=8f14e45f-ceea-467a-9f0b-1c2d3e4f5a6b
+COPERNICUS_API_KEY=00000000-0000-0000-0000-000000000000
 ```
 
 `docker-compose.yml` forwards it to the `dlt_worker` container, which is the only place it is

@@ -338,9 +338,16 @@ compression state and policies, PostGIS geometries, indexes, constraints, and th
 `ops.bootstrap_state` progress table. Restore it on any host running the same
 `timescale/timescaledb-ha:pg16` image and the stack starts where it left off.
 
-**Sizing.** Measured ratio on this project: a dump weighs about **8 %** of the live database
-(80 MB → 7.5 MB). ERA5 costs roughly **178 bytes per row** in the database. Measure your own
-before you plan a transfer:
+**Sizing.** Measured twice on this project, on datasets 57× apart in size, with the same
+result: a dump weighs about **8 %** of the live database.
+
+| Live database | Dump | Ratio |
+|---------------|------|-------|
+| 80 MB | 7.5 MB | 9.4 % |
+| 4,568 MB | 369 MB | 8.1 % |
+
+ERA5 costs roughly **178 bytes per row** in the database. Measure your own before planning a
+transfer:
 
 ```bash
 docker exec brgm-postgres psql -U postgres -d postgres -c "
