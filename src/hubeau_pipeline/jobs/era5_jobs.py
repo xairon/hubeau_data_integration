@@ -54,7 +54,7 @@ era5_daily_temp_historical_load = define_asset_job(
     # des deux writers de cette table : la partition de l'année courante chevauche la
     # fenêtre du nightly, et l'écriture (DELETE overlap + INSERT non atomique, table sans
     # contrainte d'unicité) produirait des doublons en cas de concurrence. Voir incident
-    # 2026-07-07 (CLAUDE.md). NB : le backfill temp se sérialise (1 partition à la fois),
+    # 2026-07-07 (docs/OPERATIONS.md). NB : le backfill temp se sérialise (1 partition à la fois),
     # tradeoff assumé — le backfill grille (era5_historical, limit 3) n'est pas affecté.
     tags={"dagster/concurrency_key": "era5_daily_temp_write"},
     hooks=set(),

@@ -50,7 +50,11 @@ pages:
     - apt-get update && apt-get install -y git libpq-dev gcc
     
     # 2. Installation de dbt
-    - pip install dbt-postgres
+    # Version ÉPINGLÉE : dbt_project.yml exige >=1.7.0,<1.8.0 (compatibilité Dagster).
+    # Sans épinglage, pip prend la dernière version publiée et `dbt deps` échoue sur
+    # « This version of dbt is not supported with the 'hubeau_pipeline' package ».
+    # C'est ce qui cassait ce job depuis le 2026-07-07.
+    - pip install "dbt-postgres>=1.7.0,<1.8.0"
 
     # 3. Configuration du profil dbt
     # Gère les deux types de variables GitLab : "File" (chemin) ou "Variable" (contenu)
