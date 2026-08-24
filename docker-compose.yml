@@ -96,11 +96,6 @@ services:
       PG_DB: ${PG_DB:-postgres}
       PG_USER: ${PG_USER:-postgres}
       PG_PASSWORD: ${PG_PASSWORD}
-      POSTGIS_HOST: ${POSTGIS_HOST:-postgres}
-      POSTGIS_PORT: ${POSTGIS_PORT:-5432}
-      POSTGIS_DB: ${POSTGIS_DB:-postgres}
-      POSTGIS_USER: ${POSTGIS_USER:-postgres}
-      POSTGIS_PASSWORD: ${POSTGIS_PASSWORD}
       # Hub'Eau schema
       HUBEAU_SCHEMA: ${HUBEAU_SCHEMA:-hubeau}
       HUBEAU_SCHEMA_DIR: /app/scripts/schema

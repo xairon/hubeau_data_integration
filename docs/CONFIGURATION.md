@@ -24,11 +24,6 @@ Extensions (`postgis`, `timescaledb`) are enabled by `docker/postgres/init.sql`.
 DLT's own destination credentials are derived from these
 (`DESTINATION__POSTGRES__CREDENTIALS__*` ← `PG_*`) — nothing to set by hand.
 
-> **The `POSTGIS_PASSWORD` warning on first start is harmless.** `docker compose` prints
-> `The "POSTGIS_PASSWORD" variable is not set` because `docker-compose.yml:107` forwards a
-> `POSTGIS_*` block that `.env.example` does not define. Nothing reads those variables — a
-> `grep -rn "POSTGIS_" src/` returns nothing — so they are dead configuration. Ignore the
-> warning, or delete lines 103–107 of `docker-compose.yml`.
 
 ## Dagster
 
