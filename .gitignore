@@ -101,3 +101,7 @@ nul
 
 # Exception for dbt seeds
 !**/seeds/*.csv
+
+# Per-installation identifiers — generated on first run, never shared
+dagster_home/.telemetry/
+src/dbt_hubeau/.user.yml
