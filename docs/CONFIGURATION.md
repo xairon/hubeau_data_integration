@@ -134,6 +134,31 @@ To use a managed PostgreSQL instead of the local container: point `PG_HOST`, `PG
 bash scripts/create_readonly_user.sh
 ```
 
+## Network exposure
+
+Every published port binds to **`127.0.0.1` by default**. Nothing on your network can reach
+the stack unless you say so.
+
+```bash
+# publish on every interface — read the warning first
+BIND_ADDR=0.0.0.0 docker compose up -d
+```
+
+The warning: **the Dagster UI has no authentication at all**, and Adminer is a ready-made SQL
+admin console. With `BIND_ADDR=0.0.0.0`, anyone able to reach the host can launch jobs, browse
+the database, or drop a schema. PostgreSQL itself is published too.
+
+For remote access, put a reverse proxy with authentication in front, or a VPN — Tailscale
+`serve`, WireGuard, an SSH tunnel. All of them reach the loopback bind without exposing it:
+
+```bash
+tailscale serve --bg --https=8458 http://127.0.0.1:49500
+```
+
+The sandbox compose files default to `0.0.0.0` instead, because that deployment is reached
+from other machines by design — see
+[DEPLOY_SANDBOX.md](DEPLOY_SANDBOX.md#sandbox-caveats).
+
 ## Secret handling
 
 - Strong passwords (16+ characters), one per service, never in the source.

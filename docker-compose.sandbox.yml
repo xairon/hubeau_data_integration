@@ -52,7 +52,7 @@ services:
     volumes:
       - postgres_data:/home/postgres/pgdata
     ports:
-      - "49502:5432"
+      - "${BIND_ADDR:-0.0.0.0}:49502:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres" ]
       interval: 10s
@@ -136,7 +136,7 @@ services:
       DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD}
     command: [ "dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/app/dagster_home/workspace.yaml" ]
     ports:
-      - "49500:3000"
+      - "${BIND_ADDR:-0.0.0.0}:49500:3000"
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:3000/server_info || exit 1" ]
       interval: 30s
@@ -182,7 +182,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "49501:8080"
+      - "${BIND_ADDR:-0.0.0.0}:49501:8080"
     deploy:
       resources:
         limits:

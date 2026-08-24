@@ -122,7 +122,7 @@ Hypertable (1-year chunks), compressed. Indexed on `(code_bss, date)`, `(date)`,
 | Group | Columns |
 |-------|---------|
 | Keys | `code_bss`, `date` |
-| Observations (all NOT NULL) | `niveau_nappe_eau`, `profondeur_nappe`, `temperature_2m`, `total_precipitation`, `potential_evaporation` |
+| Observations (all **nullable**) | `niveau_nappe_eau`, `profondeur_nappe`, `temperature_2m`, `total_precipitation`, `potential_evaporation` |
 | Station metadata | `codes_bdlisa`, `code_commune_insee`, `nom_commune`, `altitude_station`, `code_departement`, `nom_departement` |
 | TME metadata | `code_eh`, `libelle_eh`, `niveau_eh`, `etat_eh`, `nature_eh`, `milieu_eh`, `theme_eh`, `origine_eh` |
 | Coordinates | `station_latitude`, `station_longitude`, `era5_latitude`, `era5_longitude` |
@@ -130,6 +130,17 @@ Hypertable (1-year chunks), compressed. Indexed on `(code_bss, date)`, `(date)`,
 > `potential_evaporation` here is the **raw ERA5 PEV**, not the Hargreaves reference ET0 used
 > by the climate grid marts. The two differ by roughly a factor of two, on purpose — see
 > [ERA5.md](ERA5.md#known-grid--station-inconsistency).
+
+> **Every weather column is nullable, and they fill from two different sources.**
+> Precipitation and PET come from `stg_era5_timeseries`; **temperature comes only from
+> `stg_era5_daily_temp_stats`**. Loading the ERA5 time series without the daily temperature
+> statistics gives a table where `temperature_2m` is NULL on every row, silently — the join is
+> a LEFT JOIN and there is no constraint to catch it.
+>
+> Measured on the 2026-08-24 demo load (2025, one region): 1,058,750 rows, `niveau_nappe_eau`
+> 100 % filled, precipitation and PET 95.4 %, TME labels 90 %, `temperature_2m` **0 %** because
+> only the time-series path had been loaded. 3,258 of 3,411 stations fell inside the restricted
+> ERA5 area.
 
 ### `hydro_daily_chroniques`
 

@@ -10,7 +10,8 @@ of gigabytes.
 | Target | What you get | Copernicus key | Rough cost |
 |--------|--------------|----------------|------------|
 | **A. Ingestion smoke test** | The Bronze layer, loaded from the real APIs. Proves the plumbing works. **dbt cannot complete** — see below | not needed | ~20 min, ~200 MB |
-| **B. Demo dataset** | The whole pipeline on one year and one region: Bronze → Silver → Gold, and Junon showing real stations, maps and time series | **required** | ~1 h, ~500 MB |
+| **B. Demo dataset** | The whole pipeline on one year and one region: Bronze → Silver → Gold, and Junon showing real stations, maps and time series. **No indices** — see below | **required** | ~1 h, ~500 MB |
+| **B+. Demo with indices** | Target B over 15+ years of Hub'Eau history, so IPS/SSFI actually classify and the sector maps fill | **required** | several hours, several GB |
 | **C. Full production** | Everything, France-wide, 1950 → today | **required** | days, tens of GB |
 
 > **The Copernicus key is not optional past Bronze.** `dbt_transform` builds every model, and
@@ -120,8 +121,20 @@ ORDER BY schemaname, n_live_tup DESC;"
 You should see rows in all three schemas. Then `docker exec -w /app/src/dbt_hubeau
 brgm-dlt-worker dbt test` for the data-quality assertions.
 
-**In Junon** you now get: the station map, station pages with their time series, the IPS/SSFI
-classification. The **Climat tab stays empty** — it needs target B.
+**In Junon** you get the station map and station pages with their time series. You do **not**
+get the IPS/SSFI classification, and the Climat tab stays empty.
+
+> **One year of history is not enough to classify anything, by design.** A reference grid needs
+> at least `MIN_PER_MONTH = 10` observations per calendar month, and the method refuses to
+> fabricate one — see [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md#shared-method). Measured on the
+> 2026-08-24 one-year load: **100 % of `station_current_index` rows came out `UNKNOWN`** and
+> **100 % of the reference grids were flagged `provisoire` with `n_years = 1.0`**. As a
+> consequence `/observatory/situation/sectors` answers `200` with an empty array — the query
+> excludes `UNKNOWN` classes, so no station qualifies.
+>
+> To see real indices you need roughly **15 years** of piezometric and hydrometric history,
+> which is what `_select_reference_window` requires to promote a station from `provisoire` to
+> `adaptee` or `normale`. Load the year partitions from 2010 onward, not just the latest one.
 
 ---
 
