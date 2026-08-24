@@ -64,12 +64,22 @@ launching. They query Hub'Eau station by station, so they are long and network-b
 on 2026-08-24: piezometry took about 8 minutes for 1,058,750 rows (watch the `Lot n/234`
 counter); hydrometry sustained ~390 rows/s and was still going after 24 minutes.
 
-> **Expect to relaunch step 5 at least once.** A full year of hydrometry is roughly half an
-> hour of continuous requests, and Hub'Eau does drop connections:
-> `HTTPSConnectionPool(host='hubeau.eaufrance.fr', port=443): Max retries exceeded`. The
-> built-in retry (5 attempts, exponential backoff) covers short hiccups, not a sustained one.
+> **A long ingestion is all-or-nothing, and any network blip kills it.** DLT persists at the
+> *end* of the extract stage, so a failure partway through writes nothing at all — the Bronze
+> table is not even created. Observed here: 507,000 rows extracted over 24 minutes, then a
+> transient DNS outage on the host, and the run died with
+> `HTTPSConnectionPool(...): Max retries exceeded ... NewConnectionError`. Zero rows persisted.
+>
 > Relaunching the same partition is safe — Bronze deduplicates on the primary key through a
-> MERGE, so nothing is duplicated and the work already done is not lost.
+> MERGE — but it restarts from scratch. Before blaming the API, check your own resolver:
+>
+> ```bash
+> docker exec brgm-dlt-worker getent hosts hubeau.eaufrance.fr
+> docker exec brgm-dlt-worker curl -s -o /dev/null -w "%{http_code}\n" \
+>   "https://hubeau.eaufrance.fr/api/v2/hydrometrie/obs_elab.csv?size=1"
+> ```
+>
+> An HTTP code of `000` returned in a millisecond is a local DNS failure, not a Hub'Eau outage.
 
 **Do not skip step 5.** `dbt_transform` builds every model, so a Bronze table that was never
 loaded fails the whole run with `relation "bronze.hydrometry_obs_elab_raw" does not exist`.
