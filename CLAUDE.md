@@ -69,16 +69,29 @@ Python unit tests cover the **pure computation layer only** — no database, no 
 | `test_era5_indices_persistence.py` | SQL-constant contract of the indices table |
 | `test_era5_daily_temp_aggregation.py` | Hourly → daily aggregation (needs `xarray`) |
 
+**Nothing runs these tests automatically.** `.gitlab-ci.yml` has no test job, `tests/` is not
+copied into the worker image, and `pytest` is not installed there either — it sits in a
+`pyproject.toml` extra that the image does not install. The suite only runs when a human runs
+it.
+
+The reliable way, using the worker's real dependency set (numpy, scipy, xarray are all there):
+
 ```bash
-# `uv run pytest` does NOT work here: it rebuilds psycopg2cffi, which needs pg_config.
-# Use the interpreter directly (the coverage plugin is not always installed):
-PYTHONPATH=src python3 -m pytest tests/ -o addopts=""
+docker cp tests brgm-dlt-worker:/app/tests
+docker exec brgm-dlt-worker pip install -q pytest
+docker exec -e PYTHONPATH=/app/src brgm-dlt-worker python3 -m pytest /app/tests -o addopts="" -q
 ```
 
-`test_era5_daily_temp_aggregation.py` fails **at collection** on a host without `xarray`.
-`xarray` is a declared dependency (`pyproject.toml:74`) and is present in the worker image,
-so this only bites when running the suite on a bare host. Exclude it there with
-`--ignore=tests/test_era5_daily_temp_aggregation.py` for a clean run — 37 tests.
+Measured 2026-08-24: **57 passed in 4.67 s**.
+
+On a bare host instead, `uv run pytest` does **not** work — it rebuilds psycopg2cffi, which
+needs `pg_config`. Use the interpreter directly, and note that
+`test_era5_daily_temp_aggregation.py` fails **at collection** without `xarray`:
+
+```bash
+PYTHONPATH=src python3 -m pytest tests/ -o addopts="" \
+  --ignore=tests/test_era5_daily_temp_aggregation.py     # 37 tests
+```
 
 `tests/test_indices.py::GOLDEN_Z_TO_CLASS` is a **cross-repository sync contract**: the same
 golden table exists in the Junon repository

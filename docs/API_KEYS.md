@@ -20,8 +20,14 @@ ERA5 is the only climate source in the warehouse. Without it:
 - the two daily fact tables (`hubeau_daily_chroniques`, `hydro_daily_chroniques`) join station
   measurements against ERA5, so they lose their weather columns
 
-Piezometry and hydrometry, on the other hand, load perfectly well without any key. A
-key-less install is a legitimate way to explore the station side of the platform.
+Piezometry and hydrometry **ingest** perfectly well without any key — Bronze fills up, and you
+can query it. But the transformation layer does not: `dbt_transform` builds every model, and
+`int_era5_for_all_stations`, on which both daily fact tables depend, reads the two ERA5 staging
+models. Without ERA5 in Bronze it fails with `relation "bronze.era5_daily_temp_stats" does not
+exist` and **no Gold table is produced at all**.
+
+So a key-less install is an ingestion test, not a usable warehouse. Get the key before you
+start unless watching data arrive is all you want.
 
 ## Getting a key
 

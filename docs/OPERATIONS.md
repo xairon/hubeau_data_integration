@@ -216,6 +216,53 @@ Expected — the ingestion window overlaps by 7 days. Silver deduplicates:
 docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
 ```
 
+### `duplicate key value violates unique constraint` on an incremental model
+
+```
+duplicate key value violates unique constraint "int_daily_measurements_pkey"
+DETAIL:  Key (code_bss, date_mesure)=(06505X0093/PZ10, 2025-12-28) already exists.
+```
+
+**Cause: the two windows of the incremental models are anchored differently.** Six models use
+the `time_range_delete_predicate` macro:
+
+| | Anchor | Window |
+|---|--------|--------|
+| the `SELECT` that produces rows | `MAX(date)` **already in the table** | `streaming_lookback_days` (7) |
+| the `DELETE` that clears room for them | **`CURRENT_DATE`** | `daily_recompute_window_days` (30) |
+
+While the warehouse is up to date the two coincide, because the data's newest date is roughly
+today. The moment the data is *older than the delete window* they diverge: the DELETE matches
+nothing, the INSERT re-inserts rows that are already there, and the primary key rejects them.
+
+It bites whenever the data is not current:
+
+- a demo or partial dataset (load 2025 today, and `CURRENT_DATE - 30 days` is already past it)
+- a historical backfill
+- an instance that has been paused for more than 30 days
+
+Measured on this repository: with data stopping at 2025-12-31 and today at 2026-08-24, the
+delete bound was 2026-07-25 — covering nothing at all.
+
+**Fix**: widen the delete window so it reaches back over the data.
+
+```bash
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt build \
+  --vars '{"daily_recompute_window_days": "22000"}'
+```
+
+22000 days is about sixty years, i.e. everything. This is the same workaround the ERA5 rebuild
+procedure uses ([ERA5.md](ERA5.md#rebuilding-the-station-marts)) — it was discovered for that
+case but the underlying edge is general.
+
+The models concerned: `int_daily_measurements`, `int_hydro_daily_measurements`,
+`int_era5_for_all_stations`, `fct_monthly_chroniques`, `fct_monthly_hydro`,
+`fct_era5_monthly_grid`.
+
+> A structural fix would anchor the delete predicate on the table's own `MAX(date)` rather
+> than on `CURRENT_DATE`, making the two windows agree by construction. That changes the
+> semantics of every nightly run, so it is left as a decision rather than applied here.
+
 ### `dbt` says the project path is not found
 
 ```

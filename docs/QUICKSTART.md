@@ -9,12 +9,19 @@ of gigabytes.
 
 | Target | What you get | Copernicus key | Rough cost |
 |--------|--------------|----------------|------------|
-| **A. Smoke test** | Every layer proven to work: Bronze → Silver → Gold, station maps and station pages populated in Junon | not needed | ~15 min, <1 GB |
-| **B. Demo dataset** | Target A plus real climate data on one region: the Climat tab and the SPI/STI/SPEI layers actually render | **required** | a few hours, a few GB |
+| **A. Ingestion smoke test** | The Bronze layer, loaded from the real APIs. Proves the plumbing works. **dbt cannot complete** — see below | not needed | ~20 min, ~200 MB |
+| **B. Demo dataset** | The whole pipeline on one year and one region: Bronze → Silver → Gold, and Junon showing real stations, maps and time series | **required** | ~1 h, ~500 MB |
 | **C. Full production** | Everything, France-wide, 1950 → today | **required** | days, tens of GB |
 
-Start with A. It is fast, needs no credentials, and if it fails you have a small problem to
-debug instead of a large one.
+> **The Copernicus key is not optional past Bronze.** `dbt_transform` builds every model, and
+> `int_era5_for_all_stations` — which the two daily fact tables depend on — reads
+> `stg_era5_timeseries` and `stg_era5_daily_temp_stats`. Without ERA5 in Bronze, dbt fails with
+> `relation "bronze.era5_daily_temp_stats" does not exist`, and no Gold table is produced.
+> Target A is therefore an ingestion test, not a working warehouse. Budget the key from the
+> start unless all you want is to watch data arrive.
+
+Start with A anyway: it is quick, needs no credentials, and if the APIs are unreachable from
+your network you find out in twenty minutes instead of two hours.
 
 ---
 
@@ -44,21 +51,38 @@ allows up to five concurrent runs, and only forbids two copies of the *same* pip
 (see [ARCHITECTURE.md](ARCHITECTURE.md#concurrency)), so launching them all at once would run
 them in parallel — not queue them — and the later steps would find no data.
 
-| # | Job | What it loads | Expected |
-|---|-----|---------------|----------|
-| 1 | `reference_data_bronze` | BDLISA/TME hydrogeological entities | ~3.7 k rows |
-| 2 | `piezometry_stations_bronze` | Piezometric station referential | ~23 k rows |
-| 3 | `hydrometry_stations_bronze` | Hydrometric sites and stations | ~9 k sites, ~6 k stations |
-| 4 | `piezometry_chroniques_bronze` **partition `2025`** | One year of groundwater levels | millions of rows |
+| # | Job | What it loads | Measured on 2026-08-24 |
+|---|-----|---------------|------------------------|
+| 1 | `reference_data_bronze` | BDLISA/TME hydrogeological entities | 3,716 rows |
+| 2 | `piezometry_stations_bronze` | Piezometric station referential | 23,333 rows |
+| 3 | `hydrometry_stations_bronze` | Hydrometric sites and stations | 9,283 sites, 6,468 stations |
+| 4 | `piezometry_chroniques_bronze` **partition `2025`** | One year of groundwater levels | 1,058,750 rows, ~8 min |
+| 5 | `hydrometry_chroniques_bronze` **partition `2025`** | One year of river observations | — |
 
-Step 4 is partitioned by year: in the Launchpad, pick the partition `2025` before launching.
-It queries Hub'Eau in batches of 100 stations, so it takes a while — this is normal.
+Steps 4 and 5 are partitioned by year: pick the partition `2025` in the Launchpad before
+launching. They query Hub'Eau in batches of 100 stations, so they take several minutes each —
+this is normal, watch the `Lot n/234` counter in the logs.
+
+**Do not skip step 5.** `dbt_transform` builds every model, so a Bronze table that was never
+loaded fails the whole run with `relation "bronze.hydrometry_obs_elab_raw" does not exist`.
 
 Then transform:
 
 | # | Job | What it does |
 |---|-----|--------------|
 | 5 | `dbt_transform` | Bronze → Silver → Gold, all 29 models |
+
+> **Loading a past year? Run dbt by hand the first time, with a wide window.** The incremental
+> models delete on `CURRENT_DATE - 30 days` but select on the data's own latest date. Load 2025
+> today and the delete matches nothing while the insert repeats rows already present — the run
+> dies on a primary-key violation. See
+> [OPERATIONS.md](OPERATIONS.md#duplicate-key-value-violates-unique-constraint-on-an-incremental-model).
+>
+> ```bash
+> docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt build \
+>   --vars '{"daily_recompute_window_days": "22000"}'
+> ```
+
 | 6 | `station_reference_stats_refresh` | The IPS/SSFI reference grids |
 | 7 | `station_index_refresh` | `fct_monthly_index` + `station_current_index` |
 
