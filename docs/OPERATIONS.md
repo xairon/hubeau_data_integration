@@ -314,9 +314,10 @@ docker system prune
 
 ### Moving or archiving the whole warehouse
 
-Use the two scripts. They were tested end to end on TimescaleDB 2.29.2 **with a compressed
-chunk present**: `pg_restore` returned exit code 0 with zero errors, and the chunk came back
-still compressed, the hypertable still a hypertable, the compression policy still registered.
+Use the two scripts. They were tested end to end on TimescaleDB 2.29.2, twice, the second time
+on a realistic warehouse: **4.5 GB, 15 tables, 6 hypertables, compressed chunks present**.
+`pg_restore` returned exit code 0 with zero errors both times, and the chunks came back still
+compressed, the hypertables still hypertables, the compression policies still registered.
 
 ```bash
 bash scripts/dump_warehouse.sh ./backups          # -> backups/hubeau-warehouse-<stamp>.dump
