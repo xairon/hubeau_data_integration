@@ -191,6 +191,52 @@ hypertable.
 3. **Purge the Junon cache**: `junon:obs_climat_*` (and `junon-redis-dev` for the dev stack),
    otherwise the app serves stale values for up to 24 hours.
 
+### Loading temperature after the time series — the silent NULL
+
+If `bronze.era5_france_timeseries` is loaded first and `bronze.era5_daily_temp_stats` after, for
+the **same period**, a plain `dbt build` leaves `temperature_2m` NULL on every row. No error,
+no warning: every test passes.
+
+The cause is in `int_era5_for_all_stations`. Its temperature CTE carries an incremental guard:
+
+```sql
+{% if is_incremental() %}
+WHERE d.time > (SELECT COALESCE(MAX(era5_date), '1900-01-01'::date) FROM {{ this }})
+{% endif %}
+```
+
+The table already holds rows up to the end of the period, put there by the time-series path. So
+`d.time > MAX(era5_date)` matches nothing, the CTE is empty, and the downstream `LEFT JOIN`
+yields NULL for every row. The guard assumes temperature always arrives *later* than the time
+series, never *alongside* it.
+
+It bites on a demo load, on any repair of the temperature path, and on the cutover procedure
+itself. Measured on 2026-08-24: 4,196,040 rows in Bronze, 4,196,040 in Silver, and **0 %** of
+`gold.hubeau_daily_chroniques` rows with a temperature.
+
+Fix — rebuild the intermediate model in full, then propagate:
+
+```bash
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run \
+  --full-refresh --select int_era5_for_all_stations
+
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run \
+  --select hubeau_daily_chroniques hydro_daily_chroniques \
+  --vars '{"daily_recompute_window_days": "22000"}'
+```
+
+After that, measured: temperature filled on **95.4 %** of rows — the same rate as precipitation,
+the missing 4.6 % being stations outside the ingested ERA5 area. Mean 12.8 °C, min −2.7 °C,
+max 31.1 °C, which is what a year in central France should look like.
+
+> Check the fill rate rather than assuming it. A NULL column here is invisible: the join is a
+> LEFT JOIN and no constraint catches it.
+>
+> ```sql
+> SELECT round(100.0*count(temperature_2m)/count(*),1) AS pct_temperature
+> FROM gold.hubeau_daily_chroniques;
+> ```
+
 ### Backfilling temperature — the silver trap
 
 > **A Bronze backfill does not reach Silver on its own.** `stg_era5_daily_temp_stats` is

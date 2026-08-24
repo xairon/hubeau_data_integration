@@ -103,7 +103,8 @@ Then transform:
 > See [OPERATIONS.md](OPERATIONS.md#an-incremental-model-produces-nothing-on-a-past-dataset).
 
 | 6 | `station_reference_stats_refresh` | The IPS/SSFI reference grids |
-| 7 | `station_index_refresh` | `fct_monthly_index` + `station_current_index` |
+| 7 | asset `fct_era5_spei_climatology_grid` | The SPEI reference. **Materialize it once, by hand** — it is excluded from the nightly job, and `station_index_refresh` crashes if the table does not exist |
+| 8 | `station_index_refresh` | `fct_monthly_index` + `station_current_index` |
 
 If sensors are enabled, step 5 fires by itself once Bronze materializes, and 6/7 follow. Watch
 **Runs** rather than launching them by hand.

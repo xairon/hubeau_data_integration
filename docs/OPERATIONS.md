@@ -216,6 +216,32 @@ Expected — the ingestion window overlaps by 7 days. Silver deduplicates:
 docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
 ```
 
+### `station_index_refresh` fails every night on a fresh install
+
+```
+pandas.errors.DatabaseError: Execution failed on sql '...'
+relation "gold.fct_era5_spei_climatology_grid" does not exist
+```
+
+The nightly index job computes `fct_era5_indices_grid`, which joins the SPEI reference table.
+That table is built by a **separate Python asset that is deliberately excluded from the nightly
+job** — it is a fixed 1991–2020 reference and recomputing it every night would be waste.
+
+The consequence nobody expects: on an installation where it was never materialized, the table
+does not exist at all, and the nightly job crashes on it. Every night, until someone runs it by
+hand:
+
+```bash
+docker exec brgm-dlt-worker dagster asset materialize \
+  --select fct_era5_spei_climatology_grid -m hubeau_pipeline.definitions
+```
+
+Verified on 2026-08-24: `station_index_refresh` failed twice with the error above, then
+succeeded immediately once the reference had been materialized. The table can legitimately be
+**empty** — it needs 1991–2020 ERA5 to fit anything — but it has to exist.
+
+Full SPEI rebuild order in [ERA5.md](ERA5.md#rebuilding-spei--order-matters).
+
 ### An incremental model produces nothing on a past dataset
 
 Not an error — `dbt` reports success and the table simply does not grow. It affects the two
