@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Nicolas Ringuet"}
+    {name = "Nicolas Ringuet"}   # paternité ; aucune adresse e-mail publiée
 ]
 keywords = ["data-pipeline", "dagster", "hubeau", "water-data", "postgresql"]
 

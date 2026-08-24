@@ -17,7 +17,7 @@ exposures:
       et annuelles. Requête directement les marts Gold et les tables d'indices.
     owner:
       name: Observatoire Junon (BRGM)
-      email: ringuetnicolas2@gmail.com
+      email: contact@example.org
     depends_on:
       - ref('dim_piezo_stations')
       - ref('dim_hydro_stations')
