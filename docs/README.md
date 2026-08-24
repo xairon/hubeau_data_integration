@@ -25,6 +25,7 @@ not listed below; if you add a document, add its line too.
 |----------|--------------|
 | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | You need a table, a column, or the method behind the standardized indices. Also lists which Gold tables are built by Dagster rather than dbt. |
 | [CONFIGURATION.md](CONFIGURATION.md) | You are setting an environment variable. Includes which variables actually reach the worker container — several do not. |
+| [DATA_SOURCES.md](DATA_SOURCES.md) | You are publishing, presenting or exporting anything built on this data. Copernicus requires a verbatim acknowledgement and disclaimer; Hub'Eau and BDLISA expect attribution. |
 | [API_KEYS.md](API_KEYS.md) | You are wiring credentials. Which sources need a key (only Copernicus), how to obtain it, the licence step everyone forgets, and two commands to verify it before launching a multi-hour load. |
 | [TIMESCALEDB.md](TIMESCALEDB.md) | You need the hypertable, compression or index settings that are specific to this project. |
 

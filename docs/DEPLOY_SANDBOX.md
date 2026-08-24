@@ -5,7 +5,7 @@ data from scratch (no migration: `full_bootstrap`).
 
 | | |
 |---|---|
-| Target | `gpu2.recherche.sandbox.univ-tours.fr` (`10.108.44.30`) — standalone Docker, Portainer agent |
+| Target | The research sandbox host — standalone Docker with a Portainer agent. Substitute your own hostname and IP throughout this page. |
 | Compose | [`docker-compose.sandbox.yml`](../docker-compose.sandbox.yml) |
 | Environment | [`.env.sandbox.example`](../.env.sandbox.example) |
 | Data | Bootstrap from scratch (Hub'Eau + ERA5) |
@@ -28,7 +28,7 @@ data from scratch (no migration: `full_bootstrap`).
    curl -sI https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations | head -1
    curl -sI https://cds.climate.copernicus.eu | head -1
    ```
-2. **Ports `49500`–`49505` free** on `10.108.44.30`.
+2. **Ports `49500`–`49505` free** on the sandbox host.
 3. **A valid Copernicus CDS key.**
 
 ## 1. Build and push the images (GitLab CI → Container Registry)
@@ -104,7 +104,7 @@ tag.
 
 Once the stack is healthy:
 
-1. Dagster UI: `http://10.108.44.30:49500`
+1. Dagster UI: `http://<sandbox-host>:49500`
 2. Check that the `hubeau_pipeline` code location is loaded (otherwise *Reload*).
 3. *Jobs* → **`full_bootstrap`** → **Launchpad** → *Launch Run*.
 

@@ -137,6 +137,18 @@ The full map, with what each document is for, is in **[docs/README.md](docs/READ
 
 `CLAUDE.md` at the root is the working guide for coding agents.
 
+## Data sources
+
+The pipeline redistributes data it does not own. **Copernicus requires a verbatim
+acknowledgement** in anything derived from ERA5, including the drought indices; Hub'Eau and
+BDLISA expect attribution. The exact notices are in
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) — read it before publishing anything.
+
+> Generated using Copernicus Climate Change Service information, 2026.
+> Neither the European Commission nor ECMWF is responsible for any use that may be made of the
+> Copernicus information or data it contains.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The licence covers **the code**, not the data it fetches: each
+source keeps its own terms.
