@@ -12,7 +12,13 @@ resource:
 
   # Zone géographique : France métropolitaine
   # Format: [North, West, South, East]
-  area: [51.5, -5.5, 41.0, 10.0]  # France + marges
+  # Production: metropolitan France, ~11,500 grid cells at 0.1°.
+  area: [51.5, -5.5, 41.0, 10.0]
+  # Demo/dev alternative — one region instead of the whole country, ~620 cells, roughly
+  # eighteen times less to download and store. Shrink the AREA, not the period: the
+  # standardized indices need the full 1991-2020 reference to mean anything.
+  # See docs/QUICKSTART.md (target B).
+  #   area: [48.6, 0.5, 46.3, 3.2]   # Centre-Val de Loire
 
 extraction:
   # Période historique complète

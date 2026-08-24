@@ -5,11 +5,17 @@ not listed below; if you add a document, add its line too.
 
 **Verified on 2026-08-24** against commit `0360237`.
 
-## Understand what this is
+## Start here
 
 | Document | Read it when |
 |----------|--------------|
 | [../README.md](../README.md) | You are new. What the project does, how to install and start it. |
+| [QUICKSTART.md](QUICKSTART.md) | The stack is up and you need to know **what to launch, in what order, and how to check it worked**. Three targets: a key-less smoke test, a regional demo dataset with real climate indices, or the full production load. |
+
+## Understand what this is
+
+| Document | Read it when |
+|----------|--------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | You need the shape of the system: Medallion layers, what Dagster orchestrates, which container does what, where the code lives. |
 | [ERA5.md](ERA5.md) | You touch anything climate. Explains the two ingestion paths, why reference PET is Hargreaves and not the ERA5 PEV, why SPEI uses the generalized logistic, and the grid ↔ station inconsistency that is deliberate. |
 
@@ -19,6 +25,7 @@ not listed below; if you add a document, add its line too.
 |----------|--------------|
 | [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | You need a table, a column, or the method behind the standardized indices. Also lists which Gold tables are built by Dagster rather than dbt. |
 | [CONFIGURATION.md](CONFIGURATION.md) | You are setting an environment variable. Includes which variables actually reach the worker container — several do not. |
+| [API_KEYS.md](API_KEYS.md) | You are wiring credentials. Which sources need a key (only Copernicus), how to obtain it, the licence step everyone forgets, and two commands to verify it before launching a multi-hour load. |
 | [TIMESCALEDB.md](TIMESCALEDB.md) | You need the hypertable, compression or index settings that are specific to this project. |
 
 ## Do something

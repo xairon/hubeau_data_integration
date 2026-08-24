@@ -77,22 +77,23 @@ docker compose ps
 
 ### Load the data
 
-The `full_bootstrap` job loads everything: reference data → stations → time series by year →
-ERA5 → dbt. It is restartable — progress is persisted in `ops.bootstrap_state`.
+**Read [docs/QUICKSTART.md](docs/QUICKSTART.md) before launching anything.** It gives three
+targets — a 15-minute smoke test needing no API key, a regional demo dataset where the climate
+indices actually render, and the full production load — with the exact jobs to run, in order,
+and how to verify each step.
 
-Dagster UI → **Jobs** → `full_bootstrap` → **Launchpad** → **Launch Run**.
-
-A full bootstrap takes several hours: piezometry goes back to 1967, hydrometry to 2000. To
-load a small subset instead, see
-[docs/OPERATIONS.md](docs/OPERATIONS.md#restricting-what-the-bootstrap-loads) — note that the
-restriction variables need more than an entry in `.env`.
+The short version: `full_bootstrap` loads everything (reference data → stations → time series
+by year → ERA5 → dbt) and is restartable, its progress persisted in `ops.bootstrap_state`.
+Dagster UI → **Jobs** → `full_bootstrap` → **Launchpad** → **Launch Run**. Budget **days** and
+tens of gigabytes: piezometry goes back to 1967, hydrometry to 2000, ERA5-Land to 1950. Almost
+nobody wants that on a first install.
 
 ### Verify
 
 ```bash
 # Row counts per schema
 docker exec -it brgm-postgres psql -U postgres -d postgres -c "
-SELECT schemaname, tablename, n_live_tup AS rows
+SELECT schemaname, relname AS table_name, n_live_tup AS rows
 FROM pg_stat_user_tables
 WHERE schemaname IN ('bronze', 'silver', 'gold')
 ORDER BY schemaname, n_live_tup DESC;"

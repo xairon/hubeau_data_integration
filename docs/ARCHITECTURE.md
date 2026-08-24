@@ -119,7 +119,28 @@ by itself. On success two sensors fire in parallel: the index refresh (data) and
 checks (non-blocking alerting — a failing test fails its own run but never blocks the data
 refresh).
 
-> Runs are globally serialized (`max_concurrent_runs=1`): one run at a time.
+### Concurrency
+
+Runs are **not** globally serialized. `dagster_home/dagster.yaml` sets
+`max_concurrent_runs: 5` and then constrains what may overlap, per concurrency key:
+
+| Key | Limit | Why |
+|-----|-------|-----|
+| each DLT pipeline (`piezometry_chroniques_bronze`, `daily_hydrometry_bronze`, …) | 1 | never two copies of the same ingestion at once |
+| `dbt_pipeline` | 1 | the transform / quality / index / docs chain is never duplicated |
+| `era5_weekly` | 1 | one daily grid update at a time |
+| `era5_historical` | 3 | the ERA5 backfill may keep three CDS partitions in flight, for throughput |
+| `era5_daily_temp_write` | 1 | **one writer only** on `bronze.era5_daily_temp_stats` |
+
+That last key is shared deliberately between the nightly `era5_daily_temp_update_job` and the
+`era5_daily_temp_historical_load` backfill. The table has no uniqueness constraint and its
+DELETE+INSERT is not atomic, so when the current-year partition overlaps the nightly window the
+two would duplicate rows — an incident that actually happened on 2026-07-07. The shared limit
+of 1 makes the overlap impossible, and costs only one global slot out of five, so the backfill
+never starves production.
+
+The practical consequence: two *different* jobs will happily run at the same time. Do not
+assume launching several jobs queues them behind one another.
 
 ## Docker infrastructure
 
@@ -175,7 +196,8 @@ src/
 │   │   ├── *_index_assets.py     # IPS/SSFI indices (Python assets)
 │   │   └── era5_*_assets.py      # Gridded climate indices (SPI/STI/SPEI)
 │   ├── jobs/                     # Job definitions (ingestion, dbt, bootstrap, indices)
-│   ├── sources/                  # Source clients (hubeau_csv_source, era5_source)
+│   ├── sources/                  # Hub'Eau client only (hubeau_csv_source.py); the CDS
+│   │                             # client lives in assets/bronze/era5_assets.py
 │   ├── ml/                       # Index computation (indices.py, era5_indices.py)
 │   └── io/                       # NoOpIOManager (DLT writes straight to PG)
 │

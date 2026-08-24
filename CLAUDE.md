@@ -130,7 +130,7 @@ configs.
   - `assets/dbt_assets.py` — bridges dbt models as Dagster assets (`@dbt_assets`)
   - `assets/{current_index,monthly_index,reference_stats}_assets.py` — station-level IPS/SSFI
   - `assets/era5_{indices,spei_climatology}_assets.py` — gridded SPI/STI/SPEI
-  - `jobs/`, `sources/` (`hubeau_csv_source.py`, `era5_source.py`), `schedules.py` (8),
+  - `jobs/`, `sources/` (`hubeau_csv_source.py` only — the CDS client lives in `assets/bronze/era5_assets.py`, not here), `schedules.py` (8),
     `sensors.py` (3), `resources.py`, `io/io_managers.py`
   - `ml/` — index computation, pure and vectorized (numpy + scipy, no external index library):
     `indices.py` (IPS/SSFI), `era5_indices.py` (SPI gamma CDF, STI z-score, SPEI via

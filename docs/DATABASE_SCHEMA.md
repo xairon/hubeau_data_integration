@@ -40,16 +40,16 @@ to `::geography` for distances in metres. The `<->` KNN operator relies on that 
 
 Created automatically on the first run.
 
-| Table | Contents | Rough volume |
+| Table | Contents | Rows (measured 2026-08-24) |
 |-------|----------|--------------|
-| `piezometry_stations_raw` | BSS piezometric stations | ~23 k |
+| `piezometry_stations_raw` | BSS piezometric stations | 23,333 |
 | `piezometry_chroniques_raw` | Groundwater level measurements | ~23 M |
-| `hydrometry_sites_raw` | Hydrometric sites | ~5 k |
-| `hydrometry_stations_raw` | Hydrometric stations | ~5 k |
+| `hydrometry_sites_raw` | Hydrometric sites | 9,283 |
+| `hydrometry_stations_raw` | Hydrometric stations | 6,468 |
 | `hydrometry_obs_elab_raw` | Elaborated observations | ~15 M |
 | `era5_france_timeseries` | ERA5 time series (direct-to-timeseries) | ~300 M |
 | `era5_daily_temp_stats` | True daily temperature statistics | ~320 M |
-| `tme_entites_hydrogeo` | TME hydrogeological entities | ~2 k |
+| `tme_entites_hydrogeo` | TME hydrogeological entities | 3,716 |
 
 Key columns:
 
@@ -192,8 +192,15 @@ recomputes the indices.**
 
 ### `station_reference_stats`
 
-Grain (type, station, calendar month) — 12 rows per station. Holds the **fixed reference
-grid**. Not recomputed nightly: rematerialized once per decade (1991–2020 → 2001–2030 in 2031).
+Grain (type, station, calendar month) — 12 rows per station. Holds the reference grid.
+
+Refreshed **weekly**, by `station_reference_stats_refresh` on the `0 7 * * 0` schedule — not
+nightly, and not once per decade. The *reference window* is fixed at 1991–2020, but the
+per-station grids are not: a station accumulates history, new stations appear, and a station
+that was `provisoire` can cross the 15-year threshold and become `normale`. Weekly is the
+deliberate compromise (`schedules.py`: "baseline pluriannuelle lente à varier"). The tables
+that read it — `fct_monthly_index` and `station_current_index` — are rebuilt nightly by the
+sensor chain.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -269,8 +276,8 @@ monitored by discharge — so sector aggregation can be restricted to the offici
 
 ```sql
 -- Table sizes
-SELECT schemaname, tablename, n_live_tup AS rows,
-       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+SELECT schemaname, relname AS table_name, n_live_tup AS rows,
+       pg_size_pretty(pg_total_relation_size(schemaname||'.'||relname)) AS size
 FROM pg_stat_user_tables
 WHERE schemaname IN ('bronze', 'silver', 'gold')
 ORDER BY schemaname, n_live_tup DESC;
