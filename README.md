@@ -8,6 +8,13 @@ consumed directly in SQL by downstream applications — chiefly the Junon observ
 
 **Status** — active. Documentation verified on 2026-08-24 against commit `0360237`.
 
+> **A downstream application depends on this stack's Docker network.** The Junon observatory
+> (`time-serie-explo`) reads the Gold tables directly, joining the network Compose creates for
+> this project — `hubeau_data_integration_default` — and reaching PostgreSQL at host
+> `brgm-postgres`. Two consequences: bring this stack up **before** Junon, and keep the
+> checkout directory named `hubeau_data_integration`, because Compose derives that network
+> name from it. Renaming the directory or setting `COMPOSE_PROJECT_NAME` silently breaks Junon.
+
 New here? Read this page, then [docs/README.md](docs/README.md) for the documentation map.
 
 ## Stack

@@ -29,6 +29,18 @@ not listed below; if you add a document, add its line too.
 | [DEPLOY_SANDBOX.md](DEPLOY_SANDBOX.md) | You are deploying to the research sandbox through Portainer + GitOps. |
 | [../CLAUDE.md](../CLAUDE.md) | You are a coding agent, or you want the condensed list of traps that have already cost time. |
 
+## Related repository
+
+The **Junon observatory** (`time-serie-explo`) consumes this warehouse: it reads
+`gold.fct_era5_*`, `gold.fct_monthly_index` and `gold.station_current_index` over the
+`hubeau_data_integration_default` Docker network. Its deployment guide carries the ordered
+procedure for standing up both stacks together. Two invariants bind the repositories:
+
+- The IPS/SSFI classification maths is duplicated in both and guarded by matching golden
+  tables — see [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md#shared-method).
+- This stack must be started first, and its checkout directory must stay named
+  `hubeau_data_integration`.
+
 ## Conventions
 
 - **One fact, one place.** A fact lives in exactly one document; everywhere else links to it.
