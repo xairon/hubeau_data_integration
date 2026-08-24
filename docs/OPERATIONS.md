@@ -216,52 +216,36 @@ Expected — the ingestion window overlaps by 7 days. Silver deduplicates:
 docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run --select stg_piezo_chroniques stg_hydrometry_obs_elab
 ```
 
-### `duplicate key value violates unique constraint` on an incremental model
+### An incremental model produces nothing on a past dataset
 
-```
-duplicate key value violates unique constraint "int_daily_measurements_pkey"
-DETAIL:  Key (code_bss, date_mesure)=(06505X0093/PZ10, 2025-12-28) already exists.
-```
+Not an error — `dbt` reports success and the table simply does not grow. It affects the two
+daily hypertable marts, `hubeau_daily_chroniques` and `hydro_daily_chroniques`.
 
-**Cause: the two windows of the incremental models are anchored differently.** Six models use
-the `time_range_delete_predicate` macro:
+Both their DELETE (through the `hypertable_delete` macro) and their SELECT are anchored on
+`CURRENT_DATE - daily_recompute_window_days` (30 days by default). The two agree, which is why
+there is no error — but on a dataset that stops in the past, the window covers nothing at all
+and the incremental run has no rows to process.
 
-| | Anchor | Window |
-|---|--------|--------|
-| the `SELECT` that produces rows | `MAX(date)` **already in the table** | `streaming_lookback_days` (7) |
-| the `DELETE` that clears room for them | **`CURRENT_DATE`** | `daily_recompute_window_days` (30) |
-
-While the warehouse is up to date the two coincide, because the data's newest date is roughly
-today. The moment the data is *older than the delete window* they diverge: the DELETE matches
-nothing, the INSERT re-inserts rows that are already there, and the primary key rejects them.
-
-It bites whenever the data is not current:
-
-- a demo or partial dataset (load 2025 today, and `CURRENT_DATE - 30 days` is already past it)
-- a historical backfill
-- an instance that has been paused for more than 30 days
-
-Measured on this repository: with data stopping at 2025-12-31 and today at 2026-08-24, the
-delete bound was 2026-07-25 — covering nothing at all.
-
-**Fix**: widen the delete window so it reaches back over the data.
+This is a designed knob, not a defect. Widen it to cover your data:
 
 ```bash
-docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt build \
-  --vars '{"daily_recompute_window_days": "22000"}'
+docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt run \
+  --select hubeau_daily_chroniques --vars '{"daily_recompute_window_days": "22000"}'
 ```
 
-22000 days is about sixty years, i.e. everything. This is the same workaround the ERA5 rebuild
-procedure uses ([ERA5.md](ERA5.md#rebuilding-the-station-marts)) — it was discovered for that
-case but the underlying edge is general.
+22000 days is about sixty years, i.e. everything. The same variable drives the station-mart
+rebuild in [ERA5.md](ERA5.md#rebuilding-the-station-marts).
 
-The models concerned: `int_daily_measurements`, `int_hydro_daily_measurements`,
-`int_era5_for_all_stations`, `fct_monthly_chroniques`, `fct_monthly_hydro`,
-`fct_era5_monthly_grid`.
-
-> A structural fix would anchor the delete predicate on the table's own `MAX(date)` rather
-> than on `CURRENT_DATE`, making the two windows agree by construction. That changes the
-> semantics of every nightly run, so it is left as a decision rather than applied here.
+> **Historical note.** Six other models — `int_daily_measurements`,
+> `int_hydro_daily_measurements`, `int_era5_for_all_stations`, `fct_monthly_chroniques`,
+> `fct_monthly_hydro`, `fct_era5_monthly_grid` — used to carry an `incremental_predicates`
+> block anchored on `CURRENT_DATE` while their SELECT was anchored on the table's own
+> `MAX(date)`. The two diverged as soon as the data was older than the delete window: the
+> DELETE matched nothing, the INSERT repeated rows already present, and the run died on
+> `duplicate key value violates unique constraint`. Since their DELETE already joins the
+> incoming batch on the primary key, the predicate was a pruning optimization only — it was
+> removed rather than repaired. If you are running an older checkout and hit that error, the
+> workaround is the same widened window.
 
 ### `dbt` says the project path is not found
 

@@ -3,9 +3,6 @@
     materialized = 'incremental',
     unique_key = ['code_station', 'mois', 'grandeur_hydro_elab'],
     incremental_strategy = 'delete+insert',
-    incremental_predicates = [
-      time_range_delete_predicate('mois', '30 months')
-    ],
     indexes = [
       {'columns': ['code_station']},
       {'columns': ['code_site']},

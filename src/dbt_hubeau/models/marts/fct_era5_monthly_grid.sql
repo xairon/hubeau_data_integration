@@ -3,9 +3,6 @@
     materialized = 'incremental',
     unique_key = ['era5_latitude', 'era5_longitude', 'mois'],
     incremental_strategy = 'delete+insert',
-    incremental_predicates = [
-      time_range_delete_predicate('mois', '4 months')
-    ],
     indexes = [
       {'columns': ['mois'], 'type': 'brin'},
       {'columns': ['era5_latitude', 'era5_longitude']}

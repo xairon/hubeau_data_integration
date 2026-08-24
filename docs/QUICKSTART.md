@@ -60,8 +60,16 @@ them in parallel — not queue them — and the later steps would find no data.
 | 5 | `hydrometry_chroniques_bronze` **partition `2025`** | One year of river observations | — |
 
 Steps 4 and 5 are partitioned by year: pick the partition `2025` in the Launchpad before
-launching. They query Hub'Eau in batches of 100 stations, so they take several minutes each —
-this is normal, watch the `Lot n/234` counter in the logs.
+launching. They query Hub'Eau station by station, so they are long and network-bound. Measured
+on 2026-08-24: piezometry took about 8 minutes for 1,058,750 rows (watch the `Lot n/234`
+counter); hydrometry sustained ~390 rows/s and was still going after 24 minutes.
+
+> **Expect to relaunch step 5 at least once.** A full year of hydrometry is roughly half an
+> hour of continuous requests, and Hub'Eau does drop connections:
+> `HTTPSConnectionPool(host='hubeau.eaufrance.fr', port=443): Max retries exceeded`. The
+> built-in retry (5 attempts, exponential backoff) covers short hiccups, not a sustained one.
+> Relaunching the same partition is safe — Bronze deduplicates on the primary key through a
+> MERGE, so nothing is duplicated and the work already done is not lost.
 
 **Do not skip step 5.** `dbt_transform` builds every model, so a Bronze table that was never
 loaded fails the whole run with `relation "bronze.hydrometry_obs_elab_raw" does not exist`.
@@ -72,16 +80,16 @@ Then transform:
 |---|-----|--------------|
 | 5 | `dbt_transform` | Bronze → Silver → Gold, all 29 models |
 
-> **Loading a past year? Run dbt by hand the first time, with a wide window.** The incremental
-> models delete on `CURRENT_DATE - 30 days` but select on the data's own latest date. Load 2025
-> today and the delete matches nothing while the insert repeats rows already present — the run
-> dies on a primary-key violation. See
-> [OPERATIONS.md](OPERATIONS.md#duplicate-key-value-violates-unique-constraint-on-an-incremental-model).
+> **Loading a past year? Widen the recompute window.** The two daily hypertable marts only
+> process the last 30 days by default, counted from today — so on a 2025 dataset loaded in 2026
+> they build empty, without an error. Pass a window that covers your data:
 >
 > ```bash
 > docker exec -w /app/src/dbt_hubeau brgm-dlt-worker dbt build \
 >   --vars '{"daily_recompute_window_days": "22000"}'
 > ```
+>
+> See [OPERATIONS.md](OPERATIONS.md#an-incremental-model-produces-nothing-on-a-past-dataset).
 
 | 6 | `station_reference_stats_refresh` | The IPS/SSFI reference grids |
 | 7 | `station_index_refresh` | `fct_monthly_index` + `station_current_index` |

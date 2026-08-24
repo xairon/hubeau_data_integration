@@ -3,9 +3,6 @@
     materialized = 'incremental',
     unique_key = ['code_bss', 'mois'],
     incremental_strategy = 'delete+insert',
-    incremental_predicates = [
-      time_range_delete_predicate('mois', '30 months')
-    ],
     indexes = [
       {'columns': ['code_bss']},
       {'columns': ['mois'], 'type': 'brin'},

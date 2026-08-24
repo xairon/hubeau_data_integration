@@ -3,9 +3,6 @@
     materialized = 'incremental',
     unique_key = ['code_bss', 'date_mesure'],
     incremental_strategy = 'delete+insert',
-    incremental_predicates = [
-      time_range_delete_predicate('date_mesure', var('daily_recompute_window_days', '30') ~ ' days')
-    ],
     indexes = [
       {'columns': ['code_bss']},
       {'columns': ['date_mesure'], 'type': 'brin'}
