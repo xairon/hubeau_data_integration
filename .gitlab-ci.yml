@@ -57,12 +57,32 @@ pages:
     - pip install "dbt-postgres>=1.7.0,<1.8.0"
 
     # 3. Configuration du profil dbt
-    # Gère les deux types de variables GitLab : "File" (chemin) ou "Variable" (contenu)
+    #    Ce job ne se connecte JAMAIS à la base : `dbt docs generate` tourne avec
+    #    --empty-catalog --no-compile, et `dbt parse` n'ouvre pas de connexion non plus.
+    #    Un profil syntaxiquement valide suffit donc, et AUCUN secret n'est nécessaire.
+    #    La variable DBT_PROFILE_CONTENT reste honorée si elle est définie ; sinon on
+    #    écrit un profil factice. Sans ce repli, le job échouait sur
+    #    « The profiles.yml file at ./profiles.yml is empty ».
     - |
-      if [ -f "$DBT_PROFILE_CONTENT" ]; then
+      if [ -n "$DBT_PROFILE_CONTENT" ] && [ -f "$DBT_PROFILE_CONTENT" ]; then
         cp "$DBT_PROFILE_CONTENT" profiles.yml
-      else
+      elif [ -n "$DBT_PROFILE_CONTENT" ]; then
         echo "$DBT_PROFILE_CONTENT" > profiles.yml
+      else
+        cat > profiles.yml <<'PROFILE'
+      hubeau_pipeline:
+        target: docs
+        outputs:
+          docs:
+            type: postgres
+            host: localhost
+            port: 5432
+            user: docs
+            password: docs
+            dbname: docs
+            schema: public
+            threads: 1
+      PROFILE
       fi
 
     # 4. Installation des dépendances du projet dbt
