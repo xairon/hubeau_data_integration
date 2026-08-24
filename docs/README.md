@@ -35,7 +35,6 @@ not listed below; if you add a document, add its line too.
 |----------|--------------|
 | [OPERATIONS.md](OPERATIONS.md) | You are running the thing: initial bootstrap, daily checks, reprocessing a window, an incident, backup and restore. |
 | [DEPLOY_SANDBOX.md](DEPLOY_SANDBOX.md) | You are deploying to the research sandbox through Portainer + GitOps. |
-| [../CLAUDE.md](../CLAUDE.md) | You are a coding agent, or you want the condensed list of traps that have already cost time. |
 
 ## Related repository
 

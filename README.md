@@ -135,8 +135,6 @@ The full map, with what each document is for, is in **[docs/README.md](docs/READ
 | [TimescaleDB](docs/TIMESCALEDB.md) | Hypertables, compression, index types |
 | [Sandbox deployment](docs/DEPLOY_SANDBOX.md) | Portainer + GitOps deployment |
 
-`CLAUDE.md` at the root is the working guide for coding agents.
-
 ## Data sources
 
 The pipeline redistributes data it does not own. **Copernicus requires a verbatim

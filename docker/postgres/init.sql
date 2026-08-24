@@ -20,7 +20,7 @@ ALTER DATABASE postgres SET timescaledb.max_tuples_decompressed_per_dml_transact
 -- On le désactive dès l'init. Les conversions explicites (post_hook
 -- convert_to_hypertable des daily marts) restent fonctionnelles.
 -- Idempotent. Historiquement appliqué à la main (2026-03-06) ; désormais
--- garanti sur tout déploiement neuf. Voir CLAUDE.md "Phantom hypertables".
+-- garanti sur tout déploiement neuf. Voir docs/OPERATIONS.md, "Phantom hypertables".
 -- ============================================================================
 DO $$
 BEGIN

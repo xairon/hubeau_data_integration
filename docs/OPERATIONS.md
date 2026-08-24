@@ -283,6 +283,73 @@ The worker's WORKDIR is `/app`; the dbt project is in `/app/src/dbt_hubeau`. Add
 `-w /app/src/dbt_hubeau` to the `docker exec`. Every dbt command in this documentation
 already carries it — check yours against them.
 
+### Phantom hypertables — a table becomes a hypertable when it should not
+
+The `timescaledb_ddl_command_end` event trigger is **disabled on purpose**, so that dbt's
+`ALTER TABLE RENAME` cannot re-apply hypertable metadata to a plain table. This is the permanent
+fix and it is versioned in `docker/postgres/init.sql` as an idempotent DO block, so a
+from-scratch deployment reproduces it.
+
+If it somehow gets re-enabled:
+
+```sql
+ALTER EVENT TRIGGER timescaledb_ddl_command_end DISABLE;
+```
+
+Cleaning up a table that already became one: `DROP TABLE schema.table CASCADE`, then
+`dbt run --select model_name` — **not** `--full-refresh`. Orphaned policies are removed with
+`SELECT delete_job(id) FROM _timescaledb_config.bgw_job WHERE ...`.
+
+### Duplicate rows after a killed `dagster asset materialize`
+
+Launching a materialization with `docker exec … dagster asset materialize` **bypasses the run
+queue**. If the CLI client is killed, the step keeps running inside the worker and keeps
+inserting. Duplicate keys were observed this way on `era5_daily_temp_stats` on 2026-07-07.
+
+Launch runs from the Dagster UI or through GraphQL instead, so the `QueuedRunCoordinator`
+serializes them.
+
+### A daily mart takes an hour instead of minutes
+
+Check whether `unique_key` is set on a model whose `incremental_strategy` is `append`. dbt
+1.7.0 ignores the `append` strategy when `unique_key` is present and emits `DELETE … USING`,
+which sequentially scans every hypertable chunk. Remove `unique_key` from that model's config.
+
+### `operator does not exist: text >= date`
+
+DLT stores every Bronze column as `text`. Any date comparison must cast explicitly — in
+`_clean_recent_data()`, `{}::date >= CURRENT_DATE`. Seeing this error means a cast is missing.
+
+### Dagster daemon crash loop — `trailing_unconsumed_events`
+
+A `multi_asset_sensor` must call `context.advance_all_cursors()` on **every** evaluation, not
+only when it yields a `RunRequest`. Without it, events accumulate to the 25-event limit and
+take the daemon down.
+
+### DLT `SchemaNotFoundError` or `CannotCoerceColumnException`
+
+DLT state lives in four places and **all four** must be cleaned for a fresh pipeline start.
+Cleaning only some of them produces cascading errors:
+
+```bash
+docker exec brgm-dlt-worker rm -rf /var/dlt/pipelines/<name>
+```
+```sql
+DELETE FROM bronze._dlt_version        WHERE schema_name   = '<name>';
+DELETE FROM bronze._dlt_pipeline_state WHERE pipeline_name = '<name>';
+DELETE FROM bronze._dlt_loads          WHERE schema_name   = '<name>';
+```
+
+### FK violation on `int_hydro_daily_measurements` (orphan `code_station`)
+
+Hub'Eau can return observations for stations missing from its own stations endpoint.
+`stg_hydrometry_obs_elab` only filters on `code_site`, because `code_station` is null in about
+46 % of observations; the foreign key is enforced one level down, by the
+`INNER JOIN stg_hydrometry_stations` inside `int_hydro_daily_measurements`.
+
+It self-heals once Hub'Eau catches up, within the 7-day lookback. Piezometry is unaffected —
+`stg_piezo_chroniques` filters at the staging layer, `code_bss` being non-nullable.
+
 ### A container will not start
 
 ```bash
