@@ -85,7 +85,8 @@ and how to verify each step.
 The short version: `full_bootstrap` loads everything (reference data → stations → time series
 by year → ERA5 → dbt) and is restartable, its progress persisted in `ops.bootstrap_state`.
 Dagster UI → **Jobs** → `full_bootstrap` → **Launchpad** → **Launch Run**. Budget **days** and
-tens of gigabytes: piezometry goes back to 1967, hydrometry to 2000, ERA5-Land to 1950. Almost
+tens of gigabytes: piezometry and hydrometry are both partitioned from 1967, ERA5-Land from
+1950. How far back a given station actually goes varies from one station to the next. Almost
 nobody wants that on a first install.
 
 ### Verify

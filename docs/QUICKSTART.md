@@ -189,8 +189,8 @@ historical backfill trap, is in [ERA5.md](ERA5.md#rebuilding-spei--order-matters
 year → ERA5 → dbt. It is restartable (state in `ops.bootstrap_state`), so relaunching resumes
 rather than restarting.
 
-Budget **days**, not hours, and tens of gigabytes: piezometry goes back to 1967, hydrometry to
-2000, ERA5-Land to 1950. Restrict it first unless you really mean it — see
+Budget **days**, not hours, and tens of gigabytes: piezometry and hydrometry are both
+partitioned from 1967, ERA5-Land from 1950. Restrict it first unless you really mean it — see
 [OPERATIONS.md](OPERATIONS.md#restricting-what-the-bootstrap-loads), and note that the
 restriction variables are not forwarded to the worker by the main compose file.
 

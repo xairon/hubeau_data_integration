@@ -216,7 +216,7 @@ scripts/                          # init_volumes.sh, create_readonly_user.sh, se
 ## Data domains
 
 - **Piezometry** — groundwater levels (stations + time series, from 1967).
-- **Hydrometry** — river discharge (sites → stations → observations, from 2000).
+- **Hydrometry** — river discharge (sites → stations → observations, from 1967).
 - **Climate** — ERA5 reanalysis (temperature, precipitation, evaporation) on a ~0.1° grid
   over France; see [ERA5.md](ERA5.md).
 - **Reference data** — TME hydrogeological entities (BDLISA), used to enrich stations.

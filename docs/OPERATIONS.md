@@ -25,8 +25,10 @@ It loads in order: TME reference data (BDLISA) → stations → time series (yea
 ERA5 → dbt. It is restartable: progress is persisted in `ops.bootstrap_state`, so a
 re-launch resumes instead of starting over.
 
-**Budget several hours.** The full history means 1967 onward for piezometry, 2000 onward for
-hydrometry.
+**Budget several hours.** The full history means 1967 onward for piezometry *and* hydrometry:
+both partitioned assets share `OLDEST_YEAR = 1967`
+(`src/hubeau_pipeline/assets/bronze/dlt_assets.py`). What each station actually returns depends
+on when it was commissioned, so the effective depth varies.
 
 ### Progressive load (for a test environment)
 
