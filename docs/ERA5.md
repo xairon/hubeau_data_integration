@@ -29,10 +29,28 @@ The split exists because the two kinds of variable behave differently at 00:00 U
 confusing them has already caused one wrong diagnosis:
 
 > **Precipitation and evaporation are accumulation fluxes.** The ECMWF model produces them as
-> a running accumulation, so the 00:00 UTC value **is** the correct daily total — not an
+> a running accumulation, so the 00:00 UTC value **is** the correct daily total, not an
 > instantaneous sample. Temperature is different: the 00:00 UTC value is a genuine
-> instantaneous reading, and taking it as the daily mean introduces a night-time cold bias of
-> roughly 2–4 °C. Only temperature ever needed the 24-step treatment.
+> instantaneous reading, and taking it as the daily mean introduces a night-time cold bias.
+> Only temperature ever needed the 24-step treatment.
+
+ERA5-Land's own documentation states which parameters are accumulations and which are
+instantaneous, so this is a convention to read, not an undocumented trap. What the data itself
+never signals is *which* of the two a given column is: get it wrong and the series stays
+plausible, just too cold.
+
+**Measured, not assumed** (2026-08-26, all 11,496 cells, 2025-01-01 to 2026-08-19,
+935,040 cell-days): mean bias **-2.90 °C**, sd 1.85 °C, p5-p95 -5.76 to +0.27 °C. Worst in
+June (-3.42 °C) and July (-3.24 °C), mildest in January (-0.63 °C). Reproduce with:
+
+```sql
+SELECT round(avg(s.temperature_2m - t.t2m_mean)::numeric, 2) AS bias_c,
+       round(stddev(s.temperature_2m - t.t2m_mean)::numeric, 2) AS sd_c,
+       count(*) AS cell_days
+FROM bronze.era5_france_timeseries s
+JOIN bronze.era5_daily_temp_stats t
+  ON s.latitude = t.latitude AND s.longitude = t.longitude AND s.time = t.time;
+```
 
 The daily-statistics path reads the raw hourly archive (`reanalysis-era5-land`) rather than
 the `derived-era5-land-daily-statistics` product. The derived product is computed server-side
