@@ -136,6 +136,28 @@ The full map, with what each document is for, is in **[docs/README.md](docs/READ
 | [TimescaleDB](docs/TIMESCALEDB.md) | Hypertables, compression, index types |
 | [Sandbox deployment](docs/DEPLOY_SANDBOX.md) | Portainer + GitOps deployment |
 
+## Work derived from this warehouse
+
+Three repositories consume the Gold layer. None is required to run the pipeline;
+they are listed so that a change to the schema is known to have consumers.
+
+| Repository | What it takes | Reads |
+|---|---|---|
+| [time-serie-explo](https://github.com/xairon/time-serie-explo) | Exploration, business models, forecasting and explanation platform | Gold analytical tables |
+| [aida_embedding_benchmark](https://github.com/xairon/aida_embedding_benchmark) | Comparison of seven time-series encoders on 5,116 piezometric stations | `gold.hubeau_daily_chroniques`, `gold.dim_piezo_stations`, `ml.pastas_groundwater_signatures` |
+| [physcf](https://github.com/xairon/physcf) | Physics-informed counterfactual explanations, research prototype | `gold.hubeau_daily_chroniques` |
+
+The last two rebuild their own datasets from here rather than shipping a copy,
+so the warehouse stays the single source. Both carry a caveat worth knowing
+before relying on the station chain: it still exposes the raw ERA5
+`potential_evaporation`, which describes open water and is roughly twice the FAO
+reference evapotranspiration a water balance needs. The corrected quantity
+exists only on the monthly grid, as `etp_totale` in `gold.fct_era5_monthly_grid`.
+See [docs/ERA5.md](docs/ERA5.md).
+
+The closure report of the work these repositories come from is at
+[rapport-junon](https://github.com/xairon/rapport-junon).
+
 ## Data sources
 
 The pipeline redistributes data it does not own. **Copernicus requires a verbatim
